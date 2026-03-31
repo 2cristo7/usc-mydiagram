@@ -1,0 +1,19 @@
+# Node
+node_modules/
+dist/
+.env
+.env.local
+package-lock.json
+npm-debug.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/settings.json
