@@ -71,11 +71,23 @@ app.get('/api/diagrams', authenticateToken, (req, res) => {
 wss.on('connection', (ws) => {
   console.log('Cliente conectado al WebSocket')
 
-  ws.on('message', (message) => {
-    console.log('Mensaje recibido del cliente:', message.toString())
-    // Aquí puedes manejar los mensajes recibidos del cliente
-    // Por ejemplo, podrías procesar el mensaje y enviar una respuesta de vuelta
-    ws.send(`Mensaje recibido: ${message.toString()}`)
+  ws.on('message', async (message) => {
+    const prompt = message.toString()
+    console.log('Mensaje recibido del cliente:', prompt)
+
+    try {
+      const agentRes = await fetch('http://localhost:8000/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      })
+      const data = await agentRes.json()
+      ws.send(JSON.stringify(data))
+      console.log('Respuesta del agente:\n', data)
+    } catch (err) {
+      console.error('Error llamando al agente:', err)
+      ws.send(JSON.stringify({ error: 'Error generando el diagrama' }))
+    }
   })
 
   ws.on('close', () => {
