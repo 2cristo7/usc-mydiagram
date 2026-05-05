@@ -3,7 +3,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { DiagramCanvas } from "./components/DiagramCanvas";
 
 function App() {
-  const { messages, connectionState, sendMessage } = useWebSocket();
+  const { currentDiagram, messages, connectionState, sendMessage } = useWebSocket();
 
   return (
     <div className="flex h-screen">
@@ -14,8 +14,8 @@ function App() {
           onSendMessage={sendMessage}
         />
       </div>
-      <div className="w-2/3">
-        <DiagramCanvas />
+      <div className="w-2/3 h-full">
+        <DiagramCanvas diagram={currentDiagram} />
       </div>
     </div>
   );

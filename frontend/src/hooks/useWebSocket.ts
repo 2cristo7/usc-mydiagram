@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { Message, ConnectionState } from "../types";
+import { type Message, type ConnectionState, type DiagramSchema} from "../types";
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
     const [messages, setMessages] = useState<Message[]>([]);
@@ -7,6 +7,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     const socketRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const shouldReconnectRef = useRef(true);
+    const [currentDiagram, setCurrentDiagram] = useState<DiagramSchema | null>(null);
 
     useEffect(() => {
         shouldReconnectRef.current = true;
@@ -27,13 +28,37 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 };
 
                 ws.onmessage = (event) => {
-                    const receivedMessage: Message = {
-                        id: crypto.randomUUID(),
-                        text: event.data,
-                        sender: 'system',
-                        timestamp: new Date(),
-                    };
-                    setMessages((prev) => [...prev, receivedMessage]);
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.diagram) {
+                            setCurrentDiagram(data.diagram);
+                            const receivedMessage: Message = { 
+                                id: crypto.randomUUID(),
+                                text: `Diagrama generado: ${data.diagram.title}`,
+                                sender: 'system',
+                                timestamp: new Date(),
+                             };
+                            setMessages((prev) => [...prev, receivedMessage]);
+                        } else if (data.error) {
+                            console.error("Error received from server:", data.error);
+                            const receivedMessage: Message = { 
+                                id: crypto.randomUUID(),
+                                text: `Error: ${data.error}`,
+                                sender: 'system',
+                                timestamp: new Date(),
+                             };
+                            setMessages((prev) => [...prev, receivedMessage]);
+                            return;
+                        }
+                    } catch (e) {
+                        const receivedMessage: Message = { 
+                            id: crypto.randomUUID(),
+                            text: 'Error al procesar el mensaje del servidor',
+                            sender: 'system',
+                            timestamp: new Date(),
+                         };
+                        setMessages((prev) => [...prev, receivedMessage]);
+                    }
                 };
 
                 ws.onclose = () => {
@@ -90,6 +115,6 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         }
     };
 
-    return { messages, connectionState, sendMessage };
+    return { currentDiagram, messages, connectionState, sendMessage };
 }
 
