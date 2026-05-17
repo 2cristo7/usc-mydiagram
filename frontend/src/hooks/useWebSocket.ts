@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { type Message, type ConnectionState, type DiagramSchema} from "../types";
+import type { Message, ConnectionState} from "../types";
 import { io, Socket } from "socket.io-client";
+import { useStore } from "../store/index";
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
-    const [messages, setMessages] = useState<Message[]>([]);
+    const { setCurrentDiagram, addMessage, setUiState } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
-    const [currentDiagram, setCurrentDiagram] = useState<DiagramSchema | null>(null);
     const buffer = useRef<string>("");
 
 
@@ -38,8 +38,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                         timestamp: new Date(),
                         };
                         console.log("Diagrama recibido del servidor:", data);
-                    setMessages((prev) => [...prev, receivedMessage]);
+                    addMessage(receivedMessage);
                     buffer.current = '';
+                    setUiState('ready');
                 } catch (e) {
                     const receivedMessage: Message = { 
                         id: crypto.randomUUID(),
@@ -48,8 +49,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                         timestamp: new Date(),
                         };
                     console.error("Error processing server message:", e);
-                    setMessages((prev) => [...prev, receivedMessage]);
+                    addMessage(receivedMessage);
                     buffer.current = '';
+                    setUiState('error');
                 }
             });
 
@@ -60,10 +62,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
             socket.on('connect_error', (error) => {
                 setConnectionState('error');
+                setUiState('error');
                 console.error("WebSocket error:", error);
             });
         } catch (error) {
             setConnectionState('error');
+            setUiState('error');
             console.error("Failed to create WebSocket:", error);
         }
 
@@ -86,11 +90,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             sender: 'user',
             timestamp: new Date(),
         };
-        setMessages((prev) => [...prev, userMessage]);
+        addMessage(userMessage);
 
         socketRef.current?.emit('message:send', text);
+        setUiState('generating');
     };
 
-    return { currentDiagram, messages, connectionState, sendMessage };
+    return {connectionState, sendMessage };
 }
 

@@ -3,17 +3,18 @@ import '@xyflow/react/dist/style.css';
 import type { Node, Edge } from "@xyflow/react";
 import { ReactFlow, Background, Controls } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
+import { useStore } from "../store/index";
 
-
-export function DiagramCanvas({ diagram }: { diagram: DiagramSchema | null }) {
-    if (!diagram) {
+export function DiagramCanvas() {
+    const { currentDiagram } = useStore();
+    if (!currentDiagram) {
         return (
             <div className="flex-1 bg-gray-200 flex items-center justify-center">
                 <p className="text-gray-600">Cargando diagrama...</p>
             </div>
         );
     }
-    const { nodes, edges } = DiagramToFlow(diagram);
+    const { nodes, edges } = DiagramToFlow(currentDiagram);
 
     return (
         <div className="flex-1 h-full w-full bg-gray-100">

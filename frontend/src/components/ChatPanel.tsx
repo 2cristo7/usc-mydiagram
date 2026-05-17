@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from './ChatMessage';
 import type { Message, ConnectionState } from '../types';
+import { useStore } from '../store/index';
 
 interface ChatPanelProps {
-    messages: Message[];
     connectionState: ConnectionState;
     onSendMessage: (text: string) => void;
 }
 
-export function ChatPanel({ messages, connectionState, onSendMessage }: ChatPanelProps) {
+export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
+    const { messages } = useStore();
     const [inputValue, setInputValue] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 

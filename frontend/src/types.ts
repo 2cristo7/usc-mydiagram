@@ -5,6 +5,8 @@ export interface Message {
     timestamp: Date;
 }
 
+export type UIState = 'idle' | 'generating' | 'ready' | 'error';
+
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 export type DiagramType = 'erd' | 'uml_class' | 'sequence' | 'flowchart' | 'architecture' | 'state_machine' | 'mindmap';
