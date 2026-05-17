@@ -7,6 +7,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
     const [currentDiagram, setCurrentDiagram] = useState<DiagramSchema | null>(null);
+    const buffer = useRef<string>("");
 
 
     useEffect(() => {
@@ -20,29 +21,25 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 console.log("WebSocket connected");
             });
 
-            socket.on('diagram:done', (data) => {
+            socket.on('diagram:chunk', (chunk: string) => {
+                buffer.current += chunk;
+                console.log("Chunk received:", chunk);
+            });
+
+            socket.on('diagram:done', () => {
                 try {
-                    if (data.diagram) {
-                        setCurrentDiagram(data.diagram);
-                        const receivedMessage: Message = { 
-                            id: crypto.randomUUID(),
-                            text: `Diagrama generado: ${data.diagram.title}`,
-                            sender: 'system',
-                            timestamp: new Date(),
-                            };
-                            console.log("Diagrama recibido del servidor:", data.diagram);
-                        setMessages((prev) => [...prev, receivedMessage]);
-                    } else if (data.error) {
-                        console.error("Error received from server:", data.error);
-                        const receivedMessage: Message = { 
-                            id: crypto.randomUUID(),
-                            text: `Error: ${data.error}`,
-                            sender: 'system',
-                            timestamp: new Date(),
-                            };
-                        setMessages((prev) => [...prev, receivedMessage]);
-                        return;
-                    }
+                    const cleaned = buffer.current.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                    const data = JSON.parse(cleaned);
+                    setCurrentDiagram(data);
+                    const receivedMessage: Message = { 
+                        id: crypto.randomUUID(),
+                        text: `Diagrama generado: ${data.title}`,
+                        sender: 'system',
+                        timestamp: new Date(),
+                        };
+                        console.log("Diagrama recibido del servidor:", data);
+                    setMessages((prev) => [...prev, receivedMessage]);
+                    buffer.current = '';
                 } catch (e) {
                     const receivedMessage: Message = { 
                         id: crypto.randomUUID(),
@@ -52,6 +49,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                         };
                     console.error("Error processing server message:", e);
                     setMessages((prev) => [...prev, receivedMessage]);
+                    buffer.current = '';
                 }
             });
 
@@ -72,6 +70,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         return () => {
             if (socketRef.current) {
                 socketRef.current.disconnect();
+                buffer.current = '';
                 console.log("WebSocket disconnected on cleanup");
             }
         }
