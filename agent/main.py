@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ValidationError
+from starlette.responses import StreamingResponse
 from enum import Enum
 import httpx
 import json
+
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen3:8b"
@@ -112,7 +114,7 @@ async def generate(req: GenerateRequest):
     if diagram_type not in valid_types:
         diagram_type = "erd"  # fallback si el modelo alucina
 
-    # Llamada 3 — generar el schema JSON
+    # Llamada 2 — generar el schema JSON
     schema_raw = await call_ollama(
         system=f"""Generate a JSON representing a '{diagram_type}' diagram.
         Reply ONLY with the JSON, no explanation, no code blocks.
@@ -144,3 +146,66 @@ async def generate(req: GenerateRequest):
         raise HTTPException(status_code=500, detail=f"Schema inválido generado por el LLM: {e}")
 
     return {"diagram": diagram}
+
+
+async def stream_ollama(system: str, user: str, max_tokens: int = 2048):
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",   "content": f"/no_think\n{user}"},
+        ],
+        "stream": True,
+        "think": False,
+        "options": {"num_predict": max_tokens},
+    }
+    print(f"\n[OLLAMA] system: {system[:80]}...")
+    print(f"[OLLAMA] user:   {user[:120]}")
+    async with httpx.AsyncClient(timeout=300) as client:
+        async with client.stream("POST", OLLAMA_URL, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if line:
+                    try:
+                        data = json.loads(line)
+                        content = data.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+                            print(f"[OLLAMA] chunk: {content[:80]}")
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+                    
+
+
+@app.post("/generate-stream")
+async def generate_stream(req: GenerateRequest):
+    # Llamada 1 — clasificar tipo de diagrama
+    valid_types = [t.value for t in DiagramType]
+    diagram_type_raw = await call_ollama(
+        system=f"Reply with exactly one of these values, no explanation: {valid_types}. What type of diagram does the following text describe?",
+        user=req.prompt,
+        max_tokens=10,
+    )
+
+    diagram_type = diagram_type_raw.strip().strip('"').lower()
+    if diagram_type not in valid_types:
+      diagram_type = "erd"
+
+    # Llamada 2 — generar el schema JSON
+    return StreamingResponse(
+        stream_ollama(
+        system=f"""Generate a JSON representing a '{diagram_type}' diagram.
+        Reply ONLY with the JSON, no explanation, no code blocks.
+        The JSON must follow exactly this structure:
+        {{
+        "title": "string",
+        "diagram_type": "{diagram_type}",
+        "nodes": [
+            {{"id": "slug_sin_espacios", "label": "Nombre legible", "node_type": "table|class|actor|step|service|database|queue|state|topic", "attributes": ["campo: TIPO CONSTRAINT"]}}
+        ],
+        "edges": [
+            {{"id": "e1", "source": "id_nodo", "target": "id_nodo", "label": "etiqueta", "edge_type": "one_to_many|many_to_many|one_to_one|inherits|implements|calls|sequence|transition|depends_on|association"}}
+        ]
+        }}""",
+        user=req.prompt,
+    ), media_type="text/plain")
