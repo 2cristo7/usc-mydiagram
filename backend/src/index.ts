@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import jsonwebtoken from 'jsonwebtoken'
 import dotenv from 'dotenv'
-import { WebSocketServer } from 'ws'
+import { Server } from 'socket.io'
 
 // Cargar variables de entorno
 dotenv.config()
@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3001
 const server = app.listen(PORT, () => {
   console.log(`Backend corriendo en http://localhost:${PORT}`)
 })
-const wss = new WebSocketServer({ server: server })
+const io = new Server(server, { cors: { origin: '*' } })
 
 // Middlewares
 app.use(cors())
@@ -68,10 +68,10 @@ app.get('/api/diagrams', authenticateToken, (req, res) => {
 
 
 // Gestión websocket
-wss.on('connection', (ws) => {
+io.on('connection', (socket) => {
   console.log('Cliente conectado al WebSocket')
 
-  ws.on('message', async (message) => {
+  socket.on('generate', async (message) =>{
     const prompt = message.toString()
     console.log('Mensaje recibido del cliente:', prompt)
 
@@ -82,15 +82,15 @@ wss.on('connection', (ws) => {
         body: JSON.stringify({ prompt }),
       })
       const data = await agentRes.json()
-      ws.send(JSON.stringify(data))
       console.log('Respuesta del agente:\n', data)
+      socket.emit('diagram_ready', data)
     } catch (err) {
       console.error('Error llamando al agente:', err)
-      ws.send(JSON.stringify({ error: 'Error generando el diagrama' }))
+      socket.emit('error', { error: 'Error generando el diagrama' })
     }
   })
 
-  ws.on('close', () => {
+  socket.on('disconnect', () => {
     console.log('Cliente desconectado del WebSocket')
   })
 })
