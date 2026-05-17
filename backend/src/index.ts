@@ -3,6 +3,7 @@ import cors from 'cors'
 import jsonwebtoken from 'jsonwebtoken'
 import dotenv from 'dotenv'
 import { Server } from 'socket.io'
+import Stream from 'node:stream'
 
 // Cargar variables de entorno
 dotenv.config()
@@ -76,14 +77,23 @@ io.on('connection', (socket) => {
     console.log('Mensaje recibido del cliente:', prompt)
 
     try {
-      const agentRes = await fetch('http://localhost:8000/generate', {
+      const agentRes = await fetch('http://localhost:8000/generate-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       })
-      const data = await agentRes.json()
-      console.log('Respuesta del agente:\n', data)
-      socket.emit('diagram:done', data)
+      const decoder = new TextDecoder()
+      const reader = agentRes.body!.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done){
+          socket.emit('diagram:done')
+          break
+        }
+        const chunk = decoder.decode(value)
+        socket.emit('diagram:chunk', chunk)
+        console.log('Chunk enviado al cliente:', chunk)
+      }
     } catch (err) {
       console.error('Error llamando al agente:', err)
       socket.emit('diagram:error', { error: 'Error generando el diagrama' })
