@@ -71,7 +71,7 @@ app.get('/api/diagrams', authenticateToken, (req, res) => {
 io.on('connection', (socket) => {
   console.log('Cliente conectado al WebSocket')
 
-  socket.on('generate', async (message) =>{
+  socket.on('message:send', async (message) =>{
     const prompt = message.toString()
     console.log('Mensaje recibido del cliente:', prompt)
 
@@ -83,10 +83,10 @@ io.on('connection', (socket) => {
       })
       const data = await agentRes.json()
       console.log('Respuesta del agente:\n', data)
-      socket.emit('diagram_ready', data)
+      socket.emit('diagram:done', data)
     } catch (err) {
       console.error('Error llamando al agente:', err)
-      socket.emit('error', { error: 'Error generando el diagrama' })
+      socket.emit('diagram:error', { error: 'Error generando el diagrama' })
     }
   })
 

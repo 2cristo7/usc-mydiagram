@@ -20,7 +20,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 console.log("WebSocket connected");
             });
 
-            socket.on('diagram_ready', (data) => {
+            socket.on('diagram:done', (data) => {
                 try {
                     if (data.diagram) {
                         setCurrentDiagram(data.diagram);
@@ -89,7 +89,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         };
         setMessages((prev) => [...prev, userMessage]);
 
-        socketRef.current?.emit('generate', text);
+        socketRef.current?.emit('message:send', text);
     };
 
     return { currentDiagram, messages, connectionState, sendMessage };
