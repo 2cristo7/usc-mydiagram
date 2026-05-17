@@ -1,98 +1,80 @@
 import { useState, useEffect, useRef } from "react";
 import { type Message, type ConnectionState, type DiagramSchema} from "../types";
+import { io, Socket } from "socket.io-client";
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
     const [messages, setMessages] = useState<Message[]>([]);
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
-    const socketRef = useRef<WebSocket | null>(null);
-    const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const shouldReconnectRef = useRef(true);
+    const socketRef = useRef<Socket | null>(null);
     const [currentDiagram, setCurrentDiagram] = useState<DiagramSchema | null>(null);
 
+
     useEffect(() => {
-        shouldReconnectRef.current = true;
 
-        const connectWebSocket = () => {
-            try {
-                const ws = new WebSocket(url);
-                socketRef.current = ws;
+        try {
+            socketRef.current = io('http://localhost:3001');
+            const socket = socketRef.current;
 
-                ws.onopen = () => {
-                    setConnectionState('connected');
-                    console.log("WebSocket connected");
-                    // Limpiar timeout de reconexión si existía
-                    if (reconnectTimeoutRef.current) {
-                        clearTimeout(reconnectTimeoutRef.current);
-                        reconnectTimeoutRef.current = null;
-                    }
-                };
+            socket.on('connect', () => {
+                setConnectionState('connected');
+                console.log("WebSocket connected");
+            });
 
-                ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.diagram) {
-                            setCurrentDiagram(data.diagram);
-                            const receivedMessage: Message = { 
-                                id: crypto.randomUUID(),
-                                text: `Diagrama generado: ${data.diagram.title}`,
-                                sender: 'system',
-                                timestamp: new Date(),
-                             };
-                            setMessages((prev) => [...prev, receivedMessage]);
-                        } else if (data.error) {
-                            console.error("Error received from server:", data.error);
-                            const receivedMessage: Message = { 
-                                id: crypto.randomUUID(),
-                                text: `Error: ${data.error}`,
-                                sender: 'system',
-                                timestamp: new Date(),
-                             };
-                            setMessages((prev) => [...prev, receivedMessage]);
-                            return;
-                        }
-                    } catch (e) {
+            socket.on('diagram_ready', (data) => {
+                try {
+                    if (data.diagram) {
+                        setCurrentDiagram(data.diagram);
                         const receivedMessage: Message = { 
                             id: crypto.randomUUID(),
-                            text: 'Error al procesar el mensaje del servidor',
+                            text: `Diagrama generado: ${data.diagram.title}`,
                             sender: 'system',
                             timestamp: new Date(),
-                         };
+                            };
+                            console.log("Diagrama recibido del servidor:", data.diagram);
                         setMessages((prev) => [...prev, receivedMessage]);
+                    } else if (data.error) {
+                        console.error("Error received from server:", data.error);
+                        const receivedMessage: Message = { 
+                            id: crypto.randomUUID(),
+                            text: `Error: ${data.error}`,
+                            sender: 'system',
+                            timestamp: new Date(),
+                            };
+                        setMessages((prev) => [...prev, receivedMessage]);
+                        return;
                     }
-                };
+                } catch (e) {
+                    const receivedMessage: Message = { 
+                        id: crypto.randomUUID(),
+                        text: 'Error al procesar el mensaje del servidor',
+                        sender: 'system',
+                        timestamp: new Date(),
+                        };
+                    console.error("Error processing server message:", e);
+                    setMessages((prev) => [...prev, receivedMessage]);
+                }
+            });
 
-                ws.onclose = () => {
-                    setConnectionState('disconnected');
-                    if (shouldReconnectRef.current) {
-                        console.log("WebSocket disconnected, attempting reconnection in 3s...");
-                        reconnectTimeoutRef.current = setTimeout(() => {
-                            connectWebSocket();
-                        }, 3000);
-                    }
-                };
+            socket.on('disconnect', () => {
+                setConnectionState('disconnected');
+                console.log("WebSocket disconnected");
+            });
 
-                ws.onerror = (error) => {
-                    setConnectionState('error');
-                    console.error("WebSocket error:", error);
-                };
-            } catch (error) {
+            socket.on('connect_error', (error) => {
                 setConnectionState('error');
-                console.error("Failed to create WebSocket:", error);
-            }
-        };
-
-        connectWebSocket();
+                console.error("WebSocket error:", error);
+            });
+        } catch (error) {
+            setConnectionState('error');
+            console.error("Failed to create WebSocket:", error);
+        }
 
         return () => {
-            shouldReconnectRef.current = false;
             if (socketRef.current) {
-                socketRef.current.close();
+                socketRef.current.disconnect();
+                console.log("WebSocket disconnected on cleanup");
             }
-            if (reconnectTimeoutRef.current) {
-                clearTimeout(reconnectTimeoutRef.current);
-                reconnectTimeoutRef.current = null;
-            }
-        };
+        }
     }, [url]);
 
     const sendMessage = (text: string) => {
@@ -107,12 +89,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         };
         setMessages((prev) => [...prev, userMessage]);
 
-        // Enviar por WebSocket si está abierto
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(text);
-        } else {
-            console.warn("WebSocket is not open. Message queued but not sent.");
-        }
+        socketRef.current?.emit('generate', text);
     };
 
     return { currentDiagram, messages, connectionState, sendMessage };
