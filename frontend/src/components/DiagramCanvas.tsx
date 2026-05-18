@@ -4,6 +4,9 @@ import type { Node, Edge } from "@xyflow/react";
 import { ReactFlow, Background, Controls } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
 import { useStore } from "../store/index";
+import { UmlClassNode } from "./UmlClassNode";
+
+const nodeTypes = { umlClass: UmlClassNode };
 
 export function DiagramCanvas() {
     const { currentDiagram } = useStore();
@@ -15,10 +18,10 @@ export function DiagramCanvas() {
         );
     }
     const { nodes, edges } = DiagramToFlow(currentDiagram);
-
+    
     return (
         <div className="flex-1 h-full w-full bg-gray-100">
-            <ReactFlow nodes={nodes} edges={edges} fitView>
+            <ReactFlow nodes={nodes} edges={edges} fitView nodeTypes={nodeTypes}>
                 <Background />
                 <Controls />
             </ReactFlow>
@@ -52,6 +55,7 @@ function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
                 node_type: node.node_type,
                 attributes: node.attributes,
             },
+            type: node.node_type === 'class' ? 'umlClass' : 'default',
         } as Node;
     });
 

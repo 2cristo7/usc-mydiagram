@@ -36,3 +36,9 @@ export interface DiagramSchema {
     nodes: DiagramNode[];
     edges: DiagramEdge[];
 }
+
+export type UmlClassData = {
+      label: string;
+      stereotype?: string;
+      attributes: string[];
+};
