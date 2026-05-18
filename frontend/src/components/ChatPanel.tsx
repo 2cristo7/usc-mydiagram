@@ -9,7 +9,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
-    const { messages } = useStore();
+    const { messages, uiState } = useStore();
     const [inputValue, setInputValue] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -19,7 +19,6 @@ export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
     }, [messages]);
 
     const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
 
         if (inputValue.trim()) {
             onSendMessage(inputValue);
@@ -65,6 +64,7 @@ export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
                 <p className={`text-sm ${getConnectionStatusColor()}`}>
                     {getConnectionStatusText()}
                 </p>
+                {uiState === 'error' && <p>Error: Ha ocurrido un error</p>}
             </div>
 
             {/* Lista de mensajes */}
@@ -81,6 +81,7 @@ export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
                     />
                 ))}
                 <div ref={messagesEndRef} />
+                {uiState === 'generating' && <span>Generando...</span>}
             </div>
 
             {/* Input y botón */}
@@ -92,11 +93,11 @@ export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
                         onChange={(e) => setInputValue(e.target.value)}
                         placeholder="Escribe un mensaje..."
                         className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        disabled={connectionState !== 'connected'}
+                        disabled={connectionState !== 'connected' ||  uiState === 'generating'}
                     />
                     <button
                         type="submit"
-                        disabled={connectionState !== 'connected'}
+                        disabled={connectionState !== 'connected' || uiState === 'generating'}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
                         Enviar
