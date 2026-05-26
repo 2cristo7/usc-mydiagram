@@ -19,7 +19,7 @@ export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
     }, [messages]);
 
     const handleSubmit = (e: React.FormEvent) => {
-
+        e.preventDefault();
         if (inputValue.trim()) {
             onSendMessage(inputValue);
             setInputValue('');

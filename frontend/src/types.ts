@@ -11,7 +11,7 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'err
 
 export type DiagramType = 'erd' | 'uml_class' | 'sequence' | 'flowchart' | 'architecture' | 'state_machine' | 'mindmap';
 
-export type NodeType =  'table' | 'class' | 'actor' | 'step' | 'service' | 'database' | 'queue' | 'state' | 'topic' | 'decision' | 'terminator';
+export type NodeType =  'table' | 'class' | 'actor' | 'step' | 'service' | 'database' | 'queue' | 'gateway' | 'state' | 'topic' | 'decision' | 'terminator' | 'person' | 'system' | 'container' | 'component';
 
 export type EdgeType = 'one_to_many' | 'many_to_many' | 'one_to_one' | 'inherits' | 'implements' | 'calls' | 'sequence' | 'transition' | 'depends_on' | 'association';  
 
@@ -36,9 +36,3 @@ export interface DiagramSchema {
     nodes: DiagramNode[];
     edges: DiagramEdge[];
 }
-
-export type UmlClassData = {
-      label: string;
-      stereotype?: string;
-      attributes: string[];
-};

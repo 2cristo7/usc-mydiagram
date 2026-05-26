@@ -1,12 +1,27 @@
-import type { DiagramSchema } from "../types";
+import type { DiagramSchema, NodeType } from "../types";
 import '@xyflow/react/dist/style.css';
 import type { Node, Edge } from "@xyflow/react";
 import { ReactFlow, Background, Controls } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
 import { useStore } from "../store/index";
 import { UmlClassNode } from "./UmlClassNode";
+import { C4Node } from "./C4Node";
+import { ArchitectureNode } from "./ArchitectureNode";
 
-const nodeTypes = { umlClass: UmlClassNode };
+const nodeTypes = { umlClass: UmlClassNode, c4: C4Node, architecture: ArchitectureNode };
+
+const nodeTypeMap: Partial<Record<NodeType, string>> = {
+      class: 'umlClass',
+      person: 'c4',
+      actor: 'c4',
+      system: 'c4',
+      container: 'c4',
+      component: 'c4',
+      gateway: 'architecture',
+      service: 'architecture',
+      database: 'architecture',
+      queue: 'architecture',
+  }
 
 export function DiagramCanvas() {
     const { currentDiagram } = useStore();
@@ -52,10 +67,10 @@ function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
             position: { x, y },
             data: { 
                 label: node.label,
-                node_type: node.node_type,
+                nodeType: node.node_type,
                 attributes: node.attributes,
             },
-            type: node.node_type === 'class' ? 'umlClass' : 'default',
+            type: nodeTypeMap[node.node_type] ?? 'default'        
         } as Node;
     });
 

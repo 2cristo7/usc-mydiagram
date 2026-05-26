@@ -62,8 +62,13 @@ class NodeType(str, Enum):
     SERVICE  = "service"    # arquitectura
     DATABASE = "database"   # arquitectura
     QUEUE    = "queue"      # arquitectura
+    GATEWAY  = "gateway"    # arquitectura
     STATE    = "state"      # máquina de estados
     TOPIC    = "topic"      # mindmap
+    PERSON   = "person"     # C4
+    SYSTEM   = "system"     # C4
+    CONTAINER = "container"  # C4
+    COMPONENT = "component"  # C4
 
 
 class EdgeType(str, Enum):
@@ -123,10 +128,10 @@ async def generate(req: GenerateRequest):
         "title": "string",
         "diagram_type": "{diagram_type}",
         "nodes": [
-            {{"id": "slug_sin_espacios", "label": "Nombre legible", "node_type": "table|class|actor|step|service|database|queue|state|topic", "attributes": ["campo: TIPO CONSTRAINT"]}}
+            {{"id": "slug_sin_espacios", "label": "Nombre legible", "node_type": {"|".join(e.value for e in NodeType)}, "attributes": ["campo: TIPO CONSTRAINT"]}}
         ],
         "edges": [
-            {{"id": "e1", "source": "id_nodo", "target": "id_nodo", "label": "etiqueta", "edge_type": "one_to_many|many_to_many|one_to_one|inherits|implements|calls|sequence|transition|depends_on|association"}}
+            {{"id": "e1", "source": "id_nodo", "target": "id_nodo", "label": "etiqueta", "edge_type": {"|".join(e.value for e in EdgeType)}}}
         ]
         }}""",
         user=req.prompt,
@@ -201,10 +206,10 @@ async def generate_stream(req: GenerateRequest):
         "title": "string",
         "diagram_type": "{diagram_type}",
         "nodes": [
-            {{"id": "slug_sin_espacios", "label": "Nombre legible", "node_type": "table|class|actor|step|service|database|queue|state|topic", "attributes": ["campo: TIPO CONSTRAINT"]}}
+            {{"id": "slug_sin_espacios", "label": "Nombre legible", "node_type": {"|".join(e.value for e in NodeType)}, "attributes": ["campo: TIPO CONSTRAINT"]}}
         ],
         "edges": [
-            {{"id": "e1", "source": "id_nodo", "target": "id_nodo", "label": "etiqueta", "edge_type": "one_to_many|many_to_many|one_to_one|inherits|implements|calls|sequence|transition|depends_on|association"}}
+            {{"id": "e1", "source": "id_nodo", "target": "id_nodo", "label": "etiqueta", "edge_type": {"|".join(e.value for e in EdgeType)}}}
         ]
         }}""",
         user=req.prompt,

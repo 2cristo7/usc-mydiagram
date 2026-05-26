@@ -1,5 +1,10 @@
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import type { UmlClassData } from "../types";
+
+export type UmlClassData = {
+      label: string;
+      stereotype?: string;
+      attributes: string[];
+};
 
 type UmlClassNode = Node<UmlClassData, 'umlClass'>;
 
