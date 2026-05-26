@@ -4,23 +4,29 @@ import type { Node, Edge } from "@xyflow/react";
 import { ReactFlow, Background, Controls } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
 import { useStore } from "../store/index";
+
 import { UmlClassNode } from "./UmlClassNode";
 import { C4Node } from "./C4Node";
 import { ArchitectureNode } from "./ArchitectureNode";
+import { SequenceActorNode } from "./SequenceActorNode";
+import { FlowNode } from "./FlowNode";
 
-const nodeTypes = { umlClass: UmlClassNode, c4: C4Node, architecture: ArchitectureNode };
+const nodeTypes = { umlClass: UmlClassNode, c4: C4Node, architecture: ArchitectureNode, sequenceActor: SequenceActorNode, flow: FlowNode };
 
 const nodeTypeMap: Partial<Record<NodeType, string>> = {
-      class: 'umlClass',
-      person: 'c4',
-      actor: 'c4',
-      system: 'c4',
-      container: 'c4',
-      component: 'c4',
-      gateway: 'architecture',
-      service: 'architecture',
-      database: 'architecture',
-      queue: 'architecture',
+    class: 'umlClass',
+    person: 'c4',
+    system: 'c4',
+    container: 'c4',
+    component: 'c4',
+    gateway: 'architecture',
+    service: 'architecture',
+    database: 'architecture',
+    queue: 'architecture',
+    actor: 'sequenceActor',
+    step: 'flow',
+    decision: 'flow',
+    terminator: 'flow'
   }
 
 export function DiagramCanvas() {
@@ -47,7 +53,9 @@ export function DiagramCanvas() {
 function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
     const graph = new dagre.graphlib.Graph();
 
-    graph.setGraph({ rankdir: 'TB'});
+    const rankdir = diagram.diagram_type === 'sequence' ? 'LR' : 'TB';
+
+    graph.setGraph({ rankdir });
     graph.setDefaultEdgeLabel(() => ({}));
 
     diagram.nodes.forEach( (node) => {
