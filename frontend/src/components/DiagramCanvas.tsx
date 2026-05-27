@@ -4,6 +4,10 @@ import type { Node, Edge } from "@xyflow/react";
 import { ReactFlow, Background, Controls, Panel } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
 import { useStore } from "../store/index";
+import { NodePalette } from "./NodePalette";
+import { useState } from "react";
+import { NodePropertiesPanel } from "./NodePropertiesPanel";
+import { DiagramToFlow } from "../ui/utils/diagramToFlow";
 
 import { UmlClassNode } from "./UmlClassNode";
 import { C4Node } from "./C4Node";
@@ -11,27 +15,9 @@ import { ArchitectureNode } from "./ArchitectureNode";
 import { SequenceActorNode } from "./SequenceActorNode";
 import { FlowNode } from "./FlowNode";
 
-import { NodePalette } from "./NodePalette";
-import { useState } from "react";
-import { NodePropertiesPanel } from "./NodePropertiesPanel";
+
 
 const nodeTypes = { umlClass: UmlClassNode, c4: C4Node, architecture: ArchitectureNode, sequenceActor: SequenceActorNode, flow: FlowNode };
-
-const nodeTypeMap: Partial<Record<NodeType, string>> = {
-    class: 'umlClass',
-    person: 'c4',
-    system: 'c4',
-    container: 'c4',
-    component: 'c4',
-    gateway: 'architecture',
-    service: 'architecture',
-    database: 'architecture',
-    queue: 'architecture',
-    actor: 'sequenceActor',
-    step: 'flow',
-    decision: 'flow',
-    terminator: 'flow'
-  }
 
 export function DiagramCanvas() {
     const { currentDiagram, addNode } = useStore();
@@ -82,48 +68,4 @@ export function DiagramCanvas() {
             </div>
         </div>
     );
-}
-
-function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
-    const graph = new dagre.graphlib.Graph();
-
-    const rankdir = diagram.diagram_type === 'sequence' ? 'LR' : 'TB';
-
-    graph.setGraph({ rankdir });
-    graph.setDefaultEdgeLabel(() => ({}));
-
-    diagram.nodes.forEach( (node) => {
-        graph.setNode(node.id, { label: node.label, width: 150, height: 50 });
-    });
-
-    diagram.edges.forEach( (edge) => {
-        graph.setEdge(edge.source, edge.target, { label: edge.label });
-    });
-
-    dagre.layout(graph);
-
-    const nodes = diagram.nodes.map( (node) => {
-        const { x, y } = graph.node(node.id);
-        return {
-            id: node.id,
-            position: { x, y },
-            data: { 
-                label: node.label,
-                nodeType: node.node_type,
-                attributes: node.attributes,
-            },
-            type: nodeTypeMap[node.node_type] ?? 'default'        
-        } as Node;
-    });
-
-    const edges = diagram.edges.map( (edge) => {
-        return {
-            id: edge.id,
-            source: edge.source,
-            target: edge.target,
-            label: edge.label,
-        } as Edge;
-    });
-
-    return { nodes, edges };
 }
