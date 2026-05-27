@@ -1,15 +1,17 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 from starlette.responses import StreamingResponse
 from enum import Enum
 import httpx
 import json
-
+import time
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen3:8b"
 
 app = FastAPI()
+rate_limit_store = {}
+prompt_cache = {}
 
 
 class GenerateRequest(BaseModel):
@@ -107,7 +109,13 @@ class DiagramSchema(BaseModel):
 
 
 @app.post("/generate")
-async def generate(req: GenerateRequest):
+async def generate(req: GenerateRequest, request: Request):
+    ip = request.client.host
+    check_rate_limit(ip, rate_limit_store)
+    cached = get_cached(req.prompt)
+    if cached:
+        return cached
+
     # Llamada 1 — clasificar tipo de diagrama
     valid_types = [t.value for t in DiagramType]
     diagram_type_raw = await call_ollama(
@@ -150,6 +158,7 @@ async def generate(req: GenerateRequest):
     except (json.JSONDecodeError, ValidationError) as e:
         raise HTTPException(status_code=500, detail=f"Schema inválido generado por el LLM: {e}")
 
+    set_cache(req.prompt, {"diagram": diagram})
     return {"diagram": diagram}
 
 
@@ -183,7 +192,10 @@ async def stream_ollama(system: str, user: str, max_tokens: int = 2048):
 
 
 @app.post("/generate-stream")
-async def generate_stream(req: GenerateRequest):
+async def generate_stream(req: GenerateRequest, request: Request):
+    ip = request.client.host
+    check_rate_limit(ip, rate_limit_store)
+
     # Llamada 1 — clasificar tipo de diagrama
     valid_types = [t.value for t in DiagramType]
     diagram_type_raw = await call_ollama(
@@ -214,3 +226,31 @@ async def generate_stream(req: GenerateRequest):
         }}""",
         user=req.prompt,
     ), media_type="text/plain")
+
+def check_rate_limit(ip: str, rate_limit_store: dict, RATE_LIMIT: int = 5, WINDOW_SECONDS: int = 60):
+
+    if ip not in rate_limit_store:
+        rate_limit_store[ip] = (1, time.time())  # contador, timestamp
+        return
+    
+    count, window_start = rate_limit_store[ip]
+
+    if time.time() - window_start > WINDOW_SECONDS:
+        rate_limit_store[ip] = (1, time.time())
+    elif (count >= RATE_LIMIT):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    else:
+        rate_limit_store[ip] = (count + 1, window_start)
+
+
+
+def get_cached(prompt: str):
+    if prompt not in prompt_cache:
+        return None
+    if (prompt_cache[prompt]["timestamp"] + 60) < time.time():
+        prompt_cache.pop(prompt)
+        return None
+    return prompt_cache[prompt]["response"]
+
+def set_cache(prompt: str, response: dict):
+    prompt_cache[prompt] = {"response": response, "timestamp": time.time()}
