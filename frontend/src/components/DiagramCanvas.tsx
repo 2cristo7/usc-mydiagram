@@ -12,6 +12,8 @@ import { SequenceActorNode } from "./SequenceActorNode";
 import { FlowNode } from "./FlowNode";
 
 import { NodePalette } from "./NodePalette";
+import { useState } from "react";
+import { NodePropertiesPanel } from "./NodePropertiesPanel";
 
 const nodeTypes = { umlClass: UmlClassNode, c4: C4Node, architecture: ArchitectureNode, sequenceActor: SequenceActorNode, flow: FlowNode };
 
@@ -33,6 +35,7 @@ const nodeTypeMap: Partial<Record<NodeType, string>> = {
 
 export function DiagramCanvas() {
     const { currentDiagram, addNode } = useStore();
+    const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null);
 
     if (!currentDiagram) {
         return (
@@ -59,15 +62,24 @@ export function DiagramCanvas() {
         };
         addNode(diagramNode);
     }
+
+    function onNodeClick(_event: React.MouseEvent, node: Node) {
+        const diagramNode = currentDiagram?.nodes.find(n => n.id === node.id) ?? null;
+        setSelectedNode(diagramNode);
+    }
+
     return (
-        <div className="flex-1 h-full w-full bg-gray-100">
-            <ReactFlow nodes={nodes} edges={edges} fitView nodeTypes={nodeTypes} onDrop={onDrop} onDragOver={onDragOver}>
+        <div className="flex h-full w-full bg-gray-100">
+            <ReactFlow nodes={nodes} edges={edges} fitView nodeTypes={nodeTypes} onDrop={onDrop} onDragOver={onDragOver} onNodeClick={onNodeClick}>
                 <Panel position="top-left">
                     <NodePalette></NodePalette>
                 </Panel>
                 <Background />
                 <Controls />
             </ReactFlow>
+            <div className="w-72 border-l bg-white">
+                <NodePropertiesPanel node={selectedNode} />
+            </div>
         </div>
     );
 }
