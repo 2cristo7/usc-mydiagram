@@ -10,8 +10,8 @@ type UmlClassNode = Node<UmlClassData, 'umlClass'>;
 
 export function UmlClassNode({ data, selected }: NodeProps<UmlClassNode>) {
     const { label, stereotype, attributes } = data;
-    const methods = attributes?.filter((a: string) => a.includes('(')) ?? [];
-    const attrs   = attributes?.filter((a: string) => !a.includes('(')) ?? [];
+    const methods = attributes?.filter((a: string) => a.match(/\(.*\)\s*:\s*\w+$/)) ?? [];
+    const attrs   = attributes?.filter((a: string) => !a.match(/\(.*\)\s*:\s*\w+$/)) ?? [];
 
     return (
         <div className="bg-white border border-gray-300 rounded shadow p-4 w-48">
