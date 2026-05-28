@@ -13,7 +13,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     useEffect(() => {
 
         try {
-            socketRef.current = io('http://localhost:3001');
+            socketRef.current = io('http://localhost:3001', { transports: ['websocket'] });
             const socket = socketRef.current;
 
             socket.on('connect', () => {
@@ -57,7 +57,16 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
             socket.on('disconnect', () => {
                 setConnectionState('disconnected');
-                console.log("WebSocket disconnected");
+                if (buffer.current.length > 0) {
+                    buffer.current = '';
+                    addMessage({
+                        id: crypto.randomUUID(),
+                        text: 'Conexión perdida durante la generación. Inténtalo de nuevo.',
+                        sender: 'system',
+                        timestamp: new Date(),
+                    });
+                    setUiState('error');
+                }
             });
 
             socket.on('connect_error', (error) => {
@@ -74,8 +83,6 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         return () => {
             if (socketRef.current) {
                 socketRef.current.disconnect();
-                buffer.current = '';
-                console.log("WebSocket disconnected on cleanup");
             }
         }
     }, [url]);
