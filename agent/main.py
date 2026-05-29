@@ -1,10 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, ValidationError
-from starlette.responses import StreamingResponse
-from schemas import DiagramType, NodeType, EdgeType, DiagramSchema
-from state import DiagramState
-import httpx
-import json
+from pydantic import BaseModel
+from schemas import DiagramType, NodeType, EdgeType
+from graph import graph
 import time
 
 app = FastAPI()
@@ -25,89 +22,29 @@ async def generate(req: GenerateRequest, request: Request):
     cached = get_cached(req.prompt)
     if cached:
         return cached
+    
+    result = await graph.ainvoke({
+          "prompt": req.prompt,
+          "is_diagram_request": False,
+          "diagram_type": None,
+          "title": None,
+          "nodes": [],
+          "edges": [],
+          "diagram": None,
+          "validation_errors": [],
+          "retry_count": 0,
+      })
 
-    # Llamada 1 — clasificar tipo de diagrama
-    valid_types = [t.value for t in DiagramType]
-    diagram_type_raw = await call_ollama(
-        system=f"Reply with exactly one of these values, no explanation: {valid_types}. What type of diagram does the following text describe?",
-        user=req.prompt,
-        max_tokens=10,
-    )
-    diagram_type = diagram_type_raw.strip().strip('"').lower()
-    if diagram_type not in valid_types:
-        diagram_type = "erd"  # fallback si el modelo alucina
+    if not result["is_diagram_request"]:
+        raise HTTPException(status_code=400, detail="El prompt no describe un diagrama.")
+    if not result["diagram"]:
+        raise HTTPException(status_code=500, detail="No se pudo generar el diagrama.")
 
-    # Llamada 2 — generar el schema JSON
-    schema_raw = await call_ollama(
-        system=f"""Generate a JSON representing a '{diagram_type}' diagram.
-        Reply ONLY with the JSON, no explanation, no code blocks.
-        The JSON must follow exactly this structure:
-        {{
-        "title": "string",
-        "diagram_type": "{diagram_type}",
-        "nodes": [
-            {{"id": "slug_sin_espacios", "label": "Nombre legible", "node_type": {"|".join(e.value for e in NodeType)}, "attributes": ["campo: TIPO CONSTRAINT"]}}
-        ],
-        "edges": [
-            {{"id": "e1", "source": "id_nodo", "target": "id_nodo", "label": "etiqueta", "edge_type": {"|".join(e.value for e in EdgeType)}}}
-        ]
-        }}""",
-        user=req.prompt,
-    )
-
-    # Limpiar posibles bloques de código del LLM
-    clean = schema_raw.strip()
-    if clean.startswith("```"):
-        clean = clean.split("```")[1]
-        if clean.startswith("json"):
-            clean = clean[4:]
-
-    try:
-        data = json.loads(clean)
-        diagram = DiagramSchema.model_validate(data)
-    except (json.JSONDecodeError, ValidationError) as e:
-        raise HTTPException(status_code=500, detail=f"Schema inválido generado por el LLM: {e}")
-
-    set_cache(req.prompt, {"diagram": diagram})
-    return {"diagram": diagram}
+    set_cache(req.prompt, {"diagram": result["diagram"]})
+    return {"diagram": result["diagram"]}
                     
 
 
-@app.post("/generate-stream")
-async def generate_stream(req: GenerateRequest, request: Request):
-    ip = request.client.host
-    check_rate_limit(ip, rate_limit_store)
-
-    # Llamada 1 — clasificar tipo de diagrama
-    valid_types = [t.value for t in DiagramType]
-    diagram_type_raw = await call_ollama(
-        system=f"Reply with exactly one of these values, no explanation: {valid_types}. What type of diagram does the following text describe?",
-        user=req.prompt,
-        max_tokens=10,
-    )
-
-    diagram_type = diagram_type_raw.strip().strip('"').lower()
-    if diagram_type not in valid_types:
-      diagram_type = "erd"
-
-    # Llamada 2 — generar el schema JSON
-    return StreamingResponse(
-        stream_ollama(
-        system=f"""Generate a JSON representing a '{diagram_type}' diagram.
-        Reply ONLY with the JSON, no explanation, no code blocks.
-        The JSON must follow exactly this structure:
-        {{
-        "title": "string",
-        "diagram_type": "{diagram_type}",
-        "nodes": [
-            {{"id": "slug_sin_espacios", "label": "Nombre legible", "node_type": {"|".join(e.value for e in NodeType)}, "attributes": ["campo: TIPO CONSTRAINT"]}}
-        ],
-        "edges": [
-            {{"id": "e1", "source": "id_nodo", "target": "id_nodo", "label": "etiqueta", "edge_type": {"|".join(e.value for e in EdgeType)}}}
-        ]
-        }}""",
-        user=req.prompt,
-    ), media_type="text/plain")
 
 def check_rate_limit(ip: str, rate_limit_store: dict, RATE_LIMIT: int = 5, WINDOW_SECONDS: int = 60):
 

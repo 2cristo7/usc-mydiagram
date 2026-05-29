@@ -10,3 +10,4 @@ class DiagramState(TypedDict):
     diagram: Optional[DiagramSchema]
     validation_errors: list[str]
     retry_count: int
+    title: Optional[str]
