@@ -77,7 +77,7 @@ io.on('connection', (socket) => {
     console.log('Mensaje recibido del cliente:', prompt)
 
     try {
-      const agentRes = await fetch('http://localhost:8000/generate-stream', {
+      const agentRes = await fetch('http://localhost:8000/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),

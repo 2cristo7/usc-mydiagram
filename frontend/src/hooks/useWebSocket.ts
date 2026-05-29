@@ -30,10 +30,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 try {
                     const cleaned = buffer.current.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
                     const data = JSON.parse(cleaned);
-                    setCurrentDiagram(data);
+                    setCurrentDiagram(data.diagram);
                     const receivedMessage: Message = { 
                         id: crypto.randomUUID(),
-                        text: `Diagrama generado: ${data.title}`,
+                        text: `Diagrama generado: ${data.diagram.title}`,
                         sender: 'system',
                         timestamp: new Date(),
                         };
