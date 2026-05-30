@@ -14,4 +14,4 @@ async def synthesize(state: DiagramState) -> DiagramState:
       edges=edges,
     )
 
-    return {"diagram": diagram, "retry_count": 0}
+    return {"diagram": diagram}
