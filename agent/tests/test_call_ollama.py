@@ -1,7 +1,9 @@
 import pytest
 import httpx
 from unittest.mock import patch, MagicMock, AsyncMock
-from main import call_ollama
+from llm import OllamaBackend
+
+BACKEND = OllamaBackend(model="qwen3:8b", url="http://localhost:11434/api/chat")
 
 
 @pytest.mark.asyncio
@@ -10,9 +12,9 @@ async def test_normal_response():
     mock_response.raise_for_status = MagicMock()
     mock_response.json.return_value = {"message": {"content": "respuesta del modelo"}}
 
-    with patch('main.httpx.AsyncClient') as mock_client:
+    with patch("llm.httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-        result = await call_ollama("system prompt", "user prompt")
+        result = await BACKEND.complete("system prompt", "user prompt", max_tokens=100)
 
     assert result == "respuesta del modelo"
 
@@ -24,10 +26,10 @@ async def test_http_error():
         "Error", request=MagicMock(), response=MagicMock()
     )
 
-    with patch('main.httpx.AsyncClient') as mock_client:
+    with patch("llm.httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
         with pytest.raises(httpx.HTTPStatusError):
-            await call_ollama("system prompt", "user prompt")
+            await BACKEND.complete("system prompt", "user prompt", max_tokens=100)
 
 
 @pytest.mark.asyncio
@@ -38,8 +40,8 @@ async def test_stripping_think():
         "message": {"content": "<think>razonamiento interno</think>respuesta del modelo"}
     }
 
-    with patch('main.httpx.AsyncClient') as mock_client:
+    with patch("llm.httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-        result = await call_ollama("system prompt", "user prompt")
+        result = await BACKEND.complete("system prompt", "user prompt", max_tokens=100)
 
     assert result == "respuesta del modelo"
