@@ -18,6 +18,7 @@ Each element must follow this exact structure:
 Only use node ids from this list: {[n.id for n in nodes]}.
 Example: [{{"id": "e1", "source": "user", "target": "order", "label": "places", "edge_type": "one_to_many"}}]""",
             user=prompt,
+        tier="capable",
         max_tokens=500,
     )
     try:

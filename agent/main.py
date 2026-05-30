@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from schemas import DiagramType, NodeType, EdgeType

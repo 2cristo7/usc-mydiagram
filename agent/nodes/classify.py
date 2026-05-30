@@ -7,12 +7,14 @@ async def classify(state: DiagramState) -> DiagramState:
     llm_response_type = await call_llm(
       system=f"Reply with exactly one of these values, no explanation: {valid_types}.",
       user=state["prompt"],
+      tier="fast",
       max_tokens=10,
     )
     diagram_type_str = llm_response_type.strip().lower()
     llm_response_title = await call_llm(
       system="Reply with a concise title for the diagram, no explanation.",
       user=state["prompt"],
+      tier="fast",
       max_tokens=20,
     )
     diagram_title_str = llm_response_title.strip()
