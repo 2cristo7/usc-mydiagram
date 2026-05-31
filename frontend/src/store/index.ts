@@ -15,6 +15,7 @@ interface DiagramStore {
     setCurrentDiagram: (diagram: DiagramSchema) => void;
     updateNode(id: string, changes: Partial<DiagramNode>): void;
     addNode: (node: DiagramNode) => void;
+    setEdges: (edges: DiagramEdge[]) => void;
 }
 
 export type Store = MsgStore & DiagramStore;
@@ -38,9 +39,20 @@ export const useStore = create<Store>()((set) => ({
         nodes: state.nodes.map(node => node.id === id ? { ...node, ...changes } : node),
         currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes: state.currentDiagram.nodes.map(node => node.id === id ? { ...node, ...changes } : node) } : null
      })),
-     addNode: (node: DiagramNode) => set((state) => ({
-        nodes: [...state.nodes, node],
-        currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes: [...state.currentDiagram.nodes, node] } : null
-     }))
+     addNode: (node: DiagramNode) => set((state) => {
+        const updatedNodes = [...state.nodes, node]
+        return {
+            nodes: updatedNodes,
+            currentDiagram: state.currentDiagram
+                ? { ...state.currentDiagram, nodes: updatedNodes }
+                : { title: '', diagram_type: null, nodes: updatedNodes, edges: [] } as unknown as DiagramSchema,
+        }
+     }),
+     setEdges: (edges: DiagramEdge[]) => set((state) => ({
+        edges,
+        currentDiagram: state.currentDiagram
+            ? { ...state.currentDiagram, edges }
+            : null,
+     })),
 }));
 

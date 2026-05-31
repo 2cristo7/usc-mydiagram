@@ -4,10 +4,9 @@ import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
-    const { setCurrentDiagram, addMessage, setUiState } = useStore();
+    const { addNode, setEdges, addMessage, setUiState } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
-    const buffer = useRef<string>("");
 
 
     useEffect(() => {
@@ -21,52 +20,30 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 console.log("WebSocket connected");
             });
 
-            socket.on('diagram:chunk', (chunk: string) => {
-                buffer.current += chunk;
-                console.log("Chunk received:", chunk);
+            socket.on('diagram:node_ready', (node) => {
+                addNode(node);
             });
 
-            socket.on('diagram:done', () => {
-                try {
-                    const cleaned = buffer.current.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-                    const data = JSON.parse(cleaned);
-                    setCurrentDiagram(data.diagram);
-                    const receivedMessage: Message = { 
-                        id: crypto.randomUUID(),
-                        text: `Diagrama generado: ${data.diagram.title}`,
-                        sender: 'system',
-                        timestamp: new Date(),
-                        };
-                        console.log("Diagrama recibido del servidor:", data);
-                    addMessage(receivedMessage);
-                    buffer.current = '';
-                    setUiState('ready');
-                } catch (e) {
-                    const receivedMessage: Message = { 
-                        id: crypto.randomUUID(),
-                        text: 'Error al procesar el mensaje del servidor',
-                        sender: 'system',
-                        timestamp: new Date(),
-                        };
-                    console.error("Error processing server message:", e);
-                    addMessage(receivedMessage);
-                    buffer.current = '';
-                    setUiState('error');
-                }
+            socket.on('diagram:done', (diagram) => {
+                setEdges(diagram?.edges ?? []);
+                addMessage({
+                    id: crypto.randomUUID(),
+                    text: `Diagrama generado: ${diagram?.title ?? 'sin título'}`,
+                    sender: 'system',
+                    timestamp: new Date(),
+                });
+                setUiState('ready');
             });
 
             socket.on('disconnect', () => {
                 setConnectionState('disconnected');
-                if (buffer.current.length > 0) {
-                    buffer.current = '';
-                    addMessage({
-                        id: crypto.randomUUID(),
-                        text: 'Conexión perdida durante la generación. Inténtalo de nuevo.',
-                        sender: 'system',
-                        timestamp: new Date(),
-                    });
-                    setUiState('error');
-                }
+                addMessage({
+                    id: crypto.randomUUID(),
+                    text: 'Conexión perdida durante la generación. Inténtalo de nuevo.',
+                    sender: 'system',
+                    timestamp: new Date(),
+                });
+                setUiState('error');
             });
 
             socket.on('connect_error', (error) => {
