@@ -4,7 +4,7 @@ import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
-    const { addNode, setEdges, addMessage, setUiState } = useStore();
+    const { addNode, addEdge, addMessage, setUiState } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
 
@@ -24,15 +24,28 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 addNode(node);
             });
 
-            socket.on('diagram:done', (diagram) => {
-                setEdges(diagram?.edges ?? []);
+            socket.on('diagram:edge_ready', (edge) => {
+                addEdge(edge);
+            });
+
+            socket.on('diagram:done', (data) => {
                 addMessage({
                     id: crypto.randomUUID(),
-                    text: `Diagrama generado: ${diagram?.title ?? 'sin título'}`,
+                    text: `Diagrama generado: ${data?.title ?? 'sin título'}`,
                     sender: 'system',
                     timestamp: new Date(),
                 });
                 setUiState('ready');
+            });
+
+            socket.on('diagram:error', (data) => {
+                addMessage({
+                    id: crypto.randomUUID(),
+                    text: data?.error ?? 'Error generando el diagrama',
+                    sender: 'system',
+                    timestamp: new Date(),
+                });
+                setUiState('error');
             });
 
             socket.on('disconnect', () => {
