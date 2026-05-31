@@ -4,7 +4,7 @@ from state import DiagramState
 from nodes.guard import guard
 from nodes.classify import classify
 from nodes.extract_nodes import make_extract_nodes
-from nodes.extract_edges import extract_edges
+from nodes.extract_edges import make_extract_edges
 from nodes.synthesize import synthesize
 from nodes.validate import validate
 
@@ -26,7 +26,7 @@ def build_graph(queue: asyncio.Queue | None = None):
     builder.add_edge("classify", "extract_nodes")
     builder.add_node("extract_nodes", make_extract_nodes(queue))
     builder.add_edge("extract_nodes", "extract_edges")
-    builder.add_node("extract_edges", extract_edges)
+    builder.add_node("extract_edges", make_extract_edges(queue))
     builder.add_edge("extract_edges", "synthesize")
     builder.add_node("synthesize", synthesize)
     builder.add_edge("synthesize", "validate")

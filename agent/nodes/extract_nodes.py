@@ -32,7 +32,7 @@ Example for an ERD: [{{"id": "user", "label": "User", "node_type": "table", "att
                     node = DiagramNode.model_validate(node_dict)
                     nodes.append(node)
                     if queue is not None:
-                        await queue.put(node)
+                        await queue.put({"_type": "node", "data": node.model_dump()})
                 except Exception as e:
                     print(f"[extract_nodes] validation error: {e} — skipping node: {node_dict}")
 

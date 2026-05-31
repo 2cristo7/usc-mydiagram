@@ -45,11 +45,15 @@ async def generate_stream(req: GenerateRequest, request: Request):
     async def run_graph():
         try:
             result = await graph.ainvoke(initial_state)
-            diagram = result.get("diagram")
-            if diagram:
-                await queue.put({"_type": "diagram", "data": diagram.model_dump()})
+            if not result.get("is_diagram_request"):
+                await queue.put({"_type": "error", "message": "El prompt no describe un diagrama."})
+            elif not result.get("diagram"):
+                await queue.put({"_type": "error", "message": "No se pudo generar el diagrama."})
+            else:
+                await queue.put({"_type": "done", "title": result["diagram"].title})
         except Exception as e:
             print(f"[generate_stream] graph error: {e!r}")
+            await queue.put({"_type": "error", "message": "Error generando el diagrama."})
         finally:
             await queue.put(_SENTINEL)
 
@@ -60,8 +64,7 @@ async def generate_stream(req: GenerateRequest, request: Request):
                 item = await queue.get()
                 if item is _SENTINEL:
                     break
-                payload = item if isinstance(item, dict) else item.model_dump()
-                yield json.dumps(payload) + "\n"
+                yield json.dumps(item) + "\n"
         finally:
             await graph_task
 
