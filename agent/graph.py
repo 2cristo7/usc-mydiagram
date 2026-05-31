@@ -13,8 +13,11 @@ def route_after_guard(state: DiagramState) -> str:
     return "classify" if state["is_diagram_request"] else END
 
 def route_after_validate(state: DiagramState) -> str:
-    if state["validation_errors"] and state["retry_count"] < 3:
-        return "synthesize"
+    # validation_errors no-vacío = validate decidió reintentar (hay huérfanas y queda
+    # presupuesto). El tope de reintentos vive en validate, no aquí. Volvemos a la
+    # EXTRACCIÓN (no a synthesize) para regenerar solo las aristas huérfanas con feedback.
+    if state["validation_errors"]:
+        return "extract_edges"
     return END
 
 

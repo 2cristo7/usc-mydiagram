@@ -37,6 +37,7 @@ async def generate_stream(req: GenerateRequest, request: Request):
         "title": None,
         "nodes": [],
         "edges": [],
+        "orphan_edges": [],
         "diagram": None,
         "validation_errors": [],
         "retry_count": 0,
