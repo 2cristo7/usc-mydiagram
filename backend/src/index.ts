@@ -95,10 +95,21 @@ io.on('connection', (socket) => {
           if (!line.trim()) continue
           try {
             const item = JSON.parse(line)
-            if (item._type === 'diagram') {
-              socket.emit('diagram:done', item.data)
-            } else {
-              socket.emit('diagram:node_ready', item)
+            switch (item._type) {
+              case 'node':
+                socket.emit('diagram:node_ready', item.data)
+                break
+              case 'edge':
+                socket.emit('diagram:edge_ready', item.data)
+                break
+              case 'done':
+                socket.emit('diagram:done', { title: item.title })
+                break
+              case 'error':
+                socket.emit('diagram:error', { error: item.message })
+                break
+              default:
+                console.warn('Tipo de evento NDJSON desconocido:', item._type)
             }
           } catch {
             console.warn('Línea NDJSON inválida ignorada:', line)
