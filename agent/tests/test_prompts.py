@@ -35,10 +35,13 @@ def _make_state(**overrides) -> DiagramState:
         "diagram_type": DiagramType.ERD,
         "nodes": [],
         "edges": [],
-        "orphan_edges": [],
+        "invalid_edges": [],
+        "invalid_nodes": [],
         "diagram": None,
         "validation_errors": [],
         "retry_count": 0,
+        "node_retry_count": 0,
+        "node_validation_errors": [],
         "title": None,
     }
     base.update(overrides)
