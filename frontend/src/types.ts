@@ -13,7 +13,7 @@ export type DiagramType = 'erd' | 'uml_class' | 'sequence' | 'flowchart' | 'arch
 
 export type NodeType =  'table' | 'class' | 'actor' | 'step' | 'service' | 'database' | 'queue' | 'gateway' | 'state' | 'topic' | 'decision' | 'terminator' | 'person' | 'system' | 'container' | 'component';
 
-export type EdgeType = 'one_to_many' | 'many_to_many' | 'one_to_one' | 'inherits' | 'implements' | 'calls' | 'sequence' | 'transition' | 'depends_on' | 'association';  
+export type EdgeType = 'one_to_many' | 'many_to_many' | 'one_to_one' | 'inherits' | 'implements' | 'calls' | 'sequence' | 'transition' | 'depends_on' | 'association' | 'flow' | 'conditional';
 
 export interface DiagramNode {
     id: string;

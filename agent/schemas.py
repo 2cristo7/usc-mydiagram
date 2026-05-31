@@ -22,6 +22,8 @@ class NodeType(str, Enum):
     GATEWAY  = "gateway"    # arquitectura
     STATE    = "state"      # máquina de estados
     TOPIC    = "topic"      # mindmap
+    DECISION   = "decision"    # flowchart (rombo de bifurcación)
+    TERMINATOR = "terminator"  # flowchart (inicio/fin)
     PERSON   = "person"     # C4
     SYSTEM   = "system"     # C4
     CONTAINER = "container"  # C4
@@ -39,6 +41,8 @@ class EdgeType(str, Enum):
     TRANSITION   = "transition"  # máquina de estados
     DEPENDS_ON   = "depends_on"
     ASSOCIATION  = "association"
+    FLOW         = "flow"         # flowchart (encadenado simple entre pasos)
+    CONDITIONAL  = "conditional"  # flowchart (rama de un decision, label sí/no)
 
 class DiagramNode(BaseModel):
     id: str

@@ -3,6 +3,7 @@ import ijson
 from state import DiagramState
 from llm import stream_llm
 from schemas import EdgeType, DiagramEdge
+from prompts import get_edge_prompt
 
 
 def make_extract_edges(queue: asyncio.Queue | None = None):
@@ -34,12 +35,9 @@ Return ONLY a JSON array with the corrected edges, no explanation, no code block
 Each element must follow this exact structure:
 {{"id": "e1", "source": "source_node_id", "target": "target_node_id", "label": "Relationship Label", "edge_type": "{valid_edge_types}"}}"""
         else:
-            system = f"""You are extracting edges from a {diagram_type} diagram description.
-Return ONLY a JSON array, no explanation, no code blocks.
-Each element must follow this exact structure:
-{{"id": "e1", "source": "source_node_id", "target": "target_node_id", "label": "Relationship Label", "edge_type": "{valid_edge_types}"}}
-Only use node ids from this list: {valid_ids}.
-Example: [{{"id": "e1", "source": "user", "target": "order", "label": "places", "edge_type": "one_to_many"}}]"""
+            # Pasada normal: prompt específico del tipo de diagrama (S6.6), que
+            # nombra los edge_types propios de este tipo y da un ejemplo coherente.
+            system = get_edge_prompt(state["diagram_type"], valid_ids)
 
         # Dedup: ids ya confirmados y streameados en pasadas previas. Si el LLM re-emite
         # una arista ya válida durante el feedback, no se vuelve a mandar al canvas.
