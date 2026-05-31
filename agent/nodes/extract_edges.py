@@ -5,7 +5,7 @@ from schemas import EdgeType, DiagramEdge
 
 async def extract_edges(state: DiagramState) -> DiagramState:
     prompt = state["prompt"]
-    diagram_type = state["diagram_type"]
+    diagram_type = state["diagram_type"].value
     nodes = state["nodes"]
 
     valid_edge_types = "|".join(e.value for e in EdgeType)
