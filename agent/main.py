@@ -37,10 +37,13 @@ async def generate_stream(req: GenerateRequest, request: Request):
         "title": None,
         "nodes": [],
         "edges": [],
-        "orphan_edges": [],
+        "invalid_edges": [],
+        "invalid_nodes": [],
         "diagram": None,
         "validation_errors": [],
         "retry_count": 0,
+        "node_retry_count": 0,
+        "node_validation_errors": [],
     }
 
     async def run_graph():
