@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 
 class DiagramType(str, Enum):
@@ -44,7 +44,7 @@ class DiagramNode(BaseModel):
     id: str
     label: str
     node_type: NodeType
-    attributes: list[str]
+    attributes: list[str] = Field(default_factory=list)
 
 
 class DiagramEdge(BaseModel):
