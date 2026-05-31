@@ -77,22 +77,33 @@ io.on('connection', (socket) => {
     console.log('Mensaje recibido del cliente:', prompt)
 
     try {
-      const agentRes = await fetch('http://localhost:8000/generate', {
+      const agentRes = await fetch('http://localhost:8000/generate/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       })
       const decoder = new TextDecoder()
       const reader = agentRes.body!.getReader()
+      let buffer = ''
       while (true) {
         const { done, value } = await reader.read()
-        if (done){
-          socket.emit('diagram:done')
-          break
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const item = JSON.parse(line)
+            if (item._type === 'diagram') {
+              socket.emit('diagram:done', item.data)
+            } else {
+              socket.emit('diagram:node_ready', item)
+            }
+          } catch {
+            console.warn('Línea NDJSON inválida ignorada:', line)
+          }
         }
-        const chunk = decoder.decode(value)
-        socket.emit('diagram:chunk', chunk)
-        console.log('Chunk enviado al cliente:', chunk)
       }
     } catch (err) {
       console.error('Error llamando al agente:', err)
