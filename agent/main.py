@@ -1,15 +1,18 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from schemas import DiagramType, NodeType, EdgeType
-from graph import graph
+import asyncio
+import json
 import time
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from graph import build_graph
 
 app = FastAPI()
 rate_limit_store = {}
-prompt_cache = {}
+
+_SENTINEL = object()
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -18,43 +21,58 @@ class GenerateRequest(BaseModel):
 def health():
     return {"status": "ok", "service": "agent"}
 
-@app.post("/generate")
-async def generate(req: GenerateRequest, request: Request):
+
+@app.post("/generate/stream")
+async def generate_stream(req: GenerateRequest, request: Request):
     ip = request.client.host
     check_rate_limit(ip, rate_limit_store)
-    cached = get_cached(req.prompt)
-    if cached:
-        return cached
-    
-    result = await graph.ainvoke({
-          "prompt": req.prompt,
-          "is_diagram_request": False,
-          "diagram_type": None,
-          "title": None,
-          "nodes": [],
-          "edges": [],
-          "diagram": None,
-          "validation_errors": [],
-          "retry_count": 0,
-      })
 
-    if not result["is_diagram_request"]:
-        raise HTTPException(status_code=400, detail="El prompt no describe un diagrama.")
-    if not result["diagram"]:
-        raise HTTPException(status_code=500, detail="No se pudo generar el diagrama.")
+    queue: asyncio.Queue = asyncio.Queue()
+    graph = build_graph(queue)
 
-    set_cache(req.prompt, {"diagram": result["diagram"]})
-    return {"diagram": result["diagram"]}
-                    
+    initial_state = {
+        "prompt": req.prompt,
+        "is_diagram_request": False,
+        "diagram_type": None,
+        "title": None,
+        "nodes": [],
+        "edges": [],
+        "diagram": None,
+        "validation_errors": [],
+        "retry_count": 0,
+    }
 
+    async def run_graph():
+        try:
+            result = await graph.ainvoke(initial_state)
+            diagram = result.get("diagram")
+            if diagram:
+                await queue.put({"_type": "diagram", "data": diagram.model_dump()})
+        except Exception as e:
+            print(f"[generate_stream] graph error: {e!r}")
+        finally:
+            await queue.put(_SENTINEL)
+
+    async def node_stream():
+        graph_task = asyncio.create_task(run_graph())
+        try:
+            while True:
+                item = await queue.get()
+                if item is _SENTINEL:
+                    break
+                payload = item if isinstance(item, dict) else item.model_dump()
+                yield json.dumps(payload) + "\n"
+        finally:
+            await graph_task
+
+    return StreamingResponse(node_stream(), media_type="application/x-ndjson")
 
 
 def check_rate_limit(ip: str, rate_limit_store: dict, RATE_LIMIT: int = 5, WINDOW_SECONDS: int = 60):
-
     if ip not in rate_limit_store:
-        rate_limit_store[ip] = (1, time.time())  # contador, timestamp
+        rate_limit_store[ip] = (1, time.time())
         return
-    
+
     count, window_start = rate_limit_store[ip]
 
     if time.time() - window_start > WINDOW_SECONDS:
@@ -63,16 +81,3 @@ def check_rate_limit(ip: str, rate_limit_store: dict, RATE_LIMIT: int = 5, WINDO
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     else:
         rate_limit_store[ip] = (count + 1, window_start)
-
-
-
-def get_cached(prompt: str):
-    if prompt not in prompt_cache:
-        return None
-    if (prompt_cache[prompt]["timestamp"] + 60) < time.time():
-        prompt_cache.pop(prompt)
-        return None
-    return prompt_cache[prompt]["response"]
-
-def set_cache(prompt: str, response: dict):
-    prompt_cache[prompt] = {"response": response, "timestamp": time.time()}
