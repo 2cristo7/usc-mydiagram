@@ -64,3 +64,59 @@ class DiagramSchema(BaseModel):
     diagram_type: DiagramType
     nodes: list[DiagramNode]
     edges: list[DiagramEdge]
+
+
+# ---------------------------------------------------------------------------
+# Validación semántica por tipo (S6.7)
+# ---------------------------------------------------------------------------
+# Fuente de verdad de QUÉ node_type/edge_type es válido para cada DiagramType.
+# Es la versión-datos de la guía que la prosa de prompts.py da al LLM: ambos
+# deben beber de aquí para no contradecirse (el prompt dice qué usar, este mapa
+# valida que se haya usado). Un JSON puede ser Pydantic-válido (tipo dentro del
+# enum global) pero semánticamente inválido para su diagrama (p. ej. un
+# edge_type "one_to_many" en un flowchart).
+#
+# Registro PARCIAL a propósito: un DiagramType sin entrada aquí NO se valida
+# semánticamente (se acepta cualquier tipo del enum). Así, si en S7 se añade un
+# DiagramType nuevo y se olvida registrarlo, el sistema degrada a "solo
+# Pydantic" en vez de rechazar todos sus diagramas. Fallar hacia permisivo, no
+# hacia roto. La consulta se hace con `.get(dt)` en validate_nodes/edges.
+ALLOWED_NODE_TYPES: dict[DiagramType, set[NodeType]] = {
+    DiagramType.ERD:           {NodeType.TABLE},
+    DiagramType.UML_CLASS:     {NodeType.CLASS},
+    DiagramType.SEQUENCE:      {NodeType.ACTOR},
+    DiagramType.FLOWCHART:     {NodeType.TERMINATOR, NodeType.STEP, NodeType.DECISION},
+    DiagramType.ARCHITECTURE:  {
+        NodeType.SERVICE, NodeType.DATABASE, NodeType.QUEUE, NodeType.GATEWAY,
+        NodeType.PERSON, NodeType.SYSTEM, NodeType.CONTAINER, NodeType.COMPONENT,
+    },
+    DiagramType.STATE_MACHINE: {NodeType.STATE, NodeType.TERMINATOR},
+    DiagramType.MINDMAP:       {NodeType.TOPIC},
+}
+
+ALLOWED_EDGE_TYPES: dict[DiagramType, set[EdgeType]] = {
+    DiagramType.ERD:           {EdgeType.ONE_TO_ONE, EdgeType.ONE_TO_MANY, EdgeType.MANY_TO_MANY},
+    DiagramType.UML_CLASS:     {EdgeType.INHERITS, EdgeType.IMPLEMENTS, EdgeType.ASSOCIATION, EdgeType.DEPENDS_ON},
+    DiagramType.SEQUENCE:      {EdgeType.SEQUENCE},
+    DiagramType.FLOWCHART:     {EdgeType.FLOW, EdgeType.CONDITIONAL},
+    DiagramType.ARCHITECTURE:  {EdgeType.CALLS, EdgeType.DEPENDS_ON},
+    DiagramType.STATE_MACHINE: {EdgeType.TRANSITION},
+    DiagramType.MINDMAP:       {EdgeType.ASSOCIATION},
+}
+
+
+def node_type_allowed(diagram_type: DiagramType, node_type: NodeType) -> bool:
+    """¿Es `node_type` semánticamente válido para `diagram_type`?
+
+    Fallback permisivo (S6.7, P4-b): si el tipo de diagrama no está registrado,
+    se acepta cualquier node_type del enum (degrada a solo-Pydantic) en vez de
+    rechazar todo. Fallar hacia permisivo, no hacia roto."""
+    allowed = ALLOWED_NODE_TYPES.get(diagram_type)
+    return allowed is None or node_type in allowed
+
+
+def edge_type_allowed(diagram_type: DiagramType, edge_type: EdgeType) -> bool:
+    """¿Es `edge_type` semánticamente válido para `diagram_type`? Gemela de
+    `node_type_allowed`; mismo fallback permisivo."""
+    allowed = ALLOWED_EDGE_TYPES.get(diagram_type)
+    return allowed is None or edge_type in allowed
