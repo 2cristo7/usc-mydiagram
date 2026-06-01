@@ -15,15 +15,35 @@ def make_extract_edges(queue: asyncio.Queue | None = None):
         node_ids = {n.id for n in nodes}
         valid_ids = [n.id for n in nodes]
 
-        # Pasada de feedback (S6.5c/S6.7): retry_count > 0 significa que validate_edges
-        # nos devolvió aquí porque quedaron aristas inválidas (huérfanas, semánticas o
-        # Pydantic). Regeneramos SOLO las retenidas (no re-streamea las válidas), con su
-        # motivo, los ids válidos y los edge_types permitidos como guía.
-        is_feedback = state["retry_count"] > 0
+        # El MODO se detecta por CONTENIDO del estado, no por contador (S6.8): el
+        # contador es presupuesto, no señal de modo. Prioridad rellenar > corregir
+        # > normal (gemelo de extract_nodes). Cada extractor filtra los gaps de SU
+        # scope: aquí, los structural_gaps de type "edges".
+        fill_gaps = [g for g in state["structural_gaps"] if g["type"] == "edges"]
+        allowed = ALLOWED_EDGE_TYPES.get(dt) or set(EdgeType)
+        allowed_str = ", ".join(e.value for e in allowed)
 
-        if is_feedback:
-            allowed = ALLOWED_EDGE_TYPES.get(dt) or set(EdgeType)
-            allowed_str = ", ".join(e.value for e in allowed)
+        if fill_gaps:
+            # Modo RELLENAR hueco estructural (S6.8): validate_schema detectó que
+            # FALTAN aristas (p. ej. un terminator recién creado sin conectar). Se
+            # pasa el contexto de nodos CON SU node_type para que el LLM identifique
+            # cuál conectar (p. ej. "el terminator de inicio"), y las aristas ya
+            # existentes para no repetirlas.
+            missing = "\n".join(f'- {g["reason"]}' for g in fill_gaps)
+            node_ctx = ", ".join(f"{n.id} ({n.label}, {n.node_type.value})" for n in nodes)
+            existing = ", ".join(f"{e.source}->{e.target}" for e in state["edges"]) or "(ninguna)"
+            system = f"""Estás AÑADIENDO las aristas que faltan en un diagrama de tipo {diagram_type} ya parcialmente construido.
+Faltan estas conexiones:
+{missing}
+Los nodos disponibles (id, label, tipo) son: {node_ctx}.
+Las aristas que YA existen (NO las repitas): {existing}.
+Los ÚNICOS edge_type válidos para este tipo de diagrama son: {allowed_str}.
+Añade SOLO las aristas que faltan. Usa únicamente ids de nodo de la lista de arriba. Devuelve ÚNICAMENTE un array JSON, sin texto adicional, sin markdown, sin bloques de código.
+Cada elemento DEBE tener exactamente esta forma:
+{{"id": "e1", "source": "id_nodo_origen", "target": "id_nodo_destino", "label": "Etiqueta", "edge_type": "<uno de los permitidos>"}}"""
+        elif state["invalid_edges"]:
+            # Modo CORREGIR (S6.5c/S6.7): quedaron aristas inválidas (huérfanas,
+            # semánticas o Pydantic). Regenera SOLO las retenidas, con su motivo.
             broken = "\n".join(
                 f'- {item["raw"]}  ← {item["reason"]}'
                 for item in state["invalid_edges"]

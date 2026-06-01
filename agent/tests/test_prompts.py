@@ -42,6 +42,8 @@ def _make_state(**overrides) -> DiagramState:
         "retry_count": 0,
         "node_retry_count": 0,
         "node_validation_errors": [],
+        "structural_gaps": [],
+        "schema_retry_count": 0,
         "title": None,
     }
     base.update(overrides)

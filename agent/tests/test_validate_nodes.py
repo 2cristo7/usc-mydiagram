@@ -38,6 +38,8 @@ def _base_state(**overrides):
         "retry_count": 0,
         "node_retry_count": 0,
         "node_validation_errors": [],
+        "structural_gaps": [],
+        "schema_retry_count": 0,
         "title": "Pedidos",
     }
     state.update(overrides)

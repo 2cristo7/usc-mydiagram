@@ -11,15 +11,32 @@ def make_extract_nodes(queue: asyncio.Queue | None = None):
         prompt = state["prompt"]
         dt = state["diagram_type"]
 
-        # Pasada de feedback (S6.7): node_retry_count > 0 significa que validate_nodes
-        # nos devolvió aquí porque quedaron nodos inválidos (Pydantic o semánticos). En
-        # vez de regenerar TODOS los nodos (re-streamearía los válidos), regeneramos SOLO
-        # los retenidos, con el motivo del fallo y los node_types permitidos como guía.
-        is_feedback = state["node_retry_count"] > 0
+        # El MODO se detecta por CONTENIDO del estado, no por contador (S6.8): el
+        # contador es presupuesto, no señal de modo. Prioridad rellenar > corregir
+        # > normal, porque venir de validate_schema (structural_gaps) implica que
+        # el bucle local de nodos ya terminó; un invalid_nodes residual no debe
+        # secuestrar el modo. Cada extractor filtra los gaps de SU scope.
+        fill_gaps = [g for g in state["structural_gaps"] if g["type"] == "nodes"]
+        allowed = ALLOWED_NODE_TYPES.get(dt) or set(NodeType)
+        allowed_str = ", ".join(t.value for t in allowed)
 
-        if is_feedback:
-            allowed = ALLOWED_NODE_TYPES.get(dt) or set(NodeType)
-            allowed_str = ", ".join(t.value for t in allowed)
+        if fill_gaps:
+            # Modo RELLENAR hueco estructural (S6.8): validate_schema detectó que
+            # FALTA un nodo (no que haya uno mal). Se añade lo que falta, con los
+            # nodos existentes como contexto para no repetirlos.
+            missing = "\n".join(f'- {g["reason"]}' for g in fill_gaps)
+            existing = ", ".join(f"{n.id} ({n.label})" for n in state["nodes"]) or "(ninguno)"
+            system = f"""Estás AÑADIENDO los nodos que faltan en un diagrama de tipo {dt.value} ya parcialmente construido.
+Faltan estos elementos estructurales:
+{missing}
+Los nodos que YA existen (NO los repitas): {existing}.
+Los ÚNICOS node_type válidos para este tipo de diagrama son: {allowed_str}.
+Añade SOLO los nodos que faltan. Devuelve ÚNICAMENTE un array JSON, sin texto adicional, sin markdown, sin bloques de código.
+Cada elemento DEBE tener exactamente esta forma:
+{{"id": "slug_sin_espacios", "label": "Nombre Legible", "node_type": "<uno de los permitidos>", "attributes": ["..."]}}"""
+        elif state["invalid_nodes"]:
+            # Modo CORREGIR (S6.7): quedaron nodos inválidos (Pydantic o semánticos).
+            # Regenera SOLO los retenidos, con el motivo y los node_types permitidos.
             broken = "\n".join(
                 f'- {item["raw"]}  ← {item["reason"]}'
                 for item in state["invalid_nodes"]

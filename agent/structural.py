@@ -88,32 +88,48 @@ def find_unreachable_nodes(
 # ---------------------------------------------------------------------------
 
 def _validate_flowchart(nodes: list[DiagramNode], edges: list[DiagramEdge]) -> list[StructuralGap]:
-    """Reglas estructurales de un flowchart:
-    - (B) Un terminator de INICIO: in-degree 0 y out-degree ≥1. El ≥1 evita que
-      un terminator aislado cuente como inicio (ese caso lo captura D/E).
-    - (C) Un terminator de FIN: out-degree 0 y in-degree ≥1.
-    - (D) Ningún nodo huérfano (grado 0): falta la relación que lo conecta.
-    - (E) Conexo: todo nodo alcanzable desde el inicio; un grupo aislado son
-      aristas que faltan. Excluye huérfanos (ya reportados por D) para no duplicar.
+    """Reglas estructurales de un flowchart. Distinguen EXISTENCIA (falta un nodo
+    → type "nodes") de CONEXIÓN (el nodo está pero mal enlazado → type "edges"),
+    para que el bucle de relleno converja sin apilar nodos huérfanos:
 
-    Cero terminators dispara B y C a la vez (faltan inicio y fin): correcto, el
-    relleno debe añadir ambos."""
+    - Sin NINGÚN terminator → faltan los nodos de inicio y fin Y sus aristas. Se
+      emiten `nodes` + `edges` JUNTOS: el grafo (extract_nodes → … → extract_edges
+      en la misma vuelta) crea los terminators y los conecta en UNA pasada.
+    - Con terminators pero ninguno ejerce de inicio/fin → es cuestión de conexión,
+      no de nodos → solo `edges`.
+    - (D) Huérfanos (grado 0): falta la arista que los enlaza → `edges`.
+    - (E) Conexo: grupo aislado del inicio → faltan aristas → `edges`. Excluye
+      huérfanos (ya en D) para no duplicar.
+
+    inicio = in-degree 0 y out-degree ≥1; fin = out-degree 0 y in-degree ≥1 (el ≥1
+    evita que un terminator aislado cuente falsamente como inicio/fin)."""
     gaps: list[StructuralGap] = []
     terminators = [n for n in nodes if n.node_type == NodeType.TERMINATOR]
 
-    starts = [n for n in terminators if in_degree(n.id, edges) == 0 and out_degree(n.id, edges) >= 1]
-    if not starts:
+    if not terminators:
+        # Falta el NODO: crear inicio y fin (nodes) + conectarlos (edges), juntos.
         gaps.append({
             "type": "nodes",
-            "reason": "el flowchart no tiene un nodo 'terminator' de inicio (sin aristas entrantes y con al menos una saliente)",
+            "reason": "el flowchart no tiene terminators; añade un nodo 'terminator' de inicio y uno de fin",
         })
-
-    ends = [n for n in terminators if out_degree(n.id, edges) == 0 and in_degree(n.id, edges) >= 1]
-    if not ends:
         gaps.append({
-            "type": "nodes",
-            "reason": "el flowchart no tiene un nodo 'terminator' de fin (sin aristas salientes y con al menos una entrante)",
+            "type": "edges",
+            "reason": "conecta el terminator de inicio con el primer paso del flujo y el último paso con el terminator de fin",
         })
+    else:
+        # Los terminators EXISTEN: que no ejerzan su rol es falta de CONEXIÓN.
+        has_start = any(in_degree(n.id, edges) == 0 and out_degree(n.id, edges) >= 1 for n in terminators)
+        if not has_start:
+            gaps.append({
+                "type": "edges",
+                "reason": "ningún 'terminator' actúa como inicio; conecta uno como arranque del flujo (arista saliente, sin entrantes)",
+            })
+        has_end = any(out_degree(n.id, edges) == 0 and in_degree(n.id, edges) >= 1 for n in terminators)
+        if not has_end:
+            gaps.append({
+                "type": "edges",
+                "reason": "ningún 'terminator' actúa como fin; conecta uno como cierre del flujo (arista entrante, sin salientes)",
+            })
 
     orphans = find_orphan_nodes(nodes, edges)
     orphan_ids = {n.id for n in orphans}
@@ -125,7 +141,7 @@ def _validate_flowchart(nodes: list[DiagramNode], edges: list[DiagramEdge]) -> l
         })
 
     # (E) Conectividad. Semilla: los inicios; si no hay, el primer nodo no-huérfano.
-    seeds = [n.id for n in starts]
+    seeds = [n.id for n in terminators if in_degree(n.id, edges) == 0 and out_degree(n.id, edges) >= 1]
     if not seeds:
         seeds = [n.id for n in nodes if n.id not in orphan_ids][:1]
     if seeds:
