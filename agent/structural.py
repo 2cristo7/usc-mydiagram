@@ -18,8 +18,13 @@ sin validador registrado NO se valida estructuralmente. Fallar hacia permisivo,
 no hacia roto — si S7 añade un tipo y olvida sus reglas, degrada a "solo Pydantic
 + semántica" en vez de bloquear todos sus diagramas.
 
-S6.8 arranca solo con el validador de flowchart (el caso del criterio); los demás
-tipos quedan en fallback permisivo hasta que se valide el mecanismo end-to-end.
+Principio rector (S6.8): validar lo MÍNIMO que hace a un diagrama ser de su tipo,
+nunca más. Por eso erd, uml_class y architecture quedan PERMISIVOS a propósito (no
+por falta de cobertura): una tabla de catálogo sin FK, una clase independiente o
+un servicio aún sin cablear son legítimos, y validarlos rechazaría diagramas
+válidos. Tienen validador: flowchart, state_machine, mindmap y sequence, donde la
+estructura sí es semánticamente obligatoria (un mindmap sin centro, una máquina
+sin estado inicial o una secuencia con un solo actor no son ese diagrama).
 """
 from collections.abc import Callable
 
@@ -156,11 +161,88 @@ def _validate_flowchart(nodes: list[DiagramNode], edges: list[DiagramEdge]) -> l
     return gaps
 
 
-# Registro DiagramType → validador. Parcial: lo no listado no se valida (permisivo).
+def _validate_mindmap(nodes: list[DiagramNode], edges: list[DiagramEdge]) -> list[StructuralGap]:
+    """Un mindmap es un árbol con un topic CENTRAL del que cuelgan las ideas.
+    Mínimo: existe ese centro (un nodo sin aristas entrantes y con ramas) y ninguna
+    idea queda suelta. Un único topic (sin ramas todavía) es legítimo: es la raíz
+    sola. No se fuerza raíz exactamente única (sería más que el mínimo)."""
+    gaps: list[StructuralGap] = []
+    if len(nodes) <= 1:
+        return gaps
+
+    roots = [n for n in nodes if in_degree(n.id, edges) == 0 and out_degree(n.id, edges) >= 1]
+    if not roots:
+        gaps.append({
+            "type": "edges",
+            "reason": "el mindmap no tiene un topic central del que cuelguen las ideas; conecta las ideas a un topic raíz",
+        })
+
+    orphans = find_orphan_nodes(nodes, edges)
+    if orphans:
+        ids = ", ".join(sorted(n.id for n in orphans))
+        gaps.append({
+            "type": "edges",
+            "reason": f"ideas sin conectar al mapa: {ids}; enlázalas a un topic existente",
+        })
+    return gaps
+
+
+def _validate_state_machine(nodes: list[DiagramNode], edges: list[DiagramEdge]) -> list[StructuralGap]:
+    """Una máquina de estados necesita un estado INICIAL (sin transiciones
+    entrantes) desde el que arranca. Mínimo: existe ese inicial y ningún estado
+    queda sin transiciones."""
+    gaps: list[StructuralGap] = []
+    if len(nodes) < 2:
+        return gaps
+
+    initials = [n for n in nodes if in_degree(n.id, edges) == 0]
+    if not initials:
+        gaps.append({
+            "type": "edges",
+            "reason": "la máquina no tiene estado inicial (todos tienen transiciones entrantes); marca el arranque con un estado sin entradas",
+        })
+
+    orphans = find_orphan_nodes(nodes, edges)
+    if orphans:
+        ids = ", ".join(sorted(n.id for n in orphans))
+        gaps.append({
+            "type": "edges",
+            "reason": f"estados sin ninguna transición: {ids}; conéctalos con transiciones",
+        })
+    return gaps
+
+
+def _validate_sequence(nodes: list[DiagramNode], edges: list[DiagramEdge]) -> list[StructuralGap]:
+    """Un diagrama de secuencia modela la interacción entre participantes. Mínimo:
+    al menos 2 actores y ninguno sin mensajes."""
+    gaps: list[StructuralGap] = []
+    actors = [n for n in nodes if n.node_type == NodeType.ACTOR]
+    if len(actors) < 2:
+        gaps.append({
+            "type": "nodes",
+            "reason": "un diagrama de secuencia necesita al menos 2 actores que interactúen; añade los participantes que faltan",
+        })
+
+    orphans = find_orphan_nodes(nodes, edges)
+    if len(nodes) >= 2 and orphans:
+        ids = ", ".join(sorted(n.id for n in orphans))
+        gaps.append({
+            "type": "edges",
+            "reason": f"actores sin ningún mensaje: {ids}; añade los mensajes que faltan",
+        })
+    return gaps
+
+
+# Registro DiagramType → validador. Parcial a propósito: erd, uml_class y
+# architecture NO están → permisivos (validar elementos independientes legítimos
+# rechazaría diagramas válidos). Ver docstring del módulo.
 STRUCTURAL_VALIDATORS: dict[
     DiagramType, Callable[[list[DiagramNode], list[DiagramEdge]], list[StructuralGap]]
 ] = {
     DiagramType.FLOWCHART: _validate_flowchart,
+    DiagramType.MINDMAP: _validate_mindmap,
+    DiagramType.STATE_MACHINE: _validate_state_machine,
+    DiagramType.SEQUENCE: _validate_sequence,
 }
 
 

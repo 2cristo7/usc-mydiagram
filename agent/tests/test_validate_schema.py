@@ -102,9 +102,73 @@ def test_wellformed_flowchart_has_no_gaps():
     assert gaps == []
 
 
-def test_unregistered_type_is_permissive():
-    # ERD no tiene validador estructural → degrada a permisivo (no se valida).
-    gaps = structural.validate_structure(DiagramType.ERD, [_n("a")], [])
+@pytest.mark.parametrize("dt", [DiagramType.ERD, DiagramType.UML_CLASS, DiagramType.ARCHITECTURE])
+def test_permissive_types_have_no_rules(dt):
+    # Tipos con elementos independientes legítimos → permisivos por diseño: un
+    # nodo aislado no dispara nada.
+    assert structural.validate_structure(dt, [_n("a"), _n("b")], []) == []
+
+
+# ---- mindmap ----
+
+def test_mindmap_single_topic_is_legit():
+    assert structural.validate_structure(DiagramType.MINDMAP, [_n("centro", NodeType.TOPIC)], []) == []
+
+
+def test_mindmap_without_central_root_flags_edges():
+    # Dos topics en ciclo: ninguno con in-degree 0 → no hay centro.
+    gaps = structural.validate_structure(
+        DiagramType.MINDMAP,
+        [_n("a", NodeType.TOPIC), _n("b", NodeType.TOPIC)],
+        [_e("1", "a", "b", EdgeType.ASSOCIATION), _e("2", "b", "a", EdgeType.ASSOCIATION)],
+    )
+    assert gaps and all(g["type"] == "edges" for g in gaps)
+    assert "central" in " ".join(g["reason"] for g in gaps)
+
+
+def test_mindmap_wellformed_has_no_gaps():
+    gaps = structural.validate_structure(
+        DiagramType.MINDMAP,
+        [_n("centro", NodeType.TOPIC), _n("idea1", NodeType.TOPIC), _n("idea2", NodeType.TOPIC)],
+        [_e("1", "centro", "idea1", EdgeType.ASSOCIATION), _e("2", "centro", "idea2", EdgeType.ASSOCIATION)],
+    )
+    assert gaps == []
+
+
+# ---- state_machine ----
+
+def test_state_machine_without_initial_flags_edges():
+    gaps = structural.validate_structure(
+        DiagramType.STATE_MACHINE,
+        [_n("s1", NodeType.STATE), _n("s2", NodeType.STATE)],
+        [_e("1", "s1", "s2", EdgeType.TRANSITION), _e("2", "s2", "s1", EdgeType.TRANSITION)],
+    )
+    assert gaps and "inicial" in " ".join(g["reason"] for g in gaps)
+
+
+def test_state_machine_wellformed_has_no_gaps():
+    gaps = structural.validate_structure(
+        DiagramType.STATE_MACHINE,
+        [_n("inicio", NodeType.STATE), _n("fin", NodeType.STATE)],
+        [_e("1", "inicio", "fin", EdgeType.TRANSITION)],
+    )
+    assert gaps == []
+
+
+# ---- sequence ----
+
+def test_sequence_with_one_actor_flags_nodes():
+    gaps = structural.validate_structure(DiagramType.SEQUENCE, [_n("a", NodeType.ACTOR)], [])
+    assert gaps and gaps[0]["type"] == "nodes"
+    assert "2 actores" in gaps[0]["reason"]
+
+
+def test_sequence_wellformed_has_no_gaps():
+    gaps = structural.validate_structure(
+        DiagramType.SEQUENCE,
+        [_n("a", NodeType.ACTOR), _n("b", NodeType.ACTOR)],
+        [_e("1", "a", "b", EdgeType.SEQUENCE)],
+    )
     assert gaps == []
 
 
