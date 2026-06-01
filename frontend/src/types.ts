@@ -30,6 +30,15 @@ export interface DiagramEdge {
     edge_type: EdgeType;
 }
 
+// S6.9 — degradación parcial: el diagrama es usable pero le faltó algo que el
+// agente no pudo resolver tras agotar los reintentos. Una entrada por dimensión.
+export type DegradationCategory = 'nodes' | 'edges' | 'structure';
+
+export interface Degradation {
+    category: DegradationCategory;
+    reasons: string[];
+}
+
 export interface DiagramSchema {
     title: string;
     diagram_type: DiagramType;

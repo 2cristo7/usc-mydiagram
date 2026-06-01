@@ -21,12 +21,23 @@ const nodeTypes = { umlClass: UmlClassNode, c4: C4Node, architecture: Architectu
 
 export function DiagramCanvas() {
     const { currentDiagram, addNode } = useStore();
+    const uiState = useStore((s) => s.uiState);
     const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null);
 
+    // Sin diagrama, el placeholder depende del uiState (S6.9): antes mostraba
+    // siempre "Cargando diagrama..." y se quedaba colgado cuando un fallo emitía
+    // `error` sin que se streamease ningún nodo (currentDiagram seguía null pero
+    // la generación ya había terminado). Ahora "Cargando" solo en `generating`.
     if (!currentDiagram) {
+        const placeholder =
+            uiState === 'generating'
+                ? 'Generando diagrama...'
+                : uiState === 'error'
+                ? 'No se pudo generar el diagrama. Revisa el mensaje del chat e inténtalo de nuevo.'
+                : 'Describe un diagrama en el chat para empezar.';
         return (
             <div className="flex-1 bg-gray-200 flex items-center justify-center">
-                <p className="text-gray-600">Cargando diagrama...</p>
+                <p className="text-gray-600 px-6 text-center">{placeholder}</p>
             </div>
         );
     }

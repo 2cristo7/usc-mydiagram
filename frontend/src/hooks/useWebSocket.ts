@@ -1,7 +1,23 @@
 import { useState, useEffect, useRef } from "react";
-import type { Message, ConnectionState} from "../types";
+import type { Message, ConnectionState, Degradation, DegradationCategory } from "../types";
 import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
+
+// Render diferenciado por categoría (S6.9 P4): cada degradación se traduce a un
+// aviso de chat legible. Fallback genérico para una categoría futura sin etiqueta.
+const DEGRADATION_LABELS: Record<DegradationCategory, string> = {
+    nodes: 'No se pudieron generar algunos elementos',
+    edges: 'Faltan algunas relaciones que no se pudieron resolver',
+    structure: 'El diagrama puede estar estructuralmente incompleto',
+};
+
+function degradationMessages(degradations: Degradation[]): string[] {
+    return degradations.map((d) => {
+        const label = DEGRADATION_LABELS[d.category] ?? 'El diagrama quedó incompleto';
+        const detail = d.reasons?.length ? `: ${d.reasons.join('; ')}` : '';
+        return `⚠️ ${label}${detail}`;
+    });
+}
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
     const { addNode, addEdge, addMessage, setUiState } = useStore();
@@ -35,6 +51,18 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                     sender: 'system',
                     timestamp: new Date(),
                 });
+                // Degradación parcial (S6.9): el diagrama es usable pero quedó algo
+                // sin resolver → un aviso de chat por categoría, sin bloquear la UI.
+                if (data?.degraded && Array.isArray(data.degradations)) {
+                    for (const text of degradationMessages(data.degradations)) {
+                        addMessage({
+                            id: crypto.randomUUID(),
+                            text,
+                            sender: 'system',
+                            timestamp: new Date(),
+                        });
+                    }
+                }
                 setUiState('ready');
             });
 
