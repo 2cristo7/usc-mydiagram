@@ -101,9 +101,12 @@ def test_route_back_to_extract_edges_on_errors():
     assert route_after_validate_edges(state) == "extract_edges"
 
 
-def test_route_ends_when_clean():
+def test_route_to_synthesize_when_clean():
+    # S6.8 reordenó el grafo: validate_edges va ANTES de synthesize, así que
+    # "limpio" ya no termina el grafo, sino que avanza a synthesize (el fin del
+    # grafo lo decide ahora validate_schema, tras la validación estructural).
     state = _base_state(validation_errors=[])
-    assert route_after_validate_edges(state) == END
+    assert route_after_validate_edges(state) == "synthesize"
 
 
 # ---------- extract_edges: pasada normal, tres clases de inválida ----------

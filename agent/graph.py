@@ -8,6 +8,7 @@ from nodes.extract_edges import make_extract_edges
 from nodes.synthesize import synthesize
 from nodes.validate_edges import validate_edges
 from nodes.validate_nodes import validate_nodes
+from nodes.validate_schema import validate_schema
 
 
 def route_after_guard(state: DiagramState) -> str:
@@ -24,10 +25,25 @@ def route_after_validate_nodes(state: DiagramState) -> str:
 def route_after_validate_edges(state: DiagramState) -> str:
     # validation_errors no-vacío = validate_edges decidió reintentar (hay inválidas y
     # queda presupuesto). El tope vive en validate_edges, no aquí. Volvemos a la
-    # EXTRACCIÓN (no a synthesize) para regenerar solo las aristas inválidas con feedback.
+    # EXTRACCIÓN para regenerar solo las aristas inválidas con feedback. Limpio →
+    # synthesize (S6.8 reordenó: validate_edges va ANTES de synthesize, así no se
+    # ensambla un diagrama con aristas locales aún inválidas).
     if state["validation_errors"]:
         return "extract_edges"
-    return END
+    return "synthesize"
+
+def route_after_validate_schema(state: DiagramState) -> str:
+    # structural_gaps no-vacío = validate_schema decidió reintentar (hay huecos y
+    # queda presupuesto). El tope vive en validate_schema. El type del gap decide
+    # destino (S6.8 P5b): algún hueco de "nodes" → extract_nodes (falta un nodo, y
+    # en cascada sus aristas); solo "edges" → extract_edges (nodos OK, falta
+    # conectarlos). Vacío (limpio o degradado) → fin.
+    gaps = state["structural_gaps"]
+    if not gaps:
+        return END
+    if any(g["type"] == "nodes" for g in gaps):
+        return "extract_nodes"
+    return "extract_edges"
 
 
 def build_graph(queue: asyncio.Queue | None = None):
@@ -41,10 +57,12 @@ def build_graph(queue: asyncio.Queue | None = None):
     builder.add_edge("extract_nodes", "validate_nodes")
     builder.add_conditional_edges("validate_nodes", route_after_validate_nodes)
     builder.add_node("extract_edges", make_extract_edges(queue))
-    builder.add_edge("extract_edges", "synthesize")
-    builder.add_node("synthesize", synthesize)
-    builder.add_edge("synthesize", "validate_edges")
+    builder.add_edge("extract_edges", "validate_edges")
     builder.add_node("validate_edges", validate_edges)
     builder.add_conditional_edges("validate_edges", route_after_validate_edges)
+    builder.add_node("synthesize", synthesize)
+    builder.add_edge("synthesize", "validate_schema")
+    builder.add_node("validate_schema", validate_schema)
+    builder.add_conditional_edges("validate_schema", route_after_validate_schema)
     builder.set_entry_point("guard")
     return builder.compile()
