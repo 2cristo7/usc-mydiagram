@@ -103,10 +103,17 @@ io.on('connection', (socket) => {
                 socket.emit('diagram:edge_ready', item.data)
                 break
               case 'done':
-                socket.emit('diagram:done', { title: item.title })
+                // Propaga la bandera de degradación y los motivos por categoría
+                // (S6.9); el frontend compone el aviso. degraded=false → done limpio.
+                socket.emit('diagram:done', {
+                  title: item.title,
+                  degraded: item.degraded ?? false,
+                  degradations: item.degradations ?? [],
+                })
                 break
               case 'error':
-                socket.emit('diagram:error', { error: item.message })
+                // Propaga la categoría del fallo además del mensaje accionable.
+                socket.emit('diagram:error', { error: item.message, category: item.category })
                 break
               default:
                 console.warn('Tipo de evento NDJSON desconocido:', item._type)
