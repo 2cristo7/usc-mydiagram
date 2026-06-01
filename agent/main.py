@@ -44,6 +44,8 @@ async def generate_stream(req: GenerateRequest, request: Request):
         "retry_count": 0,
         "node_retry_count": 0,
         "node_validation_errors": [],
+        "structural_gaps": [],
+        "schema_retry_count": 0,
     }
 
     async def run_graph():
