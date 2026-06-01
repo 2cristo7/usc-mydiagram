@@ -41,11 +41,21 @@ async def validate_schema(state: DiagramState) -> DiagramState:
             print(f"[validate_schema]   [{g['type']}] {g['reason']}")
         return {"structural_gaps": gaps, "schema_retry_count": state["schema_retry_count"] + 1}
 
-    # Sin presupuesto: degradar. Log que nombra los huecos no resueltos.
+    # Sin presupuesto: degradar. Log que nombra los huecos no resueltos y registro
+    # en `degradations` (S6.9, category "structure") para que la carencia llegue al
+    # END y se comunique al usuario, en vez de entregar un diagrama silenciosamente
+    # incompleto. Vaciar structural_gaps sigue siendo obligatorio (corta el bucle).
     if gaps:
         print(
             f"[validate_schema] giving up after {MAX_SCHEMA_RETRIES} retries — "
             f"degrading with {len(gaps)} unresolved structural gap(s): {[g['reason'] for g in gaps]}"
         )
+        if not any(d["category"] == "structure" for d in state.get("degradations", [])):
+            return {
+                "structural_gaps": [],
+                "degradations": [
+                    {"category": "structure", "reasons": [g["reason"] for g in gaps]}
+                ],
+            }
 
     return {"structural_gaps": []}

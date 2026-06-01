@@ -23,11 +23,22 @@ async def validate_edges(state: DiagramState) -> DiagramState:
 
     # Sin presupuesto: descartar las inválidas restantes con log que las nombra
     # (degradación honesta). Seguro porque nunca se streamearon ni entraron en
-    # diagram.edges → el diagrama es coherente.
+    # diagram.edges → el diagrama es coherente. Además de vaciar la señal de
+    # routing (obligatorio: si no, bucle infinito), se registra la degradación en
+    # el canal `degradations` (S6.9) para que sobreviva al END. Guarda de
+    # idempotencia: si el bucle estructural reentra por aquí ya agotado, no se
+    # duplica la entrada "edges".
     if invalid:
         print(
             f"[validate_edges] giving up after {MAX_RETRIES} retries — "
             f"dropping {len(invalid)} invalid edge(s): {[item['raw'] for item in invalid]}"
         )
+        if not any(d["category"] == "edges" for d in state.get("degradations", [])):
+            return {
+                "validation_errors": [],
+                "degradations": [
+                    {"category": "edges", "reasons": [item["reason"] for item in invalid]}
+                ],
+            }
 
     return {"validation_errors": []}

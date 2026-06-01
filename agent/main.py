@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from graph import build_graph
+from outcome import classify_outcome
 
 app = FastAPI()
 rate_limit_store = {}
@@ -46,20 +47,20 @@ async def generate_stream(req: GenerateRequest, request: Request):
         "node_validation_errors": [],
         "structural_gaps": [],
         "schema_retry_count": 0,
+        "degradations": [],
     }
 
     async def run_graph():
+        # La taxonomía de desenlaces vive en classify_outcome (S6.9): main.py es el
+        # único punto que ve los tres casos (final limpio, guard-reject y crash).
         try:
             result = await graph.ainvoke(initial_state)
-            if not result.get("is_diagram_request"):
-                await queue.put({"_type": "error", "message": "El prompt no describe un diagrama."})
-            elif not result.get("diagram"):
-                await queue.put({"_type": "error", "message": "No se pudo generar el diagrama."})
-            else:
-                await queue.put({"_type": "done", "title": result["diagram"].title})
+            event = classify_outcome(result)
         except Exception as e:
             print(f"[generate_stream] graph error: {e!r}")
-            await queue.put({"_type": "error", "message": "Error generando el diagrama."})
+            event = classify_outcome(None, crashed=True)
+        try:
+            await queue.put(event)
         finally:
             await queue.put(_SENTINEL)
 

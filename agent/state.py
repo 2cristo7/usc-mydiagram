@@ -18,6 +18,23 @@ class StructuralGap(TypedDict):
     reason: str
 
 
+class Degradation(TypedDict):
+    """Una degradación CONSUMADA del diagrama final (S6.9): un branch de rendición
+    (validate_nodes/validate_edges/validate_schema) agotó su presupuesto y dejó
+    algo sin resolver. A diferencia de invalid_*/structural_gaps —canales de
+    routing que DEBEN vaciarse para que el bucle pare (si no, bucle infinito: el
+    router decide por lista no vacía, no por contador)— esto es un registro que
+    debe SOBREVIVIR hasta el END para que classify_outcome construya el aviso
+    accionable. Por eso vive en su propio canal con reducer operator.add.
+
+    `category` codifica QUÉ dimensión se degradó (la taxonomía de S6.9):
+    "nodes" (nodos descartados), "edges" (relaciones sin resolver), "structure"
+    (carencia estructural del ensamblado). `reasons` son los motivos por pieza,
+    ya accionables, que produjeron los validadores locales."""
+    category: Literal["nodes", "edges", "structure"]
+    reasons: list[str]
+
+
 class DiagramState(TypedDict):
     prompt: str
     is_diagram_request: bool
@@ -64,4 +81,13 @@ class DiagramState(TypedDict):
     # presupuesto regenerando piezas no debe llegar al validador estructural ya
     # sin saldo para rellenar el hueco. Tope en validate_schema.
     schema_retry_count: int
+    # Degradaciones consumadas (S6.9): cada branch de rendición que agota su
+    # presupuesto añade aquí su {category, reasons}. Reducer operator.add —al
+    # contrario que invalid_*/structural_gaps (replace, deben converger a vacío)—
+    # porque estas entradas deben ACUMULARSE y sobrevivir al END: son la fuente de
+    # verdad de classify_outcome para distinguir done-limpio de done-degradado y
+    # construir el aviso por categoría. Los branches usan guarda de idempotencia
+    # (no re-añadir su categoría) para el caso en que el bucle estructural reentre
+    # por un validador local ya agotado.
+    degradations: Annotated[list[Degradation], operator.add]
     title: Optional[str]

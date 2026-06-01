@@ -34,5 +34,14 @@ async def validate_nodes(state: DiagramState) -> DiagramState:
             f"[validate_nodes] giving up after {MAX_NODE_RETRIES} retries — "
             f"dropping {len(invalid)} invalid node(s): {[item['raw'] for item in invalid]}"
         )
+        # Registrar la degradación de NODOS para que sobreviva al END (S6.9), más
+        # allá de vaciar la señal de routing. Guarda de idempotencia: no duplicar.
+        if not any(d["category"] == "nodes" for d in state.get("degradations", [])):
+            return {
+                "node_validation_errors": [],
+                "degradations": [
+                    {"category": "nodes", "reasons": [item["reason"] for item in invalid]}
+                ],
+            }
 
     return {"node_validation_errors": []}
