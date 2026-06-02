@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { Message, ConnectionState, Degradation, DegradationCategory } from "../types";
 import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
+import { diagramToJson } from "../ui/utils/diagramToJson";
 
 // Render diferenciado por categoría (S6.9 P4): cada degradación se traduce a un
 // aviso de chat legible. Fallback genérico para una categoría futura sin etiqueta.
@@ -117,7 +118,20 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         };
         addMessage(userMessage);
 
-        socketRef.current?.emit('message:send', text);
+        // S7.1 — el frontend tiene la señal más fiable y temprana para decidir
+        // generación vs refinamiento: ¿existe ya un diagrama en el canvas? El texto
+        // del prompt no lo revela ("añade Carrito" es refinamiento solo si hay
+        // diagrama; sin él sería una generación). Se lee con getState() para evitar
+        // capturar un currentDiagram obsoleto en el closure.
+        const { currentDiagram } = useStore.getState();
+        if (currentDiagram) {
+            socketRef.current?.emit('message:refine', {
+                prompt: text,
+                diagram: diagramToJson(currentDiagram),
+            });
+        } else {
+            socketRef.current?.emit('message:send', text);
+        }
         setUiState('generating');
     };
 

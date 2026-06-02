@@ -1,0 +1,30 @@
+import type { DiagramSchema, DiagramNode, DiagramEdge, DiagramType } from "../../types";
+
+// S7.1 — Representación compacta del diagrama que se envía al agente al refinar.
+// El DiagramSchema ya carece de coordenadas (dagre las recalcula en cada render
+// desde currentDiagram), así que "compactar" no es quitar posiciones —no las
+// hay— sino quitar lo que el agente no necesita para razonar sobre el grafo:
+//   - diagram_type: IMPRESCINDIBLE. Determina qué node_type/edge_type son válidos
+//     (un ERD admite `table`, un flowchart `decision`…). Sin él el agente no puede
+//     proponer tipos coherentes.
+//   - nodes/edges: el estado sobre el que operan las tools de refinamiento
+//     (update_node(id, …), delete_node(id), add_edge(source, target, …)). Los `id`
+//     son imprescindibles para esa cirugía dirigida.
+//   - title: se OMITE. Es human-facing; el agente no lo necesita para refinar e
+//     inflaría el contexto sin aportar. Si un refinamiento debe cambiar el título,
+//     es trabajo de una tool, no contexto de entrada.
+// Espejo del CompactDiagram de Pydantic en el agente (schemas.py): el contrato que
+// cruza el proceso es el compacto, no el DiagramSchema completo.
+export interface CompactDiagram {
+    diagram_type: DiagramType;
+    nodes: DiagramNode[];
+    edges: DiagramEdge[];
+}
+
+export function diagramToJson(diagram: DiagramSchema): CompactDiagram {
+    return {
+        diagram_type: diagram.diagram_type,
+        nodes: diagram.nodes,
+        edges: diagram.edges,
+    };
+}
