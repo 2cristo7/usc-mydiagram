@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from graph import build_graph
 from outcome import classify_outcome
+from schemas import CompactDiagram
 
 app = FastAPI()
 rate_limit_store = {}
@@ -17,6 +18,14 @@ _SENTINEL = object()
 
 class GenerateRequest(BaseModel):
     prompt: str
+
+
+# S7.1 — Refinamiento sobre un diagrama existente. `diagram` es la versión
+# compacta (sin title) que el frontend serializa con diagramToJson. Pydantic lo
+# valida al parsear: un diagrama malformado da 422 explícito, no fallo silencioso.
+class RefineRequest(BaseModel):
+    prompt: str
+    diagram: CompactDiagram
 
 @app.get("/health")
 def health():
@@ -76,6 +85,28 @@ async def generate_stream(req: GenerateRequest, request: Request):
             await graph_task
 
     return StreamingResponse(node_stream(), media_type="application/x-ndjson")
+
+
+@app.post("/refine/stream")
+async def refine_stream(req: RefineRequest, request: Request):
+    ip = request.client.host
+    check_rate_limit(ip, rate_limit_store)
+
+    # FRONTERA DE SCOPE S7.1 — Lo REAL hasta aquí: el contrato {prompt, diagram} y
+    # su validación Pydantic (CompactDiagram). Llegar a este punto significa que el
+    # tubo frontend → gateway → agente funciona y el diagrama existente está bien
+    # formado. Lo que viene DESPUÉS de la frontera (el loop ReAct que mira el
+    # diagrama, elige tools y lo modifica) se construye en S7.2 (tools) y S7.3
+    # (agente). Hasta entonces, error NDJSON honesto en vez de fingir refinamiento.
+    async def not_implemented_stream():
+        event = {
+            "_type": "error",
+            "message": "El refinamiento de diagramas aún no está disponible (llega en S7.3).",
+            "category": "internal_error",
+        }
+        yield json.dumps(event) + "\n"
+
+    return StreamingResponse(not_implemented_stream(), media_type="application/x-ndjson")
 
 
 def check_rate_limit(ip: str, rate_limit_store: dict, RATE_LIMIT: int = 5, WINDOW_SECONDS: int = 60):

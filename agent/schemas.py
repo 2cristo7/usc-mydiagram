@@ -66,6 +66,17 @@ class DiagramSchema(BaseModel):
     edges: list[DiagramEdge]
 
 
+# S7.1 — Representación compacta que el frontend envía al refinar. Espejo del
+# CompactDiagram de TS (frontend/src/ui/utils/diagramToJson.ts): el contrato que
+# cruza el proceso al refinar es ESTE, no DiagramSchema. Sin `title` (human-facing,
+# no aporta al refinamiento). Validar aquí con Pydantic da el "error explícito" de
+# la visión global: un diagrama malformado en el refinamiento → 422, no fallo mudo.
+class CompactDiagram(BaseModel):
+    diagram_type: DiagramType
+    nodes: list[DiagramNode]
+    edges: list[DiagramEdge]
+
+
 # ---------------------------------------------------------------------------
 # Validación semántica por tipo (S6.7)
 # ---------------------------------------------------------------------------
