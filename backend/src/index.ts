@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import jsonwebtoken from 'jsonwebtoken'
 import dotenv from 'dotenv'
-import { Server } from 'socket.io'
+import { Server, Socket } from 'socket.io'
 import Stream from 'node:stream'
 
 // Cargar variables de entorno
@@ -68,65 +68,81 @@ app.get('/api/diagrams', authenticateToken, (req, res) => {
 
 
 
+// Reenvía la petición al agente Python y re-emite su stream NDJSON por Socket.io.
+// El gateway solo enruta: no interpreta la lógica del agente (antipatrón de la
+// visión global). Compartido por generación y refinamiento (S7.1): ambos hablan
+// el mismo protocolo NDJSON, solo cambian la URL del agente y el cuerpo.
+async function streamAgentToSocket(url: string, body: object, socket: Socket) {
+  try {
+    const agentRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const decoder = new TextDecoder()
+    const reader = agentRes.body!.getReader()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const item = JSON.parse(line)
+          switch (item._type) {
+            case 'node':
+              socket.emit('diagram:node_ready', item.data)
+              break
+            case 'edge':
+              socket.emit('diagram:edge_ready', item.data)
+              break
+            case 'done':
+              // Propaga la bandera de degradación y los motivos por categoría
+              // (S6.9); el frontend compone el aviso. degraded=false → done limpio.
+              socket.emit('diagram:done', {
+                title: item.title,
+                degraded: item.degraded ?? false,
+                degradations: item.degradations ?? [],
+              })
+              break
+            case 'error':
+              // Propaga la categoría del fallo además del mensaje accionable.
+              socket.emit('diagram:error', { error: item.message, category: item.category })
+              break
+            default:
+              console.warn('Tipo de evento NDJSON desconocido:', item._type)
+          }
+        } catch {
+          console.warn('Línea NDJSON inválida ignorada:', line)
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error llamando al agente:', err)
+    socket.emit('diagram:error', { error: 'Error generando el diagrama' })
+  }
+}
+
 // Gestión websocket
 io.on('connection', (socket) => {
   console.log('Cliente conectado al WebSocket')
 
-  socket.on('message:send', async (message) =>{
+  // Generación: no hay diagrama previo → el agente parte de cero (S7.1).
+  socket.on('message:send', async (message) => {
     const prompt = message.toString()
-    console.log('Mensaje recibido del cliente:', prompt)
+    console.log('Mensaje recibido del cliente (generación):', prompt)
+    await streamAgentToSocket('http://localhost:8000/generate/stream', { prompt }, socket)
+  })
 
-    try {
-      const agentRes = await fetch('http://localhost:8000/generate/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      })
-      const decoder = new TextDecoder()
-      const reader = agentRes.body!.getReader()
-      let buffer = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const item = JSON.parse(line)
-            switch (item._type) {
-              case 'node':
-                socket.emit('diagram:node_ready', item.data)
-                break
-              case 'edge':
-                socket.emit('diagram:edge_ready', item.data)
-                break
-              case 'done':
-                // Propaga la bandera de degradación y los motivos por categoría
-                // (S6.9); el frontend compone el aviso. degraded=false → done limpio.
-                socket.emit('diagram:done', {
-                  title: item.title,
-                  degraded: item.degraded ?? false,
-                  degradations: item.degradations ?? [],
-                })
-                break
-              case 'error':
-                // Propaga la categoría del fallo además del mensaje accionable.
-                socket.emit('diagram:error', { error: item.message, category: item.category })
-                break
-              default:
-                console.warn('Tipo de evento NDJSON desconocido:', item._type)
-            }
-          } catch {
-            console.warn('Línea NDJSON inválida ignorada:', line)
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Error llamando al agente:', err)
-      socket.emit('diagram:error', { error: 'Error generando el diagrama' })
-    }
+  // Refinamiento: el frontend ya decidió que hay diagrama y adjunta su versión
+  // compacta. El gateway solo reenvía {prompt, diagram} al pipeline de refinado.
+  socket.on('message:refine', async (payload) => {
+    const { prompt, diagram } = payload ?? {}
+    console.log('Mensaje recibido del cliente (refinamiento):', prompt)
+    await streamAgentToSocket('http://localhost:8000/refine/stream', { prompt, diagram }, socket)
   })
 
   socket.on('disconnect', () => {
