@@ -7,7 +7,7 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from graph import build_graph
+from graph import build_graph, initial_generation_state
 from outcome import classify_outcome
 from schemas import CompactDiagram
 
@@ -40,24 +40,7 @@ async def generate_stream(req: GenerateRequest, request: Request):
     queue: asyncio.Queue = asyncio.Queue()
     graph = build_graph(queue)
 
-    initial_state = {
-        "prompt": req.prompt,
-        "is_diagram_request": False,
-        "diagram_type": None,
-        "title": None,
-        "nodes": [],
-        "edges": [],
-        "invalid_edges": [],
-        "invalid_nodes": [],
-        "diagram": None,
-        "validation_errors": [],
-        "retry_count": 0,
-        "node_retry_count": 0,
-        "node_validation_errors": [],
-        "structural_gaps": [],
-        "schema_retry_count": 0,
-        "degradations": [],
-    }
+    initial_state = initial_generation_state(req.prompt)
 
     async def run_graph():
         # La taxonomía de desenlaces vive en classify_outcome (S6.9): main.py es el
@@ -92,21 +75,47 @@ async def refine_stream(req: RefineRequest, request: Request):
     ip = request.client.host
     check_rate_limit(ip, rate_limit_store)
 
-    # FRONTERA DE SCOPE S7.1 — Lo REAL hasta aquí: el contrato {prompt, diagram} y
-    # su validación Pydantic (CompactDiagram). Llegar a este punto significa que el
-    # tubo frontend → gateway → agente funciona y el diagrama existente está bien
-    # formado. Lo que viene DESPUÉS de la frontera (el loop ReAct que mira el
-    # diagrama, elige tools y lo modifica) se construye en S7.2 (tools) y S7.3
-    # (agente). Hasta entonces, error NDJSON honesto en vez de fingir refinamiento.
-    async def not_implemented_stream():
-        event = {
-            "_type": "error",
-            "message": "El refinamiento de diagramas aún no está disponible (llega en S7.3).",
-            "category": "internal_error",
-        }
+    # S7.3 — Loop ReAct real. Construimos el workspace de ESTA petición desde el
+    # diagrama compacto, y un grafo de agente cuyas tools cierran sobre él. El
+    # workspace es la fuente de verdad: las tools lo mutan, y al terminar
+    # ws.to_compact() es el diagrama refinado (incluido el caso regenerate, que lo
+    # reemplaza por dentro). Imports locales para no acoplar el arranque del módulo
+    # a langchain (solo se necesita en este endpoint).
+    from langchain_core.messages import SystemMessage, HumanMessage
+    from agent_graph import build_agent_graph, build_system_prompt
+    from tools import DiagramWorkspace
+
+    ws = DiagramWorkspace.from_compact(req.diagram)
+    agent_graph = build_agent_graph(ws)
+    messages = [SystemMessage(content=build_system_prompt(ws)), HumanMessage(content=req.prompt)]
+
+    async def refine():
+        # FRONTERA S7.3 → 7.5: emitimos un único evento terminal con el diagrama
+        # entero (snapshot completo: el protocolo incremental node/edge no expresa
+        # borrados, que el refinamiento sí hace). El streaming visual de cada tool
+        # call y la aplicación quirúrgica en el canvas es 7.5; el gateway hoy ignora
+        # el campo `diagram` y solo reenvía title/degraded.
+        try:
+            # recursion_limit acota el loop ReAct: cada vuelta agent→tools cuenta;
+            # un tope evita que un modelo que no converge gire indefinidamente.
+            await agent_graph.ainvoke({"messages": messages}, {"recursion_limit": 50})
+            event = {
+                "_type": "done",
+                "title": None,
+                "diagram": ws.to_compact().model_dump(mode="json"),
+                "degraded": False,
+                "degradations": [],
+            }
+        except Exception as e:
+            print(f"[refine_stream] agent error: {e!r}")
+            event = {
+                "_type": "error",
+                "category": "internal_error",
+                "message": "Se produjo un error refinando el diagrama. Vuelve a intentarlo en unos segundos.",
+            }
         yield json.dumps(event) + "\n"
 
-    return StreamingResponse(not_implemented_stream(), media_type="application/x-ndjson")
+    return StreamingResponse(refine(), media_type="application/x-ndjson")
 
 
 def check_rate_limit(ip: str, rate_limit_store: dict, RATE_LIMIT: int = 5, WINDOW_SECONDS: int = 60):
