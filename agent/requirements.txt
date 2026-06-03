@@ -17,3 +17,9 @@ typing_extensions==4.15.0
 uvicorn==0.42.0
 langgraph>=1.2.0
 ijson>=3.5.0
+# S7.3 — chat-models con bind_tools para el loop ReAct del agente, uno por perfil
+# de LLM_PROFILE (local/openai/anthropic). El import es lazy en get_chat_model:
+# solo se necesita el paquete del perfil activo.
+langchain-ollama>=0.3.0
+langchain-openai>=0.3.0
+langchain-anthropic>=0.3.0

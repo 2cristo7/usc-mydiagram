@@ -197,3 +197,48 @@ async def stream_llm(system: str, user: str, tier: str = "capable", max_tokens: 
     backend = _resolve_model(tier)
     async for chunk in backend.stream(system, user, max_tokens):
         yield chunk
+
+
+# ---------------------------------------------------------------------------
+# Chat-model para el AGENTE (S7.3)
+# ---------------------------------------------------------------------------
+# El camino de GENERACIÓN (S6) usa call_llm/stream_llm (HTTP crudo, una sola
+# completion): le basta texto plano. El camino del AGENTE (loop ReAct) necesita
+# tool calling estructurado — `bind_tools()`/`ToolNode` —, que solo dan los
+# BaseChatModel de LangChain. Por eso una API distinta, pero MISMO eje de routing
+# (LLM_PROFILE) y mismos nombres de modelo por env: producción/local de la visión
+# global se respeta, con Anthropic como tercer perfil para el agente.
+#
+# Imports LAZY: cada perfil solo importa su paquete provider; correr en `local`
+# no exige tener instalado langchain-openai ni langchain-anthropic.
+
+def get_chat_model(tier: str = "capable"):
+    """Devuelve un BaseChatModel de LangChain con tool calling, según LLM_PROFILE.
+
+    `tier` espeja _resolve_model: "fast" usa el modelo ligero, cualquier otro el
+    capaz (el agente usa "capable": el tool calling exige el modelo fiable)."""
+    profile = os.environ.get("LLM_PROFILE", "local")
+    fast = tier == "fast"
+
+    if profile == "local":
+        from langchain_ollama import ChatOllama
+        model = os.environ.get("OLLAMA_MODEL_FAST" if fast else "OLLAMA_MODEL_CAPABLE", "qwen3:8b")
+        # ChatOllama quiere la raíz del servidor, no el endpoint /api/chat que usa
+        # el backend crudo. Derivamos una de la otra para no duplicar config.
+        chat_url = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+        base_url = chat_url.split("/api/")[0]
+        return ChatOllama(model=model, base_url=base_url, temperature=0)
+
+    if profile == "openai":
+        from langchain_openai import ChatOpenAI
+        model = os.environ.get("OPENAI_MODEL_FAST" if fast else "OPENAI_MODEL_CAPABLE",
+                               "gpt-4o-mini" if fast else "gpt-4o")
+        return ChatOpenAI(model=model, api_key=os.environ.get("OPENAI_API_KEY", ""), temperature=0)
+
+    if profile == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+        model = os.environ.get("ANTHROPIC_MODEL_FAST" if fast else "ANTHROPIC_MODEL_CAPABLE",
+                               "claude-haiku-4-5" if fast else "claude-sonnet-4-6")
+        return ChatAnthropic(model=model, api_key=os.environ.get("ANTHROPIC_API_KEY", ""), temperature=0)
+
+    raise ValueError(f"Unknown LLM_PROFILE: '{profile}'. Use 'local', 'openai' or 'anthropic'.")
