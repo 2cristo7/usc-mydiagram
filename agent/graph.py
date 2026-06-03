@@ -46,6 +46,32 @@ def route_after_validate_schema(state: DiagramState) -> str:
     return "extract_edges"
 
 
+def initial_generation_state(prompt: str) -> dict:
+    """Estado inicial del pipeline de generación S6. Centralizado aquí (S7.3) para
+    que /generate/stream y el nodo `regenerate` del agente (escape hatch
+    regenerate_from_scratch) arranquen el grafo con EXACTAMENTE los mismos campos
+    sembrados — un campo olvidado en uno de los dos sitios daría KeyError en algún
+    nodo según el camino. Una sola fuente de verdad evita ese drift."""
+    return {
+        "prompt": prompt,
+        "is_diagram_request": False,
+        "diagram_type": None,
+        "title": None,
+        "nodes": [],
+        "edges": [],
+        "invalid_edges": [],
+        "invalid_nodes": [],
+        "diagram": None,
+        "validation_errors": [],
+        "retry_count": 0,
+        "node_retry_count": 0,
+        "node_validation_errors": [],
+        "structural_gaps": [],
+        "schema_retry_count": 0,
+        "degradations": [],
+    }
+
+
 def build_graph(queue: asyncio.Queue | None = None):
     builder = StateGraph(DiagramState)
     builder.add_node("guard", guard)

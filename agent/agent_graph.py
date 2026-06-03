@@ -1,0 +1,219 @@
+"""S7.3 — Grafo del agente ReAct (think → tool_call → observation → think).
+
+Cierra el loop que 7.1 (contrato /refine) y 7.2 (tools puras) dejaron preparado:
+un chat-model con `bind_tools()` decide qué tools invocar sobre el diagrama, un
+`ToolNode` las ejecuta contra el `DiagramWorkspace` de ESTA petición, y el bucle
+repite hasta que el LLM responde sin tool_calls (= "he terminado").
+
+Topología:
+
+    agent ──tools_condition──> END            (sin tool_calls → fin)
+      ^         │
+      │         └──> tools ──route_after_tools──> agent      (observación → seguir)
+      │                          │
+      │                          └──> regenerate ──> END      (escape hatch)
+      └─────────────────────────────┘
+
+`regenerate` es el único caso especial: regenerate_from_scratch no edita el
+workspace incrementalmente — tira el diagrama y corre el pipeline de generación
+S6 entero (build_graph, que arranca en guard). Por eso sale del loop por su propia
+rama y su resultado REEMPLAZA el workspace (no vuelve al agente).
+
+FRONTERA S7.3 → 7.4/7.5: ask_clarification se trata como una observación normal
+(su marcador _interrupt lo ve el agente, pero NO pausa de verdad: el interrupt()
+real es 7.4). El streaming visual de cada tool call al frontend es 7.5; 7.3 solo
+produce el diagrama final, que /refine/stream emite en un único evento `done`.
+"""
+
+import json
+from typing import Optional
+
+from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.tools import StructuredTool
+from langgraph.graph import StateGraph, MessagesState, END
+from langgraph.prebuilt import ToolNode, tools_condition
+
+from llm import get_chat_model
+from schemas import (
+    NodeType, EdgeType, ALLOWED_NODE_TYPES, ALLOWED_EDGE_TYPES,
+)
+from tools import (
+    DiagramWorkspace,
+    FindNodeArgs, AddNodeArgs, UpdateNodeArgs, DeleteNodeArgs,
+    AddEdgeArgs, DeleteEdgeArgs, ApplyLayoutArgs, AskClarificationArgs, RegenerateArgs,
+)
+
+
+# ---------------------------------------------------------------------------
+# Puente tools ↔ workspace (por petición)
+# ---------------------------------------------------------------------------
+# El contrato que ve el LLM (nombre + descripción + args_schema) es ESTÁTICO; la
+# EJECUCIÓN apunta al workspace de esta petición. Por eso build_tools se llama por
+# petición y cada tool cierra (closure) sobre `ws`: no hay workspace global y dos
+# refinamientos concurrentes deben mutar diagramas distintos. Cada tool devuelve su
+# observación como JSON-string: es lo que el LLM lee y razona en ReAct, y lo que el
+# router parsea para detectar el marcador _regenerate.
+
+def build_tools(ws: DiagramWorkspace) -> list[StructuredTool]:
+    def _find_node(query: str) -> str:
+        return json.dumps(ws.find_node(query), ensure_ascii=False)
+
+    def _add_node(node_type: NodeType, label: str,
+                  attributes: Optional[list[str]] = None, methods: Optional[list[str]] = None) -> str:
+        return json.dumps(ws.add_node(node_type, label, attributes, methods), ensure_ascii=False)
+
+    def _update_node(id: str, label: Optional[str] = None,
+                     node_type: Optional[NodeType] = None, attributes: Optional[list[str]] = None) -> str:
+        return json.dumps(ws.update_node(id, label, node_type, attributes), ensure_ascii=False)
+
+    def _delete_node(id: str) -> str:
+        return json.dumps(ws.delete_node(id), ensure_ascii=False)
+
+    def _add_edge(source: str, target: str, edge_type: EdgeType, label: str = "") -> str:
+        return json.dumps(ws.add_edge(source, target, edge_type, label), ensure_ascii=False)
+
+    def _delete_edge(id: str) -> str:
+        return json.dumps(ws.delete_edge(id), ensure_ascii=False)
+
+    def _apply_layout() -> str:
+        return json.dumps(ws.apply_layout(), ensure_ascii=False)
+
+    def _ask_clarification(question: str, options: Optional[list[str]] = None) -> str:
+        return json.dumps(ws.ask_clarification(question, options), ensure_ascii=False)
+
+    def _regenerate_from_scratch(prompt: str, diagram_type=None) -> str:
+        return json.dumps(ws.regenerate_from_scratch(prompt, diagram_type), ensure_ascii=False)
+
+    return [
+        StructuredTool.from_function(
+            func=_find_node, name="find_node", args_schema=FindNodeArgs,
+            description="Resuelve un texto al/los nodo(s) existentes por nombre (substring o fuzzy). Úsalo ANTES de referenciar un nodo por id."),
+        StructuredTool.from_function(
+            func=_add_node, name="add_node", args_schema=AddNodeArgs,
+            description="Crea un nodo nuevo. La posición la decide el layout automático; devuelve el id asignado."),
+        StructuredTool.from_function(
+            func=_update_node, name="update_node", args_schema=UpdateNodeArgs,
+            description="Modifica parcialmente un nodo existente (label, tipo o atributos)."),
+        StructuredTool.from_function(
+            func=_delete_node, name="delete_node", args_schema=DeleteNodeArgs,
+            description="Borra un nodo; sus aristas conectadas se borran en cascada."),
+        StructuredTool.from_function(
+            func=_add_edge, name="add_edge", args_schema=AddEdgeArgs,
+            description="Crea una arista tipada entre dos nodos que YA existen. No crea nodos."),
+        StructuredTool.from_function(
+            func=_delete_edge, name="delete_edge", args_schema=DeleteEdgeArgs,
+            description="Borra una arista por su id."),
+        StructuredTool.from_function(
+            func=_apply_layout, name="apply_layout", args_schema=ApplyLayoutArgs,
+            description="Re-aplica el layout automático del diagrama."),
+        StructuredTool.from_function(
+            func=_ask_clarification, name="ask_clarification", args_schema=AskClarificationArgs,
+            description="Pregunta al usuario cuando la instrucción es ambigua; opcionalmente con opciones cerradas."),
+        StructuredTool.from_function(
+            func=_regenerate_from_scratch, name="regenerate_from_scratch", args_schema=RegenerateArgs,
+            description="Escape hatch para cambios estructurales masivos (cambiar el tipo de diagrama, rehacerlo entero): regenera el diagrama desde cero a partir de una descripción."),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# System prompt del agente
+# ---------------------------------------------------------------------------
+
+def build_system_prompt(ws: DiagramWorkspace) -> str:
+    dt = ws.diagram_type
+    allowed_nodes = ", ".join(sorted(t.value for t in (ALLOWED_NODE_TYPES.get(dt) or set(NodeType))))
+    allowed_edges = ", ".join(sorted(t.value for t in (ALLOWED_EDGE_TYPES.get(dt) or set(EdgeType))))
+    diagram_json = ws.to_compact().model_dump_json(indent=2)
+    return f"""Eres un agente que REFINA un diagrama de software existente usando tools.
+
+Diagrama actual (tipo «{dt.value}»):
+{diagram_json}
+
+node_type válidos para este diagrama: {allowed_nodes}
+edge_type válidos para este diagrama: {allowed_edges}
+
+Reglas:
+- Resuelve los nombres a ids con find_node ANTES de update_node, delete_node o add_edge.
+- add_edge NO crea nodos: ambos extremos deben existir; si falta uno, créalo con add_node primero.
+- Si una tool devuelve un {{"error": ...}}, léelo y corrige (otro tipo, crear el nodo que falta…) o pregunta con ask_clarification si es ambiguo.
+- Para cambios estructurales masivos (cambiar el tipo de diagrama, rehacerlo entero) usa regenerate_from_scratch en vez de muchas ediciones.
+- Cuando hayas terminado, responde con un texto BREVE describiendo lo que hiciste y NO llames a más tools."""
+
+
+# ---------------------------------------------------------------------------
+# Detección del escape hatch
+# ---------------------------------------------------------------------------
+
+def _last_regenerate_marker(messages: list) -> Optional[dict]:
+    """Busca el marcador _regenerate en los ToolMessage del último turno de tools.
+
+    Se recorre desde el final mientras haya ToolMessage (los que ToolNode acaba de
+    añadir tras la AIMessage con tool_calls); el primer no-ToolMessage corta. Así
+    solo miramos las observaciones de ESTE paso, no las de turnos anteriores."""
+    for msg in reversed(messages):
+        if not isinstance(msg, ToolMessage):
+            break
+        try:
+            data = json.loads(msg.content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(data, dict) and data.get("_regenerate"):
+            return data
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Construcción del grafo (por petición)
+# ---------------------------------------------------------------------------
+
+def build_agent_graph(ws: DiagramWorkspace):
+    """Compila el grafo ReAct para refinar `ws`. Se construye por petición porque
+    las tools cierran sobre este workspace concreto (ver build_tools)."""
+    tools = build_tools(ws)
+    model = get_chat_model("capable").bind_tools(tools)
+    tool_node = ToolNode(tools)
+
+    async def agent(state: MessagesState) -> dict:
+        # El LLM mira el historial (system + diálogo + observaciones) y decide:
+        # devuelve tool_calls (seguir) o solo texto (terminar). tools_condition lee
+        # esa decisión en el último mensaje.
+        response = await model.ainvoke(state["messages"])
+        return {"messages": [response]}
+
+    async def regenerate(state: MessagesState) -> dict:
+        # Escape hatch: el agente pidió rehacer el diagrama desde cero. Corremos el
+        # pipeline de GENERACIÓN S6 completo (arranca en guard) con el prompt del
+        # marcador, y su resultado REEMPLAZA el workspace → /refine/stream lo sirve
+        # uniforme con ws.to_compact(). Sin streaming de nodos aquí (eso es 7.5):
+        # build_graph(queue=None) corre silencioso y devolvemos solo el estado final.
+        from graph import build_graph, initial_generation_state
+
+        marker = _last_regenerate_marker(state["messages"]) or {}
+        prompt = marker.get("prompt", "")
+        # diagram_type forzado (opcional): el pipeline lo clasifica solo, así que lo
+        # honramos como pista en el prompt en vez de tocar el grafo de generación.
+        if marker.get("diagram_type"):
+            prompt = f"{prompt}\n(Genera un diagrama de tipo: {marker['diagram_type']})"
+
+        result = await build_graph().ainvoke(initial_generation_state(prompt))
+        diagram = result.get("diagram")
+        if diagram is not None:
+            ws.diagram_type = diagram.diagram_type
+            ws.nodes = list(diagram.nodes)
+            ws.edges = list(diagram.edges)
+        return {"messages": [AIMessage(content="Diagrama regenerado desde cero.")]}
+
+    def route_after_tools(state: MessagesState) -> str:
+        # Tras ejecutar tools: si una fue regenerate_from_scratch, salimos del loop
+        # por la rama dedicada; si no, volvemos al agente con las observaciones.
+        return "regenerate" if _last_regenerate_marker(state["messages"]) else "agent"
+
+    builder = StateGraph(MessagesState)
+    builder.add_node("agent", agent)
+    builder.add_node("tools", tool_node)
+    builder.add_node("regenerate", regenerate)
+    builder.set_entry_point("agent")
+    builder.add_conditional_edges("agent", tools_condition)  # → "tools" | END
+    builder.add_conditional_edges("tools", route_after_tools)  # → "regenerate" | "agent"
+    builder.add_edge("regenerate", END)
+    return builder.compile()
