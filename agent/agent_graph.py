@@ -11,7 +11,8 @@ Topología:
       ^         │
       │         └──> tools ──route_after_tools──> agent      (observación → seguir)
       │                          │
-      │                          └──> regenerate ──> END      (escape hatch)
+      │                          ├──> regenerate ──> END      (escape hatch)
+      │                          └──> clarify ──> agent       (interrupt() → pausa S7.4)
       └─────────────────────────────┘
 
 `regenerate` es el único caso especial: regenerate_from_scratch no edita el
@@ -19,19 +20,30 @@ workspace incrementalmente — tira el diagrama y corre el pipeline de generaci�
 S6 entero (build_graph, que arranca en guard). Por eso sale del loop por su propia
 rama y su resultado REEMPLAZA el workspace (no vuelve al agente).
 
-FRONTERA S7.3 → 7.4/7.5: ask_clarification se trata como una observación normal
-(su marcador _interrupt lo ve el agente, pero NO pausa de verdad: el interrupt()
-real es 7.4). El streaming visual de cada tool call al frontend es 7.5; 7.3 solo
-produce el diagrama final, que /refine/stream emite en un único evento `done`.
+S7.4: ask_clarification PAUSA de verdad. Su marcador _interrupt se enruta (igual
+que _regenerate) a un nodo `clarify` dedicado que llama a interrupt() de LangGraph:
+el grafo se congela, /refine/stream emite la pregunta y termina, y /refine/resume
+reanuda con la respuesta del usuario vía Command(resume=...). El nodo `clarify` es
+deliberadamente LIBRE DE EFECTOS: al reanudar, LangGraph re-ejecuta el nodo
+interrumpido desde su inicio — si el interrupt viviera en ToolNode, las tools
+hermanas del mismo turno (p. ej. un add_node) se ejecutarían DOS veces (duplicado
+silencioso). Separadas en nodos distintos, las hermanas quedan checkpointeadas y
+solo se re-ejecuta el interrupt, que es idempotente (la 2ª vez devuelve la
+respuesta en vez de pausar).
+
+FRONTERA S7.4 → 7.5: el streaming visual de cada tool call al frontend es 7.5;
+aquí el `done` lleva el diagrama completo + refinement_history (traza derivada de
+los messages al final, no construida en paralelo durante el loop).
 """
 
 import json
 from typing import Optional
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.types import interrupt
 
 from llm import get_chat_model
 from schemas import (
@@ -137,15 +149,16 @@ Reglas:
 - add_edge NO crea nodos: ambos extremos deben existir; si falta uno, créalo con add_node primero.
 - Si una tool devuelve un {{"error": ...}}, léelo y corrige (otro tipo, crear el nodo que falta…) o pregunta con ask_clarification si es ambiguo.
 - Para cambios estructurales masivos (cambiar el tipo de diagrama, rehacerlo entero) usa regenerate_from_scratch en vez de muchas ediciones.
+- Si la respuesta del usuario a una aclaración pide algo DISTINTO a lo preguntado, atiende la nueva petición; deshaz con tools lo que ya no aplique.
 - Cuando hayas terminado, responde con un texto BREVE describiendo lo que hiciste y NO llames a más tools."""
 
 
 # ---------------------------------------------------------------------------
-# Detección del escape hatch
+# Detección de marcadores (escape hatch y clarificación)
 # ---------------------------------------------------------------------------
 
-def _last_regenerate_marker(messages: list) -> Optional[dict]:
-    """Busca el marcador _regenerate en los ToolMessage del último turno de tools.
+def _last_marker(messages: list, key: str) -> Optional[dict]:
+    """Busca el marcador `key` en los ToolMessage del último turno de tools.
 
     Se recorre desde el final mientras haya ToolMessage (los que ToolNode acaba de
     añadir tras la AIMessage con tool_calls); el primer no-ToolMessage corta. Así
@@ -157,18 +170,53 @@ def _last_regenerate_marker(messages: list) -> Optional[dict]:
             data = json.loads(msg.content)
         except (json.JSONDecodeError, TypeError):
             continue
-        if isinstance(data, dict) and data.get("_regenerate"):
+        if isinstance(data, dict) and data.get(key):
             return data
     return None
+
+
+# ---------------------------------------------------------------------------
+# refinement_history (S7.4)
+# ---------------------------------------------------------------------------
+
+def extract_history(messages: list) -> list[dict]:
+    """Deriva la traza de tool calls del refinamiento desde los messages finales.
+
+    La traza YA existe en el estado (cada AIMessage.tool_calls emparejado con su
+    ToolMessage por tool_call_id): se EXTRAE al final con una función pura en vez
+    de construir una lista paralela durante el loop, que sería una segunda fuente
+    de verdad capaz de desincronizarse (mismo principio que classify_outcome S6.9).
+    """
+    results: dict[str, object] = {}
+    for msg in messages:
+        if isinstance(msg, ToolMessage):
+            try:
+                results[msg.tool_call_id] = json.loads(msg.content)
+            except (json.JSONDecodeError, TypeError):
+                results[msg.tool_call_id] = msg.content
+    history = []
+    for msg in messages:
+        if isinstance(msg, AIMessage):
+            for tc in msg.tool_calls or []:
+                history.append({
+                    "tool": tc["name"],
+                    "args": tc["args"],
+                    "result": results.get(tc["id"]),
+                })
+    return history
 
 
 # ---------------------------------------------------------------------------
 # Construcción del grafo (por petición)
 # ---------------------------------------------------------------------------
 
-def build_agent_graph(ws: DiagramWorkspace):
+def build_agent_graph(ws: DiagramWorkspace, checkpointer=None):
     """Compila el grafo ReAct para refinar `ws`. Se construye por petición porque
-    las tools cierran sobre este workspace concreto (ver build_tools)."""
+    las tools cierran sobre este workspace concreto (ver build_tools).
+
+    `checkpointer` (S7.4): necesario para interrupt() — al pausar, LangGraph
+    persiste el estado (messages) por thread_id y lo restaura al reanudar. Sin él,
+    ask_clarification no puede pausar (el grafo fallaría al llamar interrupt())."""
     tools = build_tools(ws)
     model = get_chat_model("capable").bind_tools(tools)
     tool_node = ToolNode(tools)
@@ -188,7 +236,7 @@ def build_agent_graph(ws: DiagramWorkspace):
         # build_graph(queue=None) corre silencioso y devolvemos solo el estado final.
         from graph import build_graph, initial_generation_state
 
-        marker = _last_regenerate_marker(state["messages"]) or {}
+        marker = _last_marker(state["messages"], "_regenerate") or {}
         prompt = marker.get("prompt", "")
         # diagram_type forzado (opcional): el pipeline lo clasifica solo, así que lo
         # honramos como pista en el prompt en vez de tocar el grafo de generación.
@@ -203,17 +251,36 @@ def build_agent_graph(ws: DiagramWorkspace):
             ws.edges = list(diagram.edges)
         return {"messages": [AIMessage(content="Diagrama regenerado desde cero.")]}
 
+    async def clarify(state: MessagesState) -> dict:
+        # S7.4 — pausa real. Este nodo SOLO interrumpe: cualquier otro efecto aquí
+        # se ejecutaría dos veces, porque al reanudar LangGraph re-ejecuta el nodo
+        # interrumpido desde su inicio (las tools hermanas del turno ya corrieron
+        # en ToolNode y están checkpointeadas — no se repiten). La 2ª ejecución de
+        # interrupt() no pausa: devuelve la respuesta del usuario, que entra al
+        # historial como voz del usuario (HumanMessage) para el siguiente turno.
+        marker = _last_marker(state["messages"], "_interrupt") or {}
+        answer = interrupt({
+            "question": marker.get("question", ""),
+            "options": marker.get("options", []),
+        })
+        return {"messages": [HumanMessage(content=f"Respuesta del usuario a tu aclaración: {answer}")]}
+
     def route_after_tools(state: MessagesState) -> str:
-        # Tras ejecutar tools: si una fue regenerate_from_scratch, salimos del loop
-        # por la rama dedicada; si no, volvemos al agente con las observaciones.
-        return "regenerate" if _last_regenerate_marker(state["messages"]) else "agent"
+        # Tras ejecutar tools: clarificación pausa (gana a regenerate si el turno
+        # trajo ambos: preguntar antes de tirar el diagrama), regenerate sale por
+        # su rama dedicada, y si no, de vuelta al agente con las observaciones.
+        if _last_marker(state["messages"], "_interrupt"):
+            return "clarify"
+        return "regenerate" if _last_marker(state["messages"], "_regenerate") else "agent"
 
     builder = StateGraph(MessagesState)
     builder.add_node("agent", agent)
     builder.add_node("tools", tool_node)
     builder.add_node("regenerate", regenerate)
+    builder.add_node("clarify", clarify)
     builder.set_entry_point("agent")
     builder.add_conditional_edges("agent", tools_condition)  # → "tools" | END
-    builder.add_conditional_edges("tools", route_after_tools)  # → "regenerate" | "agent"
+    builder.add_conditional_edges("tools", route_after_tools)  # → "clarify" | "regenerate" | "agent"
+    builder.add_edge("clarify", "agent")
     builder.add_edge("regenerate", END)
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
