@@ -17,6 +17,35 @@ export interface Clarification {
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+// S7.5 — streaming visual de tool calls: el agente emite agent:tool_call cuando
+// decide invocar una tool (antes de que corra) y agent:tool_result al terminar,
+// con el delta declarado por el servidor (node/edge completos para add/update;
+// los borrados van autodescritos en result.deleted_*).
+export interface AgentToolCall {
+    id: string;
+    tool: string;
+    args: Record<string, unknown>;
+}
+
+export interface AgentToolResult {
+    id: string;
+    tool: string;
+    result: unknown;
+    node?: DiagramNode;
+    edge?: DiagramEdge;
+}
+
+// Entrada de la traza en vivo del chat: running mientras la tool corre,
+// ok/error al llegar su tool_result.
+export type ToolTraceStatus = 'running' | 'ok' | 'error';
+
+export interface ToolTraceEntry {
+    id: string;
+    tool: string;
+    args: Record<string, unknown>;
+    status: ToolTraceStatus;
+}
+
 export type DiagramType = 'erd' | 'uml_class' | 'sequence' | 'flowchart' | 'architecture' | 'state_machine' | 'mindmap';
 
 export type NodeType =  'table' | 'class' | 'actor' | 'step' | 'service' | 'database' | 'queue' | 'gateway' | 'state' | 'topic' | 'decision' | 'terminator' | 'person' | 'system' | 'container' | 'component';

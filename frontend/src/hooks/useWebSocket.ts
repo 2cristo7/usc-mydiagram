@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { Message, ConnectionState, Degradation, DegradationCategory } from "../types";
+import type { Message, ConnectionState, Degradation, DegradationCategory, AgentToolCall, AgentToolResult } from "../types";
 import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
 import { diagramToJson } from "../ui/utils/diagramToJson";
@@ -21,7 +21,11 @@ function degradationMessages(degradations: Degradation[]): string[] {
 }
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
-    const { addNode, addEdge, addMessage, setUiState, setPendingClarification } = useStore();
+    const {
+        addNode, addEdge, addMessage, setUiState, setPendingClarification,
+        updateNode, removeNode, removeEdge, applyDiagram,
+        traceToolCall, traceToolResult, clearToolTrace,
+    } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
 
@@ -45,7 +49,60 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 addEdge(edge);
             });
 
+            // S7.5 — el agente decidió invocar una tool (aún no ha corrido):
+            // entra a la traza en vivo como 'running'.
+            socket.on('agent:tool_call', (call: AgentToolCall) => {
+                if (!call?.id || !call?.tool) return;
+                traceToolCall({ id: call.id, tool: call.tool, args: call.args ?? {} });
+            });
+
+            // S7.5 — la tool terminó: estado en la traza + delta del canvas. El
+            // delta lo declara el SERVIDOR (node/edge completos para add/update;
+            // los borrados autodescritos en result.deleted_*): se aplica literal,
+            // sin reimplementar semántica (cascade, slugs) en el cliente.
+            socket.on('agent:tool_result', (data: AgentToolResult) => {
+                const result = data?.result as Record<string, unknown> | undefined;
+                const isError = !!(result && typeof result === 'object' && 'error' in result);
+                if (!isError) {
+                    switch (data?.tool) {
+                        case 'add_node':
+                            if (data.node) addNode(data.node);
+                            break;
+                        case 'update_node':
+                            if (data.node) updateNode(data.node.id, data.node);
+                            break;
+                        case 'add_edge':
+                            if (data.edge) addEdge(data.edge);
+                            break;
+                        case 'delete_node':
+                            if (typeof result?.deleted_node === 'string') {
+                                removeNode(result.deleted_node, Array.isArray(result.deleted_edges) ? result.deleted_edges : []);
+                            }
+                            break;
+                        case 'delete_edge':
+                            if (typeof result?.deleted_edge === 'string') {
+                                removeEdge(result.deleted_edge);
+                            }
+                            break;
+                    }
+                }
+                if (data?.id) traceToolResult(data.id, isError ? 'error' : 'ok');
+            });
+
             socket.on('diagram:done', (data) => {
+                // S7.5 — reconciliación incondicional: el done de un refinamiento
+                // trae el snapshot completo del workspace (la verdad) y se aplica
+                // SIEMPRE; si los eventos en vivo ya dejaron el canvas idéntico,
+                // la guarda de idempotencia de applyDiagram evita el re-render.
+                if (data?.diagram) {
+                    const { currentDiagram } = useStore.getState();
+                    applyDiagram({
+                        title: data.title ?? currentDiagram?.title ?? '',
+                        diagram_type: data.diagram.diagram_type,
+                        nodes: data.diagram.nodes ?? [],
+                        edges: data.diagram.edges ?? [],
+                    });
+                }
                 addMessage({
                     id: crypto.randomUUID(),
                     text: `Diagrama generado: ${data?.title ?? 'sin título'}`,
@@ -142,6 +199,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         // del prompt no lo revela ("añade Carrito" es refinamiento solo si hay
         // diagrama; sin él sería una generación). Se lee con getState() para evitar
         // capturar un currentDiagram obsoleto en el closure.
+        // S7.5 — run nuevo: la traza del anterior se descarta.
+        clearToolTrace();
+
         const { currentDiagram } = useStore.getState();
         if (currentDiagram) {
             socketRef.current?.emit('message:refine', {
