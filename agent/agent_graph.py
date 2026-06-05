@@ -31,9 +31,13 @@ silencioso). Separadas en nodos distintos, las hermanas quedan checkpointeadas y
 solo se re-ejecuta el interrupt, que es idempotente (la 2ª vez devuelve la
 respuesta en vez de pausar).
 
-FRONTERA S7.4 → 7.5: el streaming visual de cada tool call al frontend es 7.5;
-aquí el `done` lleva el diagrama completo + refinement_history (traza derivada de
-los messages al final, no construida en paralelo durante el loop).
+S7.5: streaming visual de tool calls. `tool_events` traduce cada update de
+`astream(stream_mode="updates")` a eventos NDJSON `tool_call`/`tool_result` —
+el nodo del grafo es la unidad de evento (agent completa → tool_calls; tools
+completa → observaciones), sin granularidad sub-nodo (astream_events). Los
+eventos en vivo son UX efímera; el `done` sigue llevando el diagrama completo +
+refinement_history como verdad que se aplica SIEMPRE (reconciliación
+incondicional en el frontend).
 """
 
 import json
@@ -204,6 +208,69 @@ def extract_history(messages: list) -> list[dict]:
                     "result": results.get(tc["id"]),
                 })
     return history
+
+
+# ---------------------------------------------------------------------------
+# Streaming de tool calls (S7.5)
+# ---------------------------------------------------------------------------
+
+def _result_effect(ws: DiagramWorkspace, tool: Optional[str], result) -> dict:
+    """Delta explícito declarado por el SERVIDOR (decisión P4 de S7.5).
+
+    Para las tools que crean/modifican, el evento adjunta la pieza COMPLETA leída
+    del workspace (no solo el id del result): el cliente la aplica literal, sin
+    reimplementar semántica del servidor (slugs, methods→attributes, etc.). Los
+    borrados no necesitan enriquecerse: su result ya declara el efecto entero
+    (deleted_node + deleted_edges del cascade, deleted_edge)."""
+    if not isinstance(result, dict) or result.get("error"):
+        return {}
+    if tool in ("add_node", "update_node"):
+        node = next((n for n in ws.nodes if n.id == result.get("id")), None)
+        return {"node": node.model_dump(mode="json")} if node else {}
+    if tool == "add_edge":
+        edge = next((e for e in ws.edges if e.id == result.get("id")), None)
+        return {"edge": edge.model_dump(mode="json")} if edge else {}
+    return {}
+
+
+def tool_events(update: dict, ws: DiagramWorkspace) -> list[dict]:
+    """Traduce un update de astream(stream_mode="updates") a eventos NDJSON.
+
+    El mapeo nodo→evento es 1:1 con la topología del grafo: el nodo `agent`
+    completa con la AIMessage que PIDE tools (→ eventos `tool_call`, emitidos
+    antes de que corran), y el nodo `tools` completa con los ToolMessage de sus
+    observaciones (→ eventos `tool_result`, con el delta del servidor). Los nodos
+    `clarify` y `regenerate` no emiten: sus desenlaces viajan como eventos
+    propios (`clarification`/`done`).
+
+    Función pura sobre (update, ws): testeable sin grafo ni LLM, mismo principio
+    que extract_history/classify_outcome."""
+    events: list[dict] = []
+    for node_name, output in update.items():
+        if node_name not in ("agent", "tools"):
+            continue
+        for msg in (output or {}).get("messages", []):
+            if isinstance(msg, AIMessage):
+                for tc in msg.tool_calls or []:
+                    events.append({
+                        "_type": "tool_call",
+                        "id": tc["id"],
+                        "tool": tc["name"],
+                        "args": tc["args"],
+                    })
+            elif isinstance(msg, ToolMessage):
+                try:
+                    result = json.loads(msg.content)
+                except (json.JSONDecodeError, TypeError):
+                    result = msg.content
+                events.append({
+                    "_type": "tool_result",
+                    "id": msg.tool_call_id,
+                    "tool": msg.name,
+                    "result": result,
+                    **_result_effect(ws, msg.name, result),
+                })
+    return events
 
 
 # ---------------------------------------------------------------------------

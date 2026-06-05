@@ -103,42 +103,58 @@ async def generate_stream(req: GenerateRequest, request: Request):
     return StreamingResponse(node_stream(), media_type="application/x-ndjson")
 
 
-async def _run_refine_agent(ws, graph_input, thread_id: str) -> dict:
-    """Corre (o reanuda) el loop ReAct sobre `ws` y clasifica el desenlace en un
-    evento NDJSON: `clarification` si el grafo quedó pausado en interrupt() (el
-    workspace se retiene en sesión para la reanudación), `done` con el snapshot
-    completo + refinement_history si terminó. Compartido por /refine/stream y
+async def _run_refine_agent(ws, graph_input, thread_id: str):
+    """Corre (o reanuda) el loop ReAct sobre `ws` emitiendo eventos NDJSON en vivo
+    (generador async). S7.5: astream(stream_mode="updates") en vez de ainvoke —
+    cada nodo completado yielda su aporte al estado y tool_events lo traduce a
+    eventos `tool_call`/`tool_result` (con el delta del servidor) que el frontend
+    pinta sin esperar al final. El desenlace terminal sigue siendo único:
+    `clarification` si el grafo quedó pausado en interrupt() (el workspace se
+    retiene en sesión para la reanudación), `done` con el snapshot completo +
+    refinement_history si terminó (verdad que el frontend aplica SIEMPRE,
+    reconciliando cualquier evento perdido). Compartido por /refine/stream y
     /refine/resume: ambos desenlaces pueden darse en cualquiera de los dos (una
     reanudación puede volver a pedir aclaración)."""
-    from agent_graph import build_agent_graph, extract_history
+    from agent_graph import build_agent_graph, extract_history, tool_events
 
     agent_graph = build_agent_graph(ws, checkpointer=_get_checkpointer())
     # recursion_limit acota el loop ReAct: cada vuelta agent→tools cuenta; un tope
     # evita que un modelo que no converge gire indefinidamente.
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
-    result = await agent_graph.ainvoke(graph_input, config)
 
-    if "__interrupt__" in result:
+    interrupt_payload = None
+    async for update in agent_graph.astream(graph_input, config, stream_mode="updates"):
+        if "__interrupt__" in update:
+            # El interrupt aparece como chunk propio del stream; el evento
+            # clarification se emite al final (tras agotar el stream) para
+            # mantener un único desenlace terminal por respuesta HTTP.
+            interrupt_payload = update["__interrupt__"][0].value
+            continue
+        for event in tool_events(update, ws):
+            yield event
+
+    if interrupt_payload is not None:
         # Grafo pausado en clarify: retenemos el workspace (ya mutado por las
         # tools previas al interrupt) hasta que llegue la respuesta del usuario.
-        payload = result["__interrupt__"][0].value
         _pending_clarifications[thread_id] = ws
-        return {
+        yield {
             "_type": "clarification",
             "thread_id": thread_id,
-            "question": payload.get("question", ""),
-            "options": payload.get("options", []),
+            "question": interrupt_payload.get("question", ""),
+            "options": interrupt_payload.get("options", []),
         }
+        return
 
-    # FRONTERA S7.4 → 7.5: un único evento terminal con el diagrama entero
-    # (snapshot completo: el protocolo incremental node/edge no expresa borrados,
-    # que el refinamiento sí hace). refinement_history se DERIVA de los messages
-    # finales (extract_history): la traza ya existe en el estado del grafo.
-    return {
+    # astream no devuelve el estado final como ainvoke: se recupera del
+    # checkpointer (aget_state) — de ahí salen los messages para derivar la traza.
+    # refinement_history se DERIVA de los messages finales (extract_history): la
+    # traza ya existe en el estado del grafo, no se construye en paralelo.
+    state = await agent_graph.aget_state(config)
+    yield {
         "_type": "done",
         "title": None,
         "diagram": ws.to_compact().model_dump(mode="json"),
-        "refinement_history": extract_history(result["messages"]),
+        "refinement_history": extract_history(state.values.get("messages", [])),
         "degraded": False,
         "degradations": [],
     }
@@ -147,15 +163,15 @@ async def _run_refine_agent(ws, graph_input, thread_id: str) -> dict:
 def _refine_response(ws, graph_input, thread_id: str) -> StreamingResponse:
     async def stream():
         try:
-            event = await _run_refine_agent(ws, graph_input, thread_id)
+            async for event in _run_refine_agent(ws, graph_input, thread_id):
+                yield json.dumps(event) + "\n"
         except Exception as e:
             print(f"[refine_stream] agent error: {e!r}")
-            event = {
+            yield json.dumps({
                 "_type": "error",
                 "category": "internal_error",
                 "message": "Se produjo un error refinando el diagrama. Vuelve a intentarlo en unos segundos.",
-            }
-        yield json.dumps(event) + "\n"
+            }) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
