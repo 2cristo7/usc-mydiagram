@@ -103,12 +103,38 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
               // Propaga la bandera de degradación y los motivos por categoría
               // (S6.9); el frontend compone el aviso. degraded=false → done limpio.
               // refinement_history (S7.4): traza de tool calls de un refinamiento;
-              // vacío en generación.
+              // vacío en generación. diagram (S7.5): snapshot completo del
+              // workspace — la verdad que el frontend aplica SIEMPRE, reconciliando
+              // cualquier evento en vivo perdido (null en generación, que ya
+              // streameó node/edge).
               socket.emit('diagram:done', {
                 title: item.title,
                 degraded: item.degraded ?? false,
                 degradations: item.degradations ?? [],
                 refinement_history: item.refinement_history ?? [],
+                diagram: item.diagram ?? null,
+              })
+              break
+            case 'tool_call':
+              // S7.5 — traza en vivo: el agente decidió invocar una tool (se
+              // emite ANTES de que corra). Passthrough puro: el gateway no
+              // interpreta tools (antipatrón de la visión global).
+              socket.emit('agent:tool_call', {
+                id: item.id,
+                tool: item.tool,
+                args: item.args ?? {},
+              })
+              break
+            case 'tool_result':
+              // S7.5 — la tool terminó: observación + delta declarado por el
+              // SERVIDOR (node/edge completos para add/update; los borrados van
+              // autodescritos en result.deleted_*). El frontend aplica literal.
+              socket.emit('agent:tool_result', {
+                id: item.id,
+                tool: item.tool,
+                result: item.result,
+                node: item.node,
+                edge: item.edge,
               })
               break
             case 'clarification':
