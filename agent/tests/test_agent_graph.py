@@ -18,6 +18,11 @@ Escenarios:
 S7.4 añade: pausa/reanudación de ask_clarification con interrupt()/Command(resume),
 no-duplicación de tools hermanas al reanudar, prioridad clarify > regenerate,
 extract_history y el contrato HTTP de /refine/resume.
+
+S7.5 añade: tool_events (traducción pura update→eventos NDJSON con el delta del
+servidor) y el streaming en vivo por HTTP: la respuesta de /refine/stream pasa de
+UNA línea a varias (tool_call/tool_result intercalados + desenlace terminal al
+final) — los tests HTTP parsean todas las líneas con _events().
 """
 import json
 
@@ -96,6 +101,13 @@ def _seed_erd() -> DiagramWorkspace:
 
 def _patch_model(monkeypatch, responses):
     monkeypatch.setattr(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses))
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """Los tests HTTP comparten la IP 'testclient': sin limpiar el store, la
+    suite acumula peticiones hasta el 429 (5/min) y los tests fallan por orden."""
+    main.rate_limit_store.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +236,16 @@ def _erd_body():
     }
 
 
+def _events(resp) -> list[dict]:
+    """Parsea TODAS las líneas NDJSON de la respuesta (S7.5: la respuesta de
+    /refine ya no es una sola línea — tool_call/tool_result + desenlace final)."""
+    return [json.loads(line) for line in resp.text.strip().splitlines()]
+
+
 def test_refine_stream_emits_done_with_full_diagram():
     """E2E del endpoint: el diagrama que las tools mutan en el workspace es el que
-    sale en el evento `done` (snapshot completo, no incremental)."""
+    sale en el evento `done` (snapshot completo, no incremental). El done es
+    SIEMPRE el último evento del stream."""
     from fastapi.testclient import TestClient
 
     responses = [
@@ -239,8 +258,7 @@ def test_refine_stream_emits_done_with_full_diagram():
         resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
 
     assert resp.status_code == 200
-    import json
-    event = json.loads(resp.text.strip())
+    event = _events(resp)[-1]
     assert event["_type"] == "done"
     assert {n["id"] for n in event["diagram"]["nodes"]} == {"usuario", "producto", "carrito"}
     assert [(e["source"], e["target"]) for e in event["diagram"]["edges"]] == [("carrito", "producto")]
@@ -415,7 +433,7 @@ def test_refine_clarification_roundtrip_over_http():
     with patch.object(agent_graph, "get_chat_model", lambda tier="capable": model):
         resp = client.post("/refine/stream", json=_erd_body())
         assert resp.status_code == 200
-        event = json.loads(resp.text.strip())
+        event = _events(resp)[-1]
         assert event["_type"] == "clarification"
         assert event["question"] == "¿A qué nodo lo conecto?"
         assert event["options"] == ["Usuario", "Producto"]
@@ -423,7 +441,7 @@ def test_refine_clarification_roundtrip_over_http():
 
         resp = client.post("/refine/resume", json={"thread_id": thread_id, "answer": "Usuario"})
         assert resp.status_code == 200
-        event = json.loads(resp.text.strip())
+        event = _events(resp)[-1]
 
     assert event["_type"] == "done"
     assert "carrito" in {n["id"] for n in event["diagram"]["nodes"]}
@@ -455,7 +473,137 @@ def test_refine_done_includes_refinement_history():
     with patch.object(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses)):
         resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
 
-    event = json.loads(resp.text.strip())
+    event = _events(resp)[-1]
     assert event["_type"] == "done"
     assert [h["tool"] for h in event["refinement_history"]] == ["add_node"]
     assert event["refinement_history"][0]["result"] == {"id": "carrito"}
+
+
+# ---------------------------------------------------------------------------
+# S7.5 — tool_events (traducción pura update → eventos NDJSON)
+# ---------------------------------------------------------------------------
+
+from langchain_core.messages import ToolMessage
+from agent_graph import tool_events
+
+
+def test_tool_events_agent_update_emits_tool_calls():
+    """El update del nodo `agent` (AIMessage con tool_calls) se traduce a un
+    evento tool_call por cada petición, ANTES de que las tools corran."""
+    ws = _seed_erd()
+    update = {"agent": {"messages": [AIMessage(content="", tool_calls=[
+        _tool_call("add_node", {"node_type": "table", "label": "Carrito"}, "c1"),
+        _tool_call("find_node", {"query": "Usuario"}, "c2"),
+    ])]}}
+    events = tool_events(update, ws)
+    assert events == [
+        {"_type": "tool_call", "id": "c1", "tool": "add_node",
+         "args": {"node_type": "table", "label": "Carrito"}},
+        {"_type": "tool_call", "id": "c2", "tool": "find_node",
+         "args": {"query": "Usuario"}},
+    ]
+
+
+def test_tool_events_enriches_add_node_with_full_piece():
+    """Decisión P4: el delta lo declara el SERVIDOR. El tool_result de add_node
+    adjunta el nodo COMPLETO leído del workspace (no solo el id), para que el
+    cliente lo aplique literal sin reimplementar slugs ni methods→attributes."""
+    ws = _seed_erd()
+    result = ws.add_node(NodeType.TABLE, "Carrito", attributes=["total"])
+    update = {"tools": {"messages": [
+        ToolMessage(content=json.dumps(result), tool_call_id="c1", name="add_node"),
+    ]}}
+    events = tool_events(update, ws)
+    assert len(events) == 1
+    assert events[0]["_type"] == "tool_result"
+    assert events[0]["result"] == {"id": "carrito"}
+    assert events[0]["node"]["id"] == "carrito"
+    assert events[0]["node"]["label"] == "Carrito"
+    assert events[0]["node"]["attributes"] == ["total"]
+
+
+def test_tool_events_delete_node_declares_cascade_in_result():
+    """delete_node no necesita enriquecerse: su result ya declara el efecto
+    completo (deleted_node + deleted_edges del cascade computado en Python)."""
+    ws = _seed_erd()
+    result = ws.delete_node("usuario")  # cascade: borra usuario__producto
+    update = {"tools": {"messages": [
+        ToolMessage(content=json.dumps(result), tool_call_id="c1", name="delete_node"),
+    ]}}
+    events = tool_events(update, ws)
+    assert events[0]["result"]["deleted_node"] == "usuario"
+    assert events[0]["result"]["deleted_edges"] == ["usuario__producto"]
+    assert "node" not in events[0] and "edge" not in events[0]
+
+
+def test_tool_events_error_result_has_no_effect_payload():
+    ws = _seed_erd()
+    update = {"tools": {"messages": [
+        ToolMessage(content='{"error": "No existe ningún nodo"}',
+                    tool_call_id="c1", name="update_node"),
+    ]}}
+    events = tool_events(update, ws)
+    assert events[0]["result"] == {"error": "No existe ningún nodo"}
+    assert "node" not in events[0]
+
+
+def test_tool_events_ignores_clarify_and_regenerate_nodes():
+    """Los nodos clarify/regenerate no emiten eventos de tool: sus desenlaces
+    viajan como eventos propios (clarification/done)."""
+    from langchain_core.messages import HumanMessage
+    ws = _seed_erd()
+    update = {
+        "clarify": {"messages": [HumanMessage(content="Respuesta del usuario...")]},
+        "regenerate": {"messages": [AIMessage(content="Diagrama regenerado desde cero.")]},
+    }
+    assert tool_events(update, ws) == []
+
+
+# ---------------------------------------------------------------------------
+# S7.5 — streaming en vivo por HTTP
+# ---------------------------------------------------------------------------
+
+def test_refine_stream_emits_live_tool_events_then_done():
+    """E2E del streaming: la respuesta contiene la secuencia completa de eventos
+    en orden (tool_call antes que su tool_result, done al final) y el tool_result
+    de add_node lleva el delta del servidor (nodo completo)."""
+    from fastapi.testclient import TestClient
+
+    responses = [
+        _ai_tool("add_node", {"node_type": "table", "label": "Carrito"}),
+        _ai_tool("add_edge", {"source": "carrito", "target": "producto",
+                              "edge_type": "one_to_many"}, "c2"),
+        _DONE,
+    ]
+    with patch.object(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses)):
+        resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
+
+    events = _events(resp)
+    assert [e["_type"] for e in events] == [
+        "tool_call", "tool_result", "tool_call", "tool_result", "done",
+    ]
+    assert events[0]["tool"] == "add_node"
+    assert events[1]["node"]["id"] == "carrito"          # delta del servidor
+    assert events[2]["tool"] == "add_edge"
+    assert events[3]["edge"]["source"] == "carrito"
+    # El done sigue siendo la verdad completa (reconciliación incondicional).
+    assert {n["id"] for n in events[-1]["diagram"]["nodes"]} == {"usuario", "producto", "carrito"}
+
+
+def test_refine_stream_clarification_run_also_streams_prior_tools():
+    """Un run que acaba en pausa también streamea las tools previas al interrupt:
+    el canvas ya muestra lo que el agente hizo antes de preguntar."""
+    from fastapi.testclient import TestClient
+
+    mixed = AIMessage(content="", tool_calls=[
+        _tool_call("add_node", {"node_type": "table", "label": "Carrito"}, "c1"),
+        _tool_call("ask_clarification", {"question": "¿Lo conecto a Usuario o a Producto?"}, "c2"),
+    ])
+    with patch.object(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel([mixed, _DONE])):
+        resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
+
+    events = _events(resp)
+    types = [e["_type"] for e in events]
+    assert types[-1] == "clarification"
+    add_results = [e for e in events if e["_type"] == "tool_result" and e["tool"] == "add_node"]
+    assert add_results and add_results[0]["node"]["id"] == "carrito"
