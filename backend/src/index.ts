@@ -102,10 +102,23 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
             case 'done':
               // Propaga la bandera de degradación y los motivos por categoría
               // (S6.9); el frontend compone el aviso. degraded=false → done limpio.
+              // refinement_history (S7.4): traza de tool calls de un refinamiento;
+              // vacío en generación.
               socket.emit('diagram:done', {
                 title: item.title,
                 degraded: item.degraded ?? false,
                 degradations: item.degradations ?? [],
+                refinement_history: item.refinement_history ?? [],
+              })
+              break
+            case 'clarification':
+              // S7.4 — el agente pausó en ask_clarification: pregunta + opciones
+              // (botones) + thread_id, que el frontend debe devolver con la
+              // respuesta para reanudar ESA ejecución.
+              socket.emit('agent:clarification', {
+                thread_id: item.thread_id,
+                question: item.question,
+                options: item.options ?? [],
               })
               break
             case 'error':
@@ -143,6 +156,15 @@ io.on('connection', (socket) => {
     const { prompt, diagram } = payload ?? {}
     console.log('Mensaje recibido del cliente (refinamiento):', prompt)
     await streamAgentToSocket('http://localhost:8000/refine/stream', { prompt, diagram }, socket)
+  })
+
+  // Reanudación tras clarificación (S7.4): la respuesta del usuario + el
+  // thread_id de la ejecución pausada van a /refine/resume, que continúa el
+  // mismo protocolo NDJSON (puede acabar en done, error u otra clarification).
+  socket.on('message:clarification_answer', async (payload) => {
+    const { thread_id, answer } = payload ?? {}
+    console.log('Respuesta de clarificación recibida:', answer)
+    await streamAgentToSocket('http://localhost:8000/refine/resume', { thread_id, answer }, socket)
   })
 
   socket.on('disconnect', () => {
