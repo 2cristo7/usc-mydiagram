@@ -4,7 +4,7 @@ import { DiagramCanvas } from "./components/DiagramCanvas";
 import { ReactFlowProvider } from "@xyflow/react";
 
 function App() {
-  const { connectionState, sendMessage } = useWebSocket();
+  const { connectionState, sendMessage, sendClarificationAnswer } = useWebSocket();
 
   return (
     <ReactFlowProvider>
@@ -13,6 +13,7 @@ function App() {
             <ChatPanel
               connectionState={connectionState}
               onSendMessage={sendMessage}
+              onSendClarificationAnswer={sendClarificationAnswer}
             />
           </div>
           <div className="w-2/3 h-full">

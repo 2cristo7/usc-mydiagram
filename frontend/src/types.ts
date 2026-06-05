@@ -5,7 +5,15 @@ export interface Message {
     timestamp: Date;
 }
 
-export type UIState = 'idle' | 'generating' | 'ready' | 'error';
+export type UIState = 'idle' | 'generating' | 'ready' | 'error' | 'awaiting_clarification';
+
+// S7.4 — el agente pausó pidiendo una aclaración: pregunta (+ opciones como
+// botones) y el thread_id que debe volver con la respuesta para reanudar.
+export interface Clarification {
+    thread_id: string;
+    question: string;
+    options: string[];
+}
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 

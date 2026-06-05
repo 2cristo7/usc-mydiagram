@@ -6,24 +6,30 @@ import { useStore } from '../store/index';
 interface ChatPanelProps {
     connectionState: ConnectionState;
     onSendMessage: (text: string) => void;
+    onSendClarificationAnswer: (answer: string) => void;
 }
 
-export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
-    const { messages, uiState } = useStore();
+export function ChatPanel({ connectionState, onSendMessage, onSendClarificationAnswer }: ChatPanelProps) {
+    const { messages, uiState, pendingClarification } = useStore();
     const [inputValue, setInputValue] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Scroll automático al último mensaje
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    }, [messages, pendingClarification]);
 
+    // S7.4 — mientras hay clarificación pendiente, el input envía la RESPUESTA
+    // (texto libre); las opciones cerradas se muestran como botones.
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (inputValue.trim()) {
+        if (!inputValue.trim()) return;
+        if (uiState === 'awaiting_clarification') {
+            onSendClarificationAnswer(inputValue);
+        } else {
             onSendMessage(inputValue);
-            setInputValue('');
         }
+        setInputValue('');
     };
 
     const getConnectionStatusText = (): string => {
@@ -80,6 +86,21 @@ export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
                         timestamp={msg.timestamp}
                     />
                 ))}
+                {/* S7.4 — opciones de la clarificación como botones */}
+                {uiState === 'awaiting_clarification' && pendingClarification && pendingClarification.options.length > 0 && (
+                    <div className="flex flex-wrap gap-2 m-2">
+                        {pendingClarification.options.map((option) => (
+                            <button
+                                key={option}
+                                type="button"
+                                onClick={() => onSendClarificationAnswer(option)}
+                                className="px-3 py-1 border border-blue-600 text-blue-600 rounded-full hover:bg-blue-50"
+                            >
+                                {option}
+                            </button>
+                        ))}
+                    </div>
+                )}
                 <div ref={messagesEndRef} />
                 {uiState === 'generating' && <span>Generando...</span>}
             </div>
@@ -91,7 +112,7 @@ export function ChatPanel({ connectionState, onSendMessage }: ChatPanelProps) {
                         type="text"
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                        placeholder="Escribe un mensaje..."
+                        placeholder={uiState === 'awaiting_clarification' ? 'Responde a la pregunta del agente...' : 'Escribe un mensaje...'}
                         className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         disabled={connectionState !== 'connected' ||  uiState === 'generating'}
                     />

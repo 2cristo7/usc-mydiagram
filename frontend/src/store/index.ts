@@ -1,4 +1,4 @@
-import type { Message, DiagramNode, DiagramEdge, DiagramSchema, UIState } from "../types";
+import type { Message, DiagramNode, DiagramEdge, DiagramSchema, UIState, Clarification } from "../types";
 import { create } from "zustand";
 
 interface MsgStore {
@@ -6,6 +6,9 @@ interface MsgStore {
     addMessage: (message: Message) => void;
     uiState: UIState;
     setUiState: (state: MsgStore['uiState']) => void;
+    // S7.4 — clarificación pendiente del agente (null si no hay ninguna)
+    pendingClarification: Clarification | null;
+    setPendingClarification: (c: Clarification | null) => void;
 }
 
 interface DiagramStore {
@@ -26,6 +29,8 @@ export const useStore = create<Store>()((set) => ({
     addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
     uiState: 'idle',
     setUiState: (state) => set({ uiState: state }),
+    pendingClarification: null,
+    setPendingClarification: (c) => set({ pendingClarification: c }),
 
     nodes: [],
     edges: [],

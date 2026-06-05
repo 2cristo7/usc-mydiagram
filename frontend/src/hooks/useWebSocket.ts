@@ -21,7 +21,7 @@ function degradationMessages(degradations: Degradation[]): string[] {
 }
 
 export function useWebSocket(url: string = 'ws://localhost:3001') {
-    const { addNode, addEdge, addMessage, setUiState } = useStore();
+    const { addNode, addEdge, addMessage, setUiState, setPendingClarification } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
 
@@ -65,6 +65,25 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                     }
                 }
                 setUiState('ready');
+            });
+
+            // S7.4 — el agente pausó pidiendo aclaración: la pregunta entra al
+            // chat como mensaje del sistema y las opciones se muestran como
+            // botones (ChatPanel lee pendingClarification del store). El input
+            // queda habilitado para respuesta libre.
+            socket.on('agent:clarification', (data) => {
+                addMessage({
+                    id: crypto.randomUUID(),
+                    text: data?.question ?? '¿Puedes aclarar tu petición?',
+                    sender: 'system',
+                    timestamp: new Date(),
+                });
+                setPendingClarification({
+                    thread_id: data?.thread_id,
+                    question: data?.question ?? '',
+                    options: Array.isArray(data?.options) ? data.options : [],
+                });
+                setUiState('awaiting_clarification');
             });
 
             socket.on('diagram:error', (data) => {
@@ -135,6 +154,27 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         setUiState('generating');
     };
 
-    return {connectionState, sendMessage };
+    // S7.4 — responder a la clarificación pendiente (botón u texto libre): la
+    // respuesta viaja con el thread_id para reanudar ESA ejecución pausada.
+    const sendClarificationAnswer = (answer: string) => {
+        if (!answer.trim()) return;
+        const { pendingClarification, addMessage, setPendingClarification, setUiState } = useStore.getState();
+        if (!pendingClarification) return;
+
+        addMessage({
+            id: crypto.randomUUID(),
+            text: answer,
+            sender: 'user',
+            timestamp: new Date(),
+        });
+        socketRef.current?.emit('message:clarification_answer', {
+            thread_id: pendingClarification.thread_id,
+            answer,
+        });
+        setPendingClarification(null);
+        setUiState('generating');
+    };
+
+    return {connectionState, sendMessage, sendClarificationAnswer };
 }
 
