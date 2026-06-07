@@ -3,6 +3,7 @@ load_dotenv()
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from fastapi import FastAPI, HTTPException, Request
@@ -160,10 +161,28 @@ async def _run_refine_agent(ws, graph_input, thread_id: str):
     }
 
 
+def _log_refine_event(event: dict) -> None:
+    """Log de transmisión del agente (espejo del ⏩ del gateway): una línea por
+    evento NDJSON emitido por el loop ReAct."""
+    t = event.get("_type")
+    if t == "tool_call":
+        print(f"[refine] tool_call   → {event['tool']}({json.dumps(event.get('args', {}), ensure_ascii=False)})")
+    elif t == "tool_result":
+        extra = f" +node {event['node']['id']}" if "node" in event else f" +edge {event['edge']['id']}" if "edge" in event else ""
+        print(f"[refine] tool_result → {event['tool']}: {json.dumps(event.get('result'), ensure_ascii=False)[:200]}{extra}")
+    elif t == "clarification":
+        print(f"[refine] clarification → \"{event.get('question', '')}\" opciones={event.get('options', [])}")
+    elif t == "done":
+        d = event.get("diagram") or {}
+        print(f"[refine] done → {len(d.get('nodes', []))} nodos, {len(d.get('edges', []))} aristas · "
+              f"history: {[h['tool'] for h in event.get('refinement_history', [])]}")
+
+
 def _refine_response(ws, graph_input, thread_id: str) -> StreamingResponse:
     async def stream():
         try:
             async for event in _run_refine_agent(ws, graph_input, thread_id):
+                _log_refine_event(event)
                 yield json.dumps(event) + "\n"
         except Exception as e:
             print(f"[refine_stream] agent error: {e!r}")
@@ -217,7 +236,9 @@ async def refine_resume(req: ResumeRequest, request: Request):
     return _refine_response(ws, Command(resume=req.answer), req.thread_id)
 
 
-def check_rate_limit(ip: str, rate_limit_store: dict, RATE_LIMIT: int = 5, WINDOW_SECONDS: int = 60):
+def check_rate_limit(ip: str, rate_limit_store: dict,
+                     RATE_LIMIT: int = int(os.environ.get("AGENT_RATE_LIMIT", "5")),
+                     WINDOW_SECONDS: int = 60):
     if ip not in rate_limit_store:
         rate_limit_store[ip] = (1, time.time())
         return
