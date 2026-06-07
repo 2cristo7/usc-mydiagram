@@ -79,6 +79,13 @@ def classify_outcome(state: Optional[DiagramState], *, crashed: bool = False) ->
     return {
         "_type": "done",
         "title": diagram.title,
+        # S7.5 — el done lleva el snapshot completo también en GENERACIÓN (antes
+        # solo en refinamiento). Los eventos incrementales node/edge no transmiten
+        # el diagram_type, y el frontend lo necesita para poder REFINAR después
+        # (CompactDiagram lo exige: sin él, /refine/stream da 422). Además el
+        # snapshot reconcilia cualquier node_ready/edge_ready perdido (patrón
+        # "eventos = UX efímera; done = verdad", uniforme en ambos caminos).
+        "diagram": diagram.model_dump(mode="json", exclude={"title"}),
         "degraded": bool(degradations),
         "degradations": degradations,
     }

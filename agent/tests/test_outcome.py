@@ -86,6 +86,19 @@ def test_one_node_clean_is_done_not_degraded():
     assert out["title"] == "T"
 
 
+def test_done_includes_diagram_snapshot_with_type():
+    """S7.5 — el done de GENERACIÓN lleva el snapshot completo (sin title, que ya
+    viaja aparte). Crítico: los eventos incrementales node/edge no transmiten el
+    diagram_type, y sin él el frontend no puede refinar después (422 en
+    /refine/stream con diagram_type null)."""
+    out = classify_outcome(_state(diagram=_diagram([_n("a")])))
+    assert out["_type"] == "done"
+    assert "diagram" in out
+    assert out["diagram"]["diagram_type"] == "flowchart"
+    assert [n["id"] for n in out["diagram"]["nodes"]] == ["a"]
+    assert "title" not in out["diagram"]  # el title viaja en el campo propio
+
+
 def test_degradations_make_done_degraded():
     degr = [{"category": "edges", "reasons": ["arista X huérfana"]}]
     out = classify_outcome(_state(diagram=_diagram([_n("a")]), degradations=degr))
