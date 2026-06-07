@@ -94,9 +94,11 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
           const item = JSON.parse(line)
           switch (item._type) {
             case 'node':
+              console.log(`⏩ node_ready    → ${item.data?.id} (${item.data?.node_type}) "${item.data?.label}"`)
               socket.emit('diagram:node_ready', item.data)
               break
             case 'edge':
+              console.log(`⏩ edge_ready    → ${item.data?.id}: ${item.data?.source} → ${item.data?.target} (${item.data?.edge_type})`)
               socket.emit('diagram:edge_ready', item.data)
               break
             case 'done':
@@ -107,6 +109,7 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
               // workspace — la verdad que el frontend aplica SIEMPRE, reconciliando
               // cualquier evento en vivo perdido (null en generación, que ya
               // streameó node/edge).
+              console.log(`✅ done          → ${item.diagram ? `${item.diagram.nodes?.length ?? 0} nodos, ${item.diagram.edges?.length ?? 0} aristas` : 'generación (sin snapshot)'}${item.degraded ? ' [DEGRADADO]' : ''}`)
               socket.emit('diagram:done', {
                 title: item.title,
                 degraded: item.degraded ?? false,
@@ -119,6 +122,7 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
               // S7.5 — traza en vivo: el agente decidió invocar una tool (se
               // emite ANTES de que corra). Passthrough puro: el gateway no
               // interpreta tools (antipatrón de la visión global).
+              console.log(`⏩ tool_call     → [${item.id}] ${item.tool}(${JSON.stringify(item.args ?? {})})`)
               socket.emit('agent:tool_call', {
                 id: item.id,
                 tool: item.tool,
@@ -129,6 +133,7 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
               // S7.5 — la tool terminó: observación + delta declarado por el
               // SERVIDOR (node/edge completos para add/update; los borrados van
               // autodescritos en result.deleted_*). El frontend aplica literal.
+              console.log(`⏩ tool_result   → [${item.id}] ${item.tool}: ${JSON.stringify(item.result ?? null)}${item.node ? ` +node ${item.node.id}` : ''}${item.edge ? ` +edge ${item.edge.id}` : ''}`)
               socket.emit('agent:tool_result', {
                 id: item.id,
                 tool: item.tool,
@@ -141,6 +146,7 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
               // S7.4 — el agente pausó en ask_clarification: pregunta + opciones
               // (botones) + thread_id, que el frontend debe devolver con la
               // respuesta para reanudar ESA ejecución.
+              console.log(`⏸️ clarification → [${item.thread_id}] "${item.question}" opciones: ${JSON.stringify(item.options ?? [])}`)
               socket.emit('agent:clarification', {
                 thread_id: item.thread_id,
                 question: item.question,
@@ -149,10 +155,14 @@ async function streamAgentToSocket(url: string, body: object, socket: Socket) {
               break
             case 'error':
               // Propaga la categoría del fallo además del mensaje accionable.
+              console.log(`❌ error         → [${item.category}] ${item.message}`)
               socket.emit('diagram:error', { error: item.message, category: item.category })
               break
             default:
-              console.warn('Tipo de evento NDJSON desconocido:', item._type)
+              // Un 422 del agente llega aquí: el cuerpo es {"detail": [...]} de
+              // FastAPI, sin _type. Loguear la línea entera hace visible el
+              // motivo exacto de la validación fallida.
+              console.warn('Tipo de evento NDJSON desconocido:', item._type, '·', line.slice(0, 500))
           }
         } catch {
           console.warn('Línea NDJSON inválida ignorada:', line)
@@ -181,6 +191,7 @@ io.on('connection', (socket) => {
   socket.on('message:refine', async (payload) => {
     const { prompt, diagram } = payload ?? {}
     console.log('Mensaje recibido del cliente (refinamiento):', prompt)
+    console.log(`   diagrama adjunto: type=${diagram?.diagram_type ?? 'NULL'} · ${diagram?.nodes?.length ?? 0} nodos · ${diagram?.edges?.length ?? 0} aristas`)
     await streamAgentToSocket('http://localhost:8000/refine/stream', { prompt, diagram }, socket)
   })
 
