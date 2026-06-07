@@ -183,3 +183,36 @@ def test_to_compact_roundtrip():
 
 def test_slugify_strips_accents():
     assert _slugify("Categoría de Régimen") == "categoria_de_regimen"
+
+
+def test_delete_edge_by_source_target():
+    """S7.5 — alternativa source+target (evidencia del smoke test: los modelos
+    locales llaman delete_edge(source, target) aunque la descripción exija id)."""
+    ws = erd_workspace()
+    res = ws.delete_edge(source="usuario", target="pedido")
+    assert res["ok"] is True and res["deleted_edge"] == "usuario__pedido"
+    assert ws.edges == []
+
+
+def test_delete_edge_by_source_target_any_direction():
+    ws = erd_workspace()
+    res = ws.delete_edge(source="pedido", target="usuario")  # dirección invertida
+    assert res["ok"] is True
+
+
+def test_delete_edge_source_target_ambiguous_lists_candidates():
+    ws = erd_workspace()
+    ws.add_edge("usuario", "pedido", EdgeType.ONE_TO_ONE, "segunda")
+    res = ws.delete_edge(source="usuario", target="pedido")
+    assert "error" in res and "usuario__pedido" in res["error"]
+    assert len(ws.edges) == 2  # ante ambigüedad NO borra: informa y el agente decide
+
+
+def test_delete_edge_source_target_not_found():
+    res = erd_workspace().delete_edge(source="usuario", target="inexistente")
+    assert "error" in res
+
+
+def test_delete_edge_no_args_is_actionable_error():
+    res = erd_workspace().delete_edge()
+    assert "error" in res and "source" in res["error"]

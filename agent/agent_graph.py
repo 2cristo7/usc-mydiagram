@@ -88,8 +88,9 @@ def build_tools(ws: DiagramWorkspace) -> list[StructuredTool]:
     def _add_edge(source: str, target: str, edge_type: EdgeType, label: str = "") -> str:
         return json.dumps(ws.add_edge(source, target, edge_type, label), ensure_ascii=False)
 
-    def _delete_edge(id: str) -> str:
-        return json.dumps(ws.delete_edge(id), ensure_ascii=False)
+    def _delete_edge(id: Optional[str] = None,
+                     source: Optional[str] = None, target: Optional[str] = None) -> str:
+        return json.dumps(ws.delete_edge(id, source, target), ensure_ascii=False)
 
     def _apply_layout() -> str:
         return json.dumps(ws.apply_layout(), ensure_ascii=False)
@@ -106,7 +107,8 @@ def build_tools(ws: DiagramWorkspace) -> list[StructuredTool]:
             description="Resuelve un texto al/los nodo(s) existentes por nombre (substring o fuzzy). Úsalo ANTES de referenciar un nodo por id."),
         StructuredTool.from_function(
             func=_add_node, name="add_node", args_schema=AddNodeArgs,
-            description="Crea un nodo nuevo. La posición la decide el layout automático; devuelve el id asignado."),
+            description="Crea un nodo nuevo. La posición la decide el layout automático; devuelve el id asignado. "
+                        "OJO: el nodo nace DESCONECTADO — si debe relacionarse con otros, llama después a add_edge."),
         StructuredTool.from_function(
             func=_update_node, name="update_node", args_schema=UpdateNodeArgs,
             description="Modifica parcialmente un nodo existente (label, tipo o atributos)."),
@@ -118,7 +120,8 @@ def build_tools(ws: DiagramWorkspace) -> list[StructuredTool]:
             description="Crea una arista tipada entre dos nodos que YA existen. No crea nodos."),
         StructuredTool.from_function(
             func=_delete_edge, name="delete_edge", args_schema=DeleteEdgeArgs,
-            description="Borra una arista por su id."),
+            description="Borra una arista. Indica su id, o bien source y target (ids de los nodos extremos); "
+                        "si hay varias aristas entre esos nodos devuelve los candidatos para que elijas."),
         StructuredTool.from_function(
             func=_apply_layout, name="apply_layout", args_schema=ApplyLayoutArgs,
             description="Re-aplica el layout automático del diagrama."),
@@ -149,7 +152,10 @@ node_type válidos para este diagrama: {allowed_nodes}
 edge_type válidos para este diagrama: {allowed_edges}
 
 Reglas:
+- Cumple la petición COMPLETA antes de terminar. «Añade X entre A y B» significa: crear el nodo X con add_node Y conectarlo a A y a B con add_edge. Crear un nodo NO lo conecta a nada.
+- No dejes nodos nuevos desconectados salvo que el usuario lo pida explícitamente. Antes de dar tu respuesta final, repasa si la petición implicaba relaciones que aún no has creado.
 - Resuelve los nombres a ids con find_node ANTES de update_node, delete_node o add_edge.
+- delete_edge acepta el id de la arista, o source+target (ids de nodos) si no lo conoces.
 - add_edge NO crea nodos: ambos extremos deben existir; si falta uno, créalo con add_node primero.
 - Si una tool devuelve un {{"error": ...}}, léelo y corrige (otro tipo, crear el nodo que falta…) o pregunta con ask_clarification si es ambiguo.
 - Para cambios estructurales masivos (cambiar el tipo de diagrama, rehacerlo entero) usa regenerate_from_scratch en vez de muchas ediciones.

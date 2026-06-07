@@ -61,7 +61,13 @@ class AddEdgeArgs(BaseModel):
 
 
 class DeleteEdgeArgs(BaseModel):
-    id: str = Field(description="id de la arista a borrar")
+    # S7.5: id O source+target. La evidencia del smoke test E2E: los modelos
+    # locales llaman delete_edge(source, target) sistemáticamente aunque la
+    # descripción exija id (qwen3:8b llegó a CREAR una arista para poder
+    # borrarla). Aceptar ambas formas elimina esa clase de fallo.
+    id: Optional[str] = Field(default=None, description="id de la arista a borrar (si se conoce)")
+    source: Optional[str] = Field(default=None, description="id del nodo origen (alternativa: source+target en vez de id)")
+    target: Optional[str] = Field(default=None, description="id del nodo destino (alternativa: source+target en vez de id)")
 
 
 class ApplyLayoutArgs(BaseModel):
@@ -221,7 +227,22 @@ class DiagramWorkspace:
         self.edges.append(DiagramEdge(id=edge_id, source=source, target=target, label=label, edge_type=edge_type))
         return {"id": edge_id}
 
-    def delete_edge(self, id: str) -> dict:
+    def delete_edge(self, id: Optional[str] = None,
+                    source: Optional[str] = None, target: Optional[str] = None) -> dict:
+        # Resolución por source+target (S7.5): la tool RESUELVE como find_node;
+        # ante ambigüedad informa los candidatos y el agente decide (no adivina).
+        # Se acepta cualquier dirección: el usuario no distingue source de target.
+        if id is None:
+            if not (source and target):
+                return {"error": "Indica el id de la arista, o bien source y target."}
+            matches = [e for e in self.edges if {e.source, e.target} == {source, target}]
+            if not matches:
+                return {"error": f"No existe ninguna arista entre '{source}' y '{target}'."}
+            if len(matches) > 1:
+                ids = [e.id for e in matches]
+                return {"error": f"Hay {len(matches)} aristas entre '{source}' y '{target}': {ids}. "
+                                 f"Repite delete_edge indicando el id concreto."}
+            id = matches[0].id
         if self._edge(id) is None:
             return {"error": f"No existe ninguna arista con id '{id}'."}
         self.edges = [e for e in self.edges if e.id != id]
