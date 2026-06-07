@@ -227,7 +227,13 @@ def get_chat_model(tier: str = "capable"):
         # el backend crudo. Derivamos una de la otra para no duplicar config.
         chat_url = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
         base_url = chat_url.split("/api/")[0]
-        return ChatOllama(model=model, base_url=base_url, temperature=0)
+        # reasoning=False: qwen3 trae thinking activado por defecto y el camino del
+        # agente NO pasa por el `think: false` del backend crudo — sin esto, cada
+        # turno del loop ReAct razona minutos antes de responder. num_ctx=8192: el
+        # default de Ollama (4096) se queda corto con el system prompt del agente
+        # (diagrama completo + 9 schemas de tools + historial del loop).
+        return ChatOllama(model=model, base_url=base_url, temperature=0,
+                          reasoning=False, num_ctx=8192)
 
     if profile == "openai":
         from langchain_openai import ChatOpenAI
