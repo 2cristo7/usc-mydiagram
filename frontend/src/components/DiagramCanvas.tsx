@@ -1,8 +1,7 @@
-import type { DiagramNode, DiagramSchema, NodeType } from "../types";
+import type { DiagramNode, NodeType } from "../types";
 import '@xyflow/react/dist/style.css';
-import type { Node, Edge } from "@xyflow/react";
+import type { Node } from "@xyflow/react";
 import { ReactFlow, Background, Controls, Panel } from "@xyflow/react";
-import dagre from '@dagrejs/dagre';
 import { useStore } from "../store/index";
 import { NodePalette } from "./NodePalette";
 import { useState } from "react";

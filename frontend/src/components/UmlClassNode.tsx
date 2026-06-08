@@ -8,7 +8,7 @@ export type UmlClassData = {
 
 type UmlClassNode = Node<UmlClassData, 'umlClass'>;
 
-export function UmlClassNode({ data, selected }: NodeProps<UmlClassNode>) {
+export function UmlClassNode({ data }: NodeProps<UmlClassNode>) {
     const { label, stereotype, attributes } = data;
     const methods = attributes?.filter((a: string) => a.match(/\(.*\)\s*:\s*\w+$/)) ?? [];
     const attrs   = attributes?.filter((a: string) => !a.match(/\(.*\)\s*:\s*\w+$/)) ?? [];
