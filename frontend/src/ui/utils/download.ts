@@ -112,3 +112,13 @@ export function triggerDownload(href: string, filename: string): void {
     a.download = filename;
     a.click();
 }
+
+/**
+ * Serializa un objeto a JSON (indentado) y lo descarga. Usa un data URL en vez de
+ * `URL.createObjectURL` para no tener que revocar nada (sin fuga de object URLs).
+ */
+export function triggerJsonDownload(data: unknown, filename: string): void {
+    const json = JSON.stringify(data, null, 2);
+    const href = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+    triggerDownload(href, filename);
+}

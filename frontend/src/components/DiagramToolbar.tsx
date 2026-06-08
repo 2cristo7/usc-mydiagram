@@ -1,8 +1,11 @@
+import { useRef } from "react";
 import { getViewportForBounds } from "@xyflow/react";
 import { toPng } from "html-to-image";
 import { useStore } from "../store/index";
+import { diagramImportSchema } from "../types";
 import {
-    diagramFilename, triggerDownload, getRenderedNodeBounds, getRenderedEdges, loadImage,
+    diagramFilename, triggerDownload, triggerJsonDownload,
+    getRenderedNodeBounds, getRenderedEdges, loadImage,
 } from "../ui/utils/download";
 
 // Márgenes de la imagen exportada alrededor del grafo (px) y límites de zoom del
@@ -22,8 +25,18 @@ const PIXEL_RATIO = 2;
 export function DiagramToolbar() {
     const uiState = useStore((s) => s.uiState);
     const currentDiagram = useStore((s) => s.currentDiagram);
+    const setCurrentDiagram = useStore((s) => s.setCurrentDiagram);
+    const setUiState = useStore((s) => s.setUiState);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const canExport = uiState === 'ready';
+    // Importar disponible al partir de cero (idle), tras un diagrama (ready) o para
+    // recuperarse (error). Se bloquea mientras `generating` (un diagrama entrante por
+    // WS pisaría/competiría con el importado) y en `awaiting_clarification` (hay un
+    // refinamiento en pausa: reemplazar el diagrama dejaría el thread del backend
+    // esperando una respuesta sobre un diagrama que ya no existe).
+    const canImport =
+        uiState === 'idle' || uiState === 'ready' || uiState === 'error';
 
     async function handleExportPng() {
         const viewportEl = document.querySelector<HTMLElement>('.react-flow__viewport');
@@ -93,6 +106,36 @@ export function DiagramToolbar() {
         }
     }
 
+    // Export JSON — formato propio MydIAgram: el DiagramSchema COMPLETO (con title),
+    // no el CompactDiagram del agente (que omite title). El fichero es un artefacto
+    // de usuario autosuficiente: sirve para recargarlo (import) o dárselo a una IA.
+    function handleExportJson() {
+        if (!currentDiagram) return;
+        triggerJsonDownload(currentDiagram, diagramFilename(currentDiagram.title, 'json'));
+    }
+
+    // Import — entrada externa: se valida en el borde con Zod (forma + enums +
+    // integridad referencial) ANTES de tocar el canvas. Si el archivo no es un
+    // diagrama válido, se avisa y no se modifica nada.
+    async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0];
+        event.target.value = ''; // permite reimportar el mismo fichero seguidas veces
+        if (!file) return;
+        try {
+            const parsed = diagramImportSchema.safeParse(JSON.parse(await file.text()));
+            if (!parsed.success) {
+                console.error('[import] JSON inválido:', parsed.error.issues);
+                window.alert('El archivo no es un diagrama MydIAgram válido.');
+                return;
+            }
+            setCurrentDiagram(parsed.data);
+            setUiState('ready');
+        } catch (err) {
+            console.error('[import] error al leer/parsear el JSON:', err);
+            window.alert('No se pudo leer el archivo: no es un JSON válido.');
+        }
+    }
+
     return (
         <div className="flex items-center gap-2 border-b bg-white px-4 py-2">
             <button
@@ -102,6 +145,29 @@ export function DiagramToolbar() {
             >
                 Exportar PNG
             </button>
+            <button
+                onClick={handleExportJson}
+                disabled={!canExport}
+                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+                Exportar JSON
+            </button>
+            {/* Importar disponible también en idle (partir de cero), no durante
+                generating/awaiting_clarification (ver canImport). */}
+            <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!canImport}
+                className="rounded border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+                Importar JSON
+            </button>
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={handleImportFile}
+                className="hidden"
+            />
         </div>
     );
 }
