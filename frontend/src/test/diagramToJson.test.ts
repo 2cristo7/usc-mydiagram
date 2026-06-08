@@ -12,7 +12,7 @@ const diagram: DiagramSchema = {
     diagram_type: 'erd',
     nodes: [
         { id: 'usuario', node_type: 'table', label: 'Usuario', attributes: ['id PK', 'email'] },
-        { id: 'pedido', node_type: 'table', label: 'Pedido' },
+        { id: 'pedido', node_type: 'table', label: 'Pedido', attributes: [] },
     ],
     edges: [
         { id: 'e1', source: 'usuario', target: 'pedido', edge_type: 'one_to_many', label: 'realiza' },

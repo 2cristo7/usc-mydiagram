@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import type { DiagramType, NodeType } from '../types'
+import type { DiagramType, NodeType, EdgeType } from '../types'
 import { DiagramToFlow } from '../ui/utils/diagramToFlow';
 
 
@@ -12,7 +12,7 @@ test('DiagramToFlow basic conversion', () => {
             { id: '2', label: 'Node 2', node_type: 'person' as NodeType, attributes: [] },
         ],
         edges: [
-            { id: 'e1-2', source: '1', target: '2', label: 'Edge from Node 1 to Node 2' }
+            { id: 'e1-2', source: '1', target: '2', label: 'Edge from Node 1 to Node 2', edge_type: 'association' as EdgeType }
         ]
     };
 
@@ -119,7 +119,7 @@ test ('DiagramToFlow sequence diagram layout', () => {
             { id: '2', label: 'Actor 2', node_type: 'actor' as NodeType, attributes: [] },
         ],
         edges: [
-            { id: 'e1-2', source: '1', target: '2', label: 'Message from Actor 1 to Actor 2' }
+            { id: 'e1-2', source: '1', target: '2', label: 'Message from Actor 1 to Actor 2', edge_type: 'association' as EdgeType }
         ]
     };
 
@@ -137,7 +137,7 @@ test ('DiagramToFlow edges mapping', () => {
             { id: '2', label: 'Node 2', node_type: 'class' as NodeType, attributes: [] },
         ],
         edges: [
-            { id: 'e1-2', source: '1', target: '2', label: 'Edge from Node 1 to Node 2' }
+            { id: 'e1-2', source: '1', target: '2', label: 'Edge from Node 1 to Node 2', edge_type: 'association' as EdgeType }
         ]
     };
 
