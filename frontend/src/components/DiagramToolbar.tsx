@@ -7,6 +7,7 @@ import {
     diagramFilename, triggerDownload, triggerJsonDownload,
     getRenderedNodeBounds, getRenderedEdges, loadImage,
 } from "../ui/utils/download";
+import { AuthButton } from "./AuthButton";
 
 // Márgenes de la imagen exportada alrededor del grafo (px) y límites de zoom del
 // encuadre. MIN/MAX_ZOOM evitan que un diagrama diminuto se exporte gigantesco o
@@ -168,6 +169,10 @@ export function DiagramToolbar() {
                 onChange={handleImportFile}
                 className="hidden"
             />
+            {/* S9.2 — acceso opcional (login solo para guardar), alineado a la derecha. */}
+            <div className="ml-auto">
+                <AuthButton />
+            </div>
         </div>
     );
 }

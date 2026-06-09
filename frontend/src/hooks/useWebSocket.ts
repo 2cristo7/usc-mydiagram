@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { Message, ConnectionState, Degradation, DegradationCategory, AgentToolCall, AgentToolResult } from "../types";
 import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
+import { useAuthStore } from "../store/auth";
 import { diagramToJson } from "../ui/utils/diagramToJson";
 
 // Render diferenciado por categoría (S6.9 P4): cada degradación se traduce a un
@@ -28,12 +29,20 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
+    // S9.2 — el socket se (re)crea al cambiar la identidad (login/logout). El token
+    // vigente se lee al conectar; los refrescos de token NO recrean el socket (la
+    // verificación del backend ocurre solo en el handshake).
+    const userId = useAuthStore((s) => s.user?.id ?? null);
 
 
     useEffect(() => {
 
         try {
-            socketRef.current = io('http://localhost:3001', { transports: ['websocket'] });
+            const token = useAuthStore.getState().session?.access_token;
+            socketRef.current = io('http://localhost:3001', {
+                transports: ['websocket'],
+                auth: token ? { token } : {},
+            });
             const socket = socketRef.current;
 
             socket.on('connect', () => {
@@ -180,7 +189,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 socketRef.current.disconnect();
             }
         }
-    }, [url]);
+    }, [url, userId]);
 
     const sendMessage = (text: string) => {
         if (!text.trim()) return;

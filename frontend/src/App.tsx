@@ -1,10 +1,12 @@
 import { useWebSocket } from "./hooks/useWebSocket";
+import { useAuth } from "./hooks/useAuth";
 import { ChatPanel } from "./components/ChatPanel";
 import { DiagramCanvas } from "./components/DiagramCanvas";
 import { DiagramToolbar } from "./components/DiagramToolbar";
 import { ReactFlowProvider } from "@xyflow/react";
 
 function App() {
+  useAuth();
   const { connectionState, sendMessage, sendClarificationAnswer } = useWebSocket();
 
   return (
