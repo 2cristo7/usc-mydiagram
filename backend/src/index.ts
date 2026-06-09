@@ -1,16 +1,12 @@
 import express from 'express'
 import cors from 'cors'
-import jsonwebtoken from 'jsonwebtoken'
 import dotenv from 'dotenv'
 import { Server } from 'socket.io'
 import { streamAgentToSocket } from './agentStream'
+import { verifySupabaseToken } from './auth'
 
 // Cargar variables de entorno
 dotenv.config()
-
-interface AuthRequest extends express.Request {
-  user?: any
-}
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -27,50 +23,39 @@ app.use((req, res, next) => {
   next()
 })
 
-
-function authenticateToken(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers['authorization']
-  const token = authHeader && authHeader.split(' ')[1]
-
-  if (!token) return res.status(401).json({ error: 'Token no proporcionado' })
-
-  jsonwebtoken.verify(token, process.env.JWT_SECRET as string, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Token inválido' });
-    (req as AuthRequest).user = user
-    next()
-  })
-}
-
 // Ruta de salud
 app.get('/health', (req, res) => {
   console.log('Ruta de salud accedida')
   res.json({ status: 'ok', service: 'backend' })
 })
 
-app.post('/api/diagram/generate', authenticateToken, (req, res) => {
-  const { body } = req.body
-  // Aquí iría la lógica para generar el diagrama a partir de la descripción
-  // Por ahora, solo devolvemos un mensaje de éxito
-  res.json({ message: 'Diagrama generado con éxito:', receivedBody: body})
+// S9.2 — Autenticación del handshake de Socket.io.
+// Modo "login solo para guardar": la generación funciona sin sesión, así que una
+// conexión SIN token es válida (anónima). Un token PRESENTE pero inválido no es
+// anonimato — es un cliente con sesión rota — y se rechaza para forzar refresco.
+// `socket.data.userId` queda disponible para las operaciones que sí requieren
+// usuario (persistencia, historial — S9.3).
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.token as string | undefined
+  if (!token) {
+    socket.data.userId = null
+    return next()
+  }
+  try {
+    const { userId, email } = await verifySupabaseToken(token)
+    socket.data.userId = userId
+    socket.data.email = email
+    next()
+  } catch (err) {
+    console.warn('Handshake rechazado: token inválido —', (err as Error).message)
+    next(new Error('Token inválido'))
+  }
 })
-
-app.get('/api/diagrams', authenticateToken, (req, res) => {
-  // Aquí iría la lógica para obtener los diagramas guardados del usuario
-  // Por ahora, solo devolvemos un mensaje de éxito
-  res.json({
-    diagrams: [
-      { id: 1, title: 'Diagrama 1', nodes: ["Nodo 1"], edges: ["Arista 1"] },
-      { id: 2, title: 'Diagrama 2', nodes: ["Nodo 2"], edges: ["Arista 2"] }
-    ]
-  })
-})
-
-
-
 
 // Gestión websocket
 io.on('connection', (socket) => {
-  console.log('Cliente conectado al WebSocket')
+  const userId = socket.data.userId as string | null
+  console.log(userId ? `Cliente conectado (user ${userId})` : 'Cliente conectado (anónimo)')
 
   // Generación: no hay diagrama previo → el agente parte de cero (S7.1).
   socket.on('message:send', async (message) => {
@@ -101,5 +86,3 @@ io.on('connection', (socket) => {
     console.log('Cliente desconectado del WebSocket')
   })
 })
-
-
