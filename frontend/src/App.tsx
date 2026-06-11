@@ -7,7 +7,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 
 function App() {
   useAuth();
-  const { connectionState, sendMessage, sendClarificationAnswer } = useWebSocket();
+  const { connectionState, sendMessage, sendClarificationAnswer, regenerate } = useWebSocket();
 
   return (
     <ReactFlowProvider>
@@ -20,7 +20,7 @@ function App() {
             />
           </div>
           <div className="w-2/3 h-full flex flex-col">
-            <DiagramToolbar />
+            <DiagramToolbar onRegenerate={regenerate} />
             <div className="flex-1 min-h-0 flex">
               <DiagramCanvas/>
             </div>

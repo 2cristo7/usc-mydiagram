@@ -26,11 +26,13 @@ const PIXEL_RATIO = 2;
 // aunque no haya diagrama (necesario para que Importar, S8.2, esté disponible en
 // estado idle). Export solo se habilita en `ready`: nunca se exporta un diagrama
 // a medio generar ni un refinamiento en pausa (awaiting_clarification).
-export function DiagramToolbar() {
+export function DiagramToolbar({ onRegenerate }: { onRegenerate: () => void }) {
     const uiState = useStore((s) => s.uiState);
     const currentDiagram = useStore((s) => s.currentDiagram);
     const setCurrentDiagram = useStore((s) => s.setCurrentDiagram);
     const setCurrentDiagramId = useStore((s) => s.setCurrentDiagramId);
+    const setLastGenerationPrompt = useStore((s) => s.setLastGenerationPrompt);
+    const lastGenerationPrompt = useStore((s) => s.lastGenerationPrompt);
     const setUiState = useStore((s) => s.setUiState);
     const user = useAuthStore((s) => s.user);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,6 +44,9 @@ export function DiagramToolbar() {
     // ediciones manuales que no pasan por un `done` del agente (decisión P3: sin
     // debounce, el guardado manual es el camino para persistirlas).
     const canSave = !!user && !!currentDiagram && uiState === 'ready' && !saving;
+    // Regenerar (redo, S9.3b): rehace el prompt que originó el diagrama saltándose
+    // la caché. Solo si hubo una generación en esta sesión (lastGenerationPrompt).
+    const canRegenerate = uiState === 'ready' && !!lastGenerationPrompt;
 
     async function handleSave() {
         setSaving(true);
@@ -157,6 +162,8 @@ export function DiagramToolbar() {
             // S9.3 — un diagrama importado no procede de la BD: id null → si se
             // guarda, será un POST (fila nueva), no un PATCH de un id ajeno.
             setCurrentDiagramId(null);
+            // S9.3b — un importado no tiene prompt de origen → no se puede regenerar.
+            setLastGenerationPrompt(null);
             setUiState('ready');
         } catch (err) {
             console.error('[import] error al leer/parsear el JSON:', err);
@@ -196,6 +203,14 @@ export function DiagramToolbar() {
                 onChange={handleImportFile}
                 className="hidden"
             />
+            {/* S9.3b — Regenerar (redo): rehace el prompt saltándose la caché. */}
+            <button
+                onClick={onRegenerate}
+                disabled={!canRegenerate}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+                Regenerar
+            </button>
             {/* S9.3 — guardado explícito (P3-c). Solo con sesión y diagrama listo;
                 persiste también las ediciones manuales que no disparan un done. */}
             <button

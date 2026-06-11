@@ -225,7 +225,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         clearToolTrace();
         lastPromptRef.current = text;
 
-        const { currentDiagram, setCurrentDiagramId } = useStore.getState();
+        const { currentDiagram, setCurrentDiagramId, setLastGenerationPrompt } = useStore.getState();
         if (currentDiagram) {
             socketRef.current?.emit('message:refine', {
                 prompt: text,
@@ -235,8 +235,28 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // S9.3 — generación desde cero: el diagrama resultante es nuevo, así
             // que su id persistido se resetea a null → el primer done hará POST.
             setCurrentDiagramId(null);
+            // S9.3b — guarda el prompt que origina el diagrama → habilita "Regenerar".
+            setLastGenerationPrompt(text);
             socketRef.current?.emit('message:send', text);
         }
+        setUiState('generating');
+    };
+
+    // S9.3b — Redo: regenera el prompt que originó el diagrama, IGNORANDO la
+    // caché (el backend sobrescribe su entrada con el nuevo resultado). Solo tiene
+    // sentido si ese prompt existe (diagrama generado en esta sesión).
+    const regenerate = () => {
+        const prompt = useStore.getState().lastGenerationPrompt;
+        if (!prompt) return;
+        addMessage({
+            id: crypto.randomUUID(),
+            text: 'Regenerando el diagrama…',
+            sender: 'system',
+            timestamp: new Date(),
+        });
+        clearToolTrace();
+        lastPromptRef.current = prompt;
+        socketRef.current?.emit('message:regenerate', { prompt });
         setUiState('generating');
     };
 
@@ -261,6 +281,6 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         setUiState('generating');
     };
 
-    return {connectionState, sendMessage, sendClarificationAnswer };
+    return {connectionState, sendMessage, sendClarificationAnswer, regenerate };
 }
 

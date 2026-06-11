@@ -28,6 +28,13 @@ interface DiagramStore {
     // historial; se resetea a null al empezar una generación desde cero.
     currentDiagramId: string | null;
     setCurrentDiagramId: (id: string | null) => void;
+    // S9.3b — prompt que ORIGINÓ el diagrama vivo (solo generación, no
+    // refinamiento). Habilita el botón "Regenerar" (redo): rehace ese prompt
+    // saltándose la caché y sobrescribiendo su entrada. null = el diagrama no se
+    // generó en esta sesión (importado o cargado del historial sin prompt) → no
+    // hay nada que regenerar.
+    lastGenerationPrompt: string | null;
+    setLastGenerationPrompt: (prompt: string | null) => void;
     setCurrentDiagram: (diagram: DiagramSchema) => void;
     updateNode(id: string, changes: Partial<DiagramNode>): void;
     addNode: (node: DiagramNode) => void;
@@ -66,6 +73,8 @@ export const useStore = create<Store>()((set) => ({
     currentDiagram: null,
     currentDiagramId: null,
     setCurrentDiagramId: (id) => set({ currentDiagramId: id }),
+    lastGenerationPrompt: null,
+    setLastGenerationPrompt: (prompt) => set({ lastGenerationPrompt: prompt }),
     setCurrentDiagram: (diagram) => set({
         currentDiagram: diagram,
         nodes: diagram.nodes,

@@ -11,6 +11,7 @@ export function HistoryPanel() {
   const user = useAuthStore((s) => s.user)
   const setCurrentDiagram = useStore((s) => s.setCurrentDiagram)
   const setCurrentDiagramId = useStore((s) => s.setCurrentDiagramId)
+  const setLastGenerationPrompt = useStore((s) => s.setLastGenerationPrompt)
   const setUiState = useStore((s) => s.setUiState)
 
   const [open, setOpen] = useState(false)
@@ -40,6 +41,8 @@ export function HistoryPanel() {
       const row = await getDiagram(id)
       setCurrentDiagram(row.data)
       setCurrentDiagramId(row.id)
+      // S9.3b — restaura el prompt de origen para poder regenerar (si se guardó).
+      setLastGenerationPrompt(row.prompt ?? null)
       setUiState('ready')
       setOpen(false)
     } catch (err) {

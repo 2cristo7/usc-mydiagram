@@ -18,9 +18,11 @@ export interface DiagramMeta {
   updated_at: string
 }
 
-// Fila completa: metadata + data (el diagrama para cargar al canvas).
+// Fila completa: metadata + data (el diagrama para cargar al canvas) + el prompt
+// de origen (S9.3b: permite regenerar un diagrama cargado del historial).
 export interface DiagramRow extends DiagramMeta {
   data: DiagramSchema
+  prompt: string | null
 }
 
 export interface SaveResult {
