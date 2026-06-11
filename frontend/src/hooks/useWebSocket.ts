@@ -4,6 +4,7 @@ import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
 import { useAuthStore } from "../store/auth";
 import { diagramToJson } from "../ui/utils/diagramToJson";
+import { persistCurrentDiagram } from "../lib/api";
 
 // Render diferenciado por categoría (S6.9 P4): cada degradación se traduce a un
 // aviso de chat legible. Fallback genérico para una categoría futura sin etiqueta.
@@ -29,6 +30,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
+    // S9.3 — último prompt enviado, para guardarlo junto al diagrama (columna
+    // prompt). Un ref: no debe provocar re-render ni recrear el efecto del socket.
+    const lastPromptRef = useRef<string | undefined>(undefined);
     // S9.2 — el socket se (re)crea al cambiar la identidad (login/logout). El token
     // vigente se lee al conectar; los refrescos de token NO recrean el socket (la
     // verificación del backend ocurre solo en el handshake).
@@ -117,6 +121,15 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                     text: `Diagrama generado: ${data?.title ?? 'sin título'}`,
                     sender: 'system',
                     timestamp: new Date(),
+                });
+                // S9.3 — auto-guardado tras CADA done (generación y cada
+                // refinamiento). persistCurrentDiagram es no-op si no hay sesión
+                // ("login solo para guardar") y serializa POST→PATCH; fire-and-
+                // forget para no bloquear la UI, solo se loguea el fallo.
+                persistCurrentDiagram(lastPromptRef.current).then((r) => {
+                    if (!r.ok && r.error !== 'no-session') {
+                        console.error('[persist] auto-guardado falló:', r.error);
+                    }
                 });
                 // Degradación parcial (S6.9): el diagrama es usable pero quedó algo
                 // sin resolver → un aviso de chat por categoría, sin bloquear la UI.
@@ -210,14 +223,18 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         // capturar un currentDiagram obsoleto en el closure.
         // S7.5 — run nuevo: la traza del anterior se descarta.
         clearToolTrace();
+        lastPromptRef.current = text;
 
-        const { currentDiagram } = useStore.getState();
+        const { currentDiagram, setCurrentDiagramId } = useStore.getState();
         if (currentDiagram) {
             socketRef.current?.emit('message:refine', {
                 prompt: text,
                 diagram: diagramToJson(currentDiagram),
             });
         } else {
+            // S9.3 — generación desde cero: el diagrama resultante es nuevo, así
+            // que su id persistido se resetea a null → el primer done hará POST.
+            setCurrentDiagramId(null);
             socketRef.current?.emit('message:send', text);
         }
         setUiState('generating');

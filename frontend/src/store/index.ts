@@ -22,6 +22,12 @@ interface DiagramStore {
     nodes : DiagramNode[];
     edges : DiagramEdge[];
     currentDiagram: DiagramSchema | null;
+    // S9.3 — id de la fila en BD del diagrama vivo. null = nunca guardado (un
+    // diagrama recién generado o importado) → el próximo guardado es POST; con
+    // id → PATCH. Se fija al recibir la respuesta del POST o al cargar del
+    // historial; se resetea a null al empezar una generación desde cero.
+    currentDiagramId: string | null;
+    setCurrentDiagramId: (id: string | null) => void;
     setCurrentDiagram: (diagram: DiagramSchema) => void;
     updateNode(id: string, changes: Partial<DiagramNode>): void;
     addNode: (node: DiagramNode) => void;
@@ -58,7 +64,9 @@ export const useStore = create<Store>()((set) => ({
     nodes: [],
     edges: [],
     currentDiagram: null,
-    setCurrentDiagram: (diagram) => set({ 
+    currentDiagramId: null,
+    setCurrentDiagramId: (id) => set({ currentDiagramId: id }),
+    setCurrentDiagram: (diagram) => set({
         currentDiagram: diagram,
         nodes: diagram.nodes,
         edges: diagram.edges
