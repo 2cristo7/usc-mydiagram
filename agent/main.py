@@ -3,10 +3,8 @@ load_dotenv()
 
 import asyncio
 import json
-import os
-import time
 import uuid
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from graph import build_graph, initial_generation_state
@@ -14,7 +12,11 @@ from outcome import classify_outcome
 from schemas import CompactDiagram
 
 app = FastAPI()
-rate_limit_store = {}
+
+# S9.3b — El rate limiter se trasladó al BACKEND (Node): el agente queda con solo
+# lógica de agente (generación + tools). El control de admisión (rate limit,
+# caché) vive en el backend, que es el único punto de entrada. Ver
+# backend/src/rateLimit.ts y backend/src/cache.ts.
 
 _SENTINEL = object()
 
@@ -67,10 +69,7 @@ def health():
 
 
 @app.post("/generate/stream")
-async def generate_stream(req: GenerateRequest, request: Request):
-    ip = request.client.host
-    check_rate_limit(ip, rate_limit_store)
-
+async def generate_stream(req: GenerateRequest):
     queue: asyncio.Queue = asyncio.Queue()
     graph = build_graph(queue)
 
@@ -196,10 +195,7 @@ def _refine_response(ws, graph_input, thread_id: str) -> StreamingResponse:
 
 
 @app.post("/refine/stream")
-async def refine_stream(req: RefineRequest, request: Request):
-    ip = request.client.host
-    check_rate_limit(ip, rate_limit_store)
-
+async def refine_stream(req: RefineRequest):
     # S7.3 — Loop ReAct real. Construimos el workspace de ESTA petición desde el
     # diagrama compacto, y un grafo de agente cuyas tools cierran sobre él. El
     # workspace es la fuente de verdad: las tools lo mutan, y al terminar
@@ -217,10 +213,7 @@ async def refine_stream(req: RefineRequest, request: Request):
 
 
 @app.post("/refine/resume")
-async def refine_resume(req: ResumeRequest, request: Request):
-    ip = request.client.host
-    check_rate_limit(ip, rate_limit_store)
-
+async def refine_resume(req: ResumeRequest):
     # S7.4 — La respuesta del usuario reanuda el grafo pausado: Command(resume=
     # answer) hace que el interrupt() del nodo clarify DEVUELVA ese texto, y el
     # checkpointer restaura los messages por thread_id. El workspace pendiente se
@@ -234,20 +227,3 @@ async def refine_resume(req: ResumeRequest, request: Request):
             detail="No hay ninguna clarificación pendiente para ese thread_id (¿expiró o ya fue respondida?).",
         )
     return _refine_response(ws, Command(resume=req.answer), req.thread_id)
-
-
-def check_rate_limit(ip: str, rate_limit_store: dict,
-                     RATE_LIMIT: int = int(os.environ.get("AGENT_RATE_LIMIT", "5")),
-                     WINDOW_SECONDS: int = 60):
-    if ip not in rate_limit_store:
-        rate_limit_store[ip] = (1, time.time())
-        return
-
-    count, window_start = rate_limit_store[ip]
-
-    if time.time() - window_start > WINDOW_SECONDS:
-        rate_limit_store[ip] = (1, time.time())
-    elif (count >= RATE_LIMIT):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    else:
-        rate_limit_store[ip] = (count + 1, window_start)

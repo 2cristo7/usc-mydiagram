@@ -103,11 +103,8 @@ def _patch_model(monkeypatch, responses):
     monkeypatch.setattr(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses))
 
 
-@pytest.fixture(autouse=True)
-def _reset_rate_limit():
-    """Los tests HTTP comparten la IP 'testclient': sin limpiar el store, la
-    suite acumula peticiones hasta el 429 (5/min) y los tests fallan por orden."""
-    main.rate_limit_store.clear()
+# S9.3b — El rate limiter se trasladó al backend (Node); el agente ya no lo tiene,
+# así que el antiguo fixture autouse que limpiaba main.rate_limit_store desaparece.
 
 
 # ---------------------------------------------------------------------------
