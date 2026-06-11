@@ -55,7 +55,7 @@ describe('setCached', () => {
 
   it('hace upsert con la clave normalizada y onConflict (sobrescribe → solo el último)', async () => {
     await setCached('  Crear ERD ', 'Blog', { nodes: [], edges: [] })
-    const [row, opts] = upsert.mock.calls[0]
+    const [row, opts] = upsert.mock.calls[0] as unknown as [Record<string, unknown>, unknown]
     expect(row.prompt_key).toBe('crear erd')
     expect(row.prompt).toBe('  Crear ERD ') // el original se conserva para depurar
     expect(opts).toEqual({ onConflict: 'prompt_key,model' })
