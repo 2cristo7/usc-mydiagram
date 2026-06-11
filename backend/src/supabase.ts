@@ -41,3 +41,28 @@ export function supabaseForUser(accessToken: string): SupabaseClient {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 }
+
+// S9.3b — Cliente de SISTEMA (service_role) para la caché global de generaciones.
+//
+// service_role hace BYPASS de la RLS: por eso se usa ÚNICAMENTE aquí, en una
+// tabla sin user_id (generation_cache) que no contiene datos de usuario, y NUNCA
+// para los diagramas del usuario (esos van por supabaseForUser, con RLS activa).
+// La tabla tiene RLS sin políticas → solo este cliente puede leerla/escribirla,
+// lo que evita el envenenamiento de la caché desde el cliente (decisión C, S9.1).
+//
+// Singleton: el service_role es estable, no depende de la petición.
+let _service: SupabaseClient | null = null
+
+export function supabaseService(): SupabaseClient {
+  if (!_service) {
+    const url = process.env.SUPABASE_URL
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!url || !serviceKey) {
+      throw new Error('Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY — necesarias para la caché')
+    }
+    _service = createClient(url, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  }
+  return _service
+}

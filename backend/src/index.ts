@@ -5,6 +5,9 @@ import { Server } from 'socket.io'
 import { streamAgentToSocket } from './agentStream'
 import { verifySupabaseToken } from './auth'
 import diagramsRouter from './diagrams'
+import { checkRateLimit } from './rateLimit'
+import { getCached, setCached } from './cache'
+import type { Socket } from 'socket.io'
 
 // Cargar variables de entorno
 dotenv.config()
@@ -57,23 +60,91 @@ io.use(async (socket, next) => {
   }
 })
 
+// S9.3b — Rate limit por IDENTIDAD: el user_id autenticado (S9.2) o, si la
+// conexión es anónima, la IP del socket. Una sola petición = una llamada a
+// checkRateLimit, ANTES de mirar la caché (invariante b).
+function rateLimitKey(socket: Socket): string {
+  const userId = socket.data.userId as string | null
+  return userId ?? `ip:${socket.handshake.address}`
+}
+
+function emitRateLimited(socket: Socket): void {
+  socket.emit('diagram:error', {
+    error: 'Has alcanzado el límite de generaciones por minuto. Espera un momento e inténtalo de nuevo.',
+    category: 'rate_limit',
+  })
+}
+
 // Gestión websocket
 io.on('connection', (socket) => {
   const userId = socket.data.userId as string | null
   console.log(userId ? `Cliente conectado (user ${userId})` : 'Cliente conectado (anónimo)')
 
+  // S9.3b — Generación con admisión (rate limit + caché). useCache=false es el
+  // camino de REDO (decisión P3 del usuario): el botón "Regenerar" fuerza una
+  // generación nueva saltándose el lookup y SOBRESCRIBE la entrada (upsert), de
+  // modo que la caché siempre devuelve el último resultado para ese prompt. Sin
+  // este camino, un prompt cacheado nunca podría regenerarse.
+  async function runGeneration(prompt: string, useCache: boolean) {
+    // Rate limit PRIMERO (cuenta esta petición), también en redo: un hit o un
+    // redo no evaden el límite (invariante b).
+    if (!checkRateLimit(rateLimitKey(socket))) {
+      console.log('⛔ rate limit →', rateLimitKey(socket))
+      emitRateLimited(socket)
+      return
+    }
+
+    if (useCache) {
+      const cached = await getCached(prompt)
+      if (cached) {
+        console.log('⚡ cache HIT → se sirve sin llamar al agente')
+        socket.emit('diagram:done', {
+          title: cached.title,
+          degraded: false,
+          degradations: [],
+          refinement_history: [],
+          diagram: cached.diagram,
+        })
+        return
+      }
+    }
+
+    // Miss o redo: genera y, si el resultado es un éxito LIMPIO (≥1 nodo, no
+    // degradado), lo cachea/sobrescribe para la próxima vez (onDone).
+    await streamAgentToSocket('http://localhost:8000/generate/stream', { prompt }, socket, (done) => {
+      const nodes = (done.diagram as { nodes?: unknown[] } | null)?.nodes
+      if (!done.degraded && Array.isArray(nodes) && nodes.length > 0) {
+        setCached(prompt, done.title ?? null, done.diagram)
+      }
+    })
+  }
+
   // Generación: no hay diagrama previo → el agente parte de cero (S7.1).
   socket.on('message:send', async (message) => {
     const prompt = message.toString()
     console.log('Mensaje recibido del cliente (generación):', prompt)
-    await streamAgentToSocket('http://localhost:8000/generate/stream', { prompt }, socket)
+    await runGeneration(prompt, true)
+  })
+
+  // S9.3b — Redo: regenera el mismo prompt IGNORANDO la caché y sobrescribe.
+  socket.on('message:regenerate', async (payload) => {
+    const prompt = (payload?.prompt ?? '').toString()
+    if (!prompt) return
+    console.log('Mensaje recibido del cliente (regenerar, sin caché):', prompt)
+    await runGeneration(prompt, false)
   })
 
   // Refinamiento: el frontend ya decidió que hay diagrama y adjunta su versión
-  // compacta. El gateway solo reenvía {prompt, diagram} al pipeline de refinado.
+  // compacta. El backend solo reenvía {prompt, diagram} al pipeline de refinado.
+  // No se cachea (depende del diagrama de entrada, no solo del prompt).
   socket.on('message:refine', async (payload) => {
     const { prompt, diagram } = payload ?? {}
     console.log('Mensaje recibido del cliente (refinamiento):', prompt)
+    if (!checkRateLimit(rateLimitKey(socket))) {
+      console.log('⛔ rate limit →', rateLimitKey(socket))
+      emitRateLimited(socket)
+      return
+    }
     console.log(`   diagrama adjunto: type=${diagram?.diagram_type ?? 'NULL'} · ${diagram?.nodes?.length ?? 0} nodos · ${diagram?.edges?.length ?? 0} aristas`)
     await streamAgentToSocket('http://localhost:8000/refine/stream', { prompt, diagram }, socket)
   })
@@ -84,6 +155,11 @@ io.on('connection', (socket) => {
   socket.on('message:clarification_answer', async (payload) => {
     const { thread_id, answer } = payload ?? {}
     console.log('Respuesta de clarificación recibida:', answer)
+    if (!checkRateLimit(rateLimitKey(socket))) {
+      console.log('⛔ rate limit →', rateLimitKey(socket))
+      emitRateLimited(socket)
+      return
+    }
     await streamAgentToSocket('http://localhost:8000/refine/resume', { thread_id, answer }, socket)
   })
 
