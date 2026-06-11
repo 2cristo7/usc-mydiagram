@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
+import type { Request, Response, NextFunction } from 'express'
 
 // S9.2 — Verificación del JWT que emite Supabase Auth.
 //
@@ -49,5 +50,39 @@ export async function verifySupabaseToken(token: string): Promise<AuthenticatedU
   return {
     userId: payload.sub,
     email: typeof payload.email === 'string' ? payload.email : undefined,
+  }
+}
+
+// S9.3 — Datos de autenticación adjuntados a la request por requireAuth. El
+// accessToken crudo se conserva para REENVIARLO a Supabase (RLS actúa como el
+// usuario), no solo el userId ya extraído.
+export interface AuthedRequest extends Request {
+  userId?: string
+  accessToken?: string
+}
+
+/**
+ * Middleware Express para las rutas de persistencia (S9.3).
+ *
+ * A diferencia del handshake del socket (S9.2), aquí NO hay degradación a
+ * anónimo: el modelo es "login solo para guardar", así que estas rutas exigen
+ * sesión. Sin token o con token inválido → 401 (el frontend debe iniciar sesión
+ * o refrescar). Deja `req.userId` y `req.accessToken` para el handler.
+ */
+export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
+  const header = req.headers.authorization
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined
+  if (!token) {
+    res.status(401).json({ error: 'Falta el token de sesión' })
+    return
+  }
+  try {
+    const { userId } = await verifySupabaseToken(token)
+    req.userId = userId
+    req.accessToken = token
+    next()
+  } catch (err) {
+    console.warn('REST rechazado: token inválido —', (err as Error).message)
+    res.status(401).json({ error: 'Token inválido' })
   }
 }

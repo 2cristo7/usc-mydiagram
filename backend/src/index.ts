@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import { Server } from 'socket.io'
 import { streamAgentToSocket } from './agentStream'
 import { verifySupabaseToken } from './auth'
+import diagramsRouter from './diagrams'
 
 // Cargar variables de entorno
 dotenv.config()
@@ -28,6 +29,10 @@ app.get('/health', (req, res) => {
   console.log('Ruta de salud accedida')
   res.json({ status: 'ok', service: 'backend' })
 })
+
+// S9.3 — Persistencia de diagramas (CRUD). Todas las rutas exigen sesión
+// (requireAuth dentro del router): "login solo para guardar".
+app.use('/diagrams', diagramsRouter)
 
 // S9.2 — Autenticación del handshake de Socket.io.
 // Modo "login solo para guardar": la generación funciona sin sesión, así que una
