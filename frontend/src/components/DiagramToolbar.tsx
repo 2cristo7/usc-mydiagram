@@ -1,12 +1,16 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { getViewportForBounds } from "@xyflow/react";
 import { toPng } from "html-to-image";
 import { useStore } from "../store/index";
+import { useAuthStore } from "../store/auth";
 import { diagramImportSchema } from "../types";
 import {
     diagramFilename, triggerDownload, triggerJsonDownload,
     getRenderedNodeBounds, getRenderedEdges, loadImage,
 } from "../ui/utils/download";
+import { persistCurrentDiagram } from "../lib/api";
+import { AuthButton } from "./AuthButton";
+import { HistoryPanel } from "./HistoryPanel";
 
 // Márgenes de la imagen exportada alrededor del grafo (px) y límites de zoom del
 // encuadre. MIN/MAX_ZOOM evitan que un diagrama diminuto se exporte gigantesco o
@@ -22,14 +26,40 @@ const PIXEL_RATIO = 2;
 // aunque no haya diagrama (necesario para que Importar, S8.2, esté disponible en
 // estado idle). Export solo se habilita en `ready`: nunca se exporta un diagrama
 // a medio generar ni un refinamiento en pausa (awaiting_clarification).
-export function DiagramToolbar() {
+export function DiagramToolbar({ onRegenerate }: { onRegenerate: () => void }) {
     const uiState = useStore((s) => s.uiState);
     const currentDiagram = useStore((s) => s.currentDiagram);
     const setCurrentDiagram = useStore((s) => s.setCurrentDiagram);
+    const setCurrentDiagramId = useStore((s) => s.setCurrentDiagramId);
+    const setLastGenerationPrompt = useStore((s) => s.setLastGenerationPrompt);
+    const lastGenerationPrompt = useStore((s) => s.lastGenerationPrompt);
     const setUiState = useStore((s) => s.setUiState);
+    const user = useAuthStore((s) => s.user);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [saving, setSaving] = useState(false);
+    const [savedTick, setSavedTick] = useState(false);
 
     const canExport = uiState === 'ready';
+    // Guardar (explícito, P3-c): exige sesión y un diagrama presente. Cubre las
+    // ediciones manuales que no pasan por un `done` del agente (decisión P3: sin
+    // debounce, el guardado manual es el camino para persistirlas).
+    const canSave = !!user && !!currentDiagram && uiState === 'ready' && !saving;
+    // Regenerar (redo, S9.3b): rehace el prompt que originó el diagrama saltándose
+    // la caché. Solo si hubo una generación en esta sesión (lastGenerationPrompt).
+    const canRegenerate = uiState === 'ready' && !!lastGenerationPrompt;
+
+    async function handleSave() {
+        setSaving(true);
+        setSavedTick(false);
+        const r = await persistCurrentDiagram();
+        setSaving(false);
+        if (r.ok) {
+            setSavedTick(true);
+            setTimeout(() => setSavedTick(false), 1500);
+        } else if (r.error !== 'no-session') {
+            window.alert(`No se pudo guardar: ${r.error}`);
+        }
+    }
     // Importar disponible al partir de cero (idle), tras un diagrama (ready) o para
     // recuperarse (error). Se bloquea mientras `generating` (un diagrama entrante por
     // WS pisaría/competiría con el importado) y en `awaiting_clarification` (hay un
@@ -129,6 +159,11 @@ export function DiagramToolbar() {
                 return;
             }
             setCurrentDiagram(parsed.data);
+            // S9.3 — un diagrama importado no procede de la BD: id null → si se
+            // guarda, será un POST (fila nueva), no un PATCH de un id ajeno.
+            setCurrentDiagramId(null);
+            // S9.3b — un importado no tiene prompt de origen → no se puede regenerar.
+            setLastGenerationPrompt(null);
             setUiState('ready');
         } catch (err) {
             console.error('[import] error al leer/parsear el JSON:', err);
@@ -168,6 +203,28 @@ export function DiagramToolbar() {
                 onChange={handleImportFile}
                 className="hidden"
             />
+            {/* S9.3b — Regenerar (redo): rehace el prompt saltándose la caché. */}
+            <button
+                onClick={onRegenerate}
+                disabled={!canRegenerate}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+                Regenerar
+            </button>
+            {/* S9.3 — guardado explícito (P3-c). Solo con sesión y diagrama listo;
+                persiste también las ediciones manuales que no disparan un done. */}
+            <button
+                onClick={handleSave}
+                disabled={!canSave}
+                className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+                {saving ? 'Guardando…' : savedTick ? 'Guardado ✓' : 'Guardar'}
+            </button>
+            {/* S9.3 — historial (solo con sesión), alineado a la derecha junto al login. */}
+            <div className="ml-auto flex items-center gap-2">
+                <HistoryPanel />
+                <AuthButton />
+            </div>
         </div>
     );
 }

@@ -13,7 +13,22 @@ export interface SocketLike {
 // El gateway solo enruta: no interpreta la lógica del agente (antipatrón de la
 // visión global). Compartido por generación y refinamiento (S7.1): ambos hablan
 // el mismo protocolo NDJSON, solo cambian la URL del agente y el cuerpo.
-export async function streamAgentToSocket(url: string, body: object, socket: SocketLike) {
+// S9.3b — onDone: callback opcional con el evento `done` del agente. La
+// generación lo usa para cachear el diagrama recién generado (miss); el
+// refinamiento no lo pasa (no se cachea). El backend NO interpreta el diagrama
+// (sigue sin lógica de agente): solo entrega el snapshot tal cual para guardarlo.
+export interface DoneEvent {
+  title?: string | null
+  diagram?: unknown
+  degraded?: boolean
+}
+
+export async function streamAgentToSocket(
+  url: string,
+  body: object,
+  socket: SocketLike,
+  onDone?: (done: DoneEvent) => void,
+) {
   try {
     const agentRes = await fetch(url, {
       method: 'POST',
@@ -58,6 +73,8 @@ export async function streamAgentToSocket(url: string, body: object, socket: Soc
                 refinement_history: item.refinement_history ?? [],
                 diagram: item.diagram ?? null,
               })
+              // S9.3b — notifica el done para que la generación cachee (miss).
+              onDone?.({ title: item.title, diagram: item.diagram ?? null, degraded: item.degraded ?? false })
               break
             case 'tool_call':
               // S7.5 — traza en vivo: el agente decidió invocar una tool (se

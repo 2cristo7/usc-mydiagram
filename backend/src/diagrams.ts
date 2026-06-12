@@ -1,0 +1,138 @@
+import { Router, type Response } from 'express'
+import { requireAuth, type AuthedRequest } from './auth'
+import { supabaseForUser } from './supabase'
+
+// S9.3 — CRUD de diagramas persistidos. El gateway es el ÚNICO punto de acceso a
+// datos (decisión P1: frontend → gateway → Supabase, nunca directo): centraliza
+// auth y deja el frontend agnóstico de la topología de la BD.
+//
+// Cada handler crea un cliente Supabase con el JWT del usuario (req.accessToken):
+// la RLS de S9.1 impone la propiedad de cada fila. El backend no filtra por
+// user_id a mano en SELECT/UPDATE/DELETE — la política `auth.uid() = user_id` lo
+// hace en la BD. En el INSERT sí escribe user_id explícito (la fila aún no
+// existe) y debe coincidir con auth.uid() o el WITH CHECK lo rechaza.
+
+const TITLE_FALLBACK = 'Diagrama sin título'
+
+interface DiagramPayload {
+  diagram?: {
+    title?: string | null
+    diagram_type?: string | null
+    nodes?: unknown[]
+    edges?: unknown[]
+  }
+  prompt?: string | null
+}
+
+// La forma mínima que exige el CHECK de la tabla (objeto con nodes[]/edges[]) y
+// que diagram_type esté presente (columna NOT NULL). Se valida aquí para dar un
+// 400 accionable en vez de dejar que el INSERT reviente con un error de Postgres.
+function validate(payload: DiagramPayload): { ok: true } | { ok: false; error: string } {
+  const d = payload?.diagram
+  if (!d || typeof d !== 'object') return { ok: false, error: 'Falta el diagrama' }
+  if (!d.diagram_type) return { ok: false, error: 'Falta diagram_type' }
+  if (!Array.isArray(d.nodes) || !Array.isArray(d.edges)) {
+    return { ok: false, error: 'El diagrama debe tener nodes[] y edges[]' }
+  }
+  return { ok: true }
+}
+
+// Construye las columnas a partir del payload. title se rellena con fallback si
+// el agente devolvió null (decisión #2 de S9.1: la columna es NOT NULL y el
+// backend garantiza el valor, no la UI).
+function columns(payload: DiagramPayload) {
+  const d = payload.diagram!
+  return {
+    title: d.title?.trim() || TITLE_FALLBACK,
+    diagram_type: d.diagram_type,
+    prompt: payload.prompt ?? null,
+    data: d,
+  }
+}
+
+const router = Router()
+router.use(requireAuth)
+
+// Lista del historial: solo metadata (P5), ordenada por el índice (user_id,
+// updated_at desc) de S9.1. El data completo se trae al abrir un diagrama.
+router.get('/', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .select('id, title, diagram_type, created_at, updated_at')
+    .order('updated_at', { ascending: false })
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  res.json(data)
+})
+
+// Un diagrama completo (incluye data) para cargarlo al canvas. La RLS hace que
+// un id de otro usuario devuelva 0 filas → 404, sin filtrar por user_id a mano.
+router.get('/:id', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .select('*')
+    .eq('id', req.params.id)
+    .maybeSingle()
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  if (!data) {
+    res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  res.json(data)
+})
+
+// Primer guardado: INSERT. Devuelve el id nuevo, que el frontend cachea en el
+// store (P4) para que los guardados siguientes sean PATCH.
+router.post('/', async (req: AuthedRequest, res: Response) => {
+  const v = validate(req.body)
+  if (!v.ok) {
+    res.status(400).json({ error: v.error })
+    return
+  }
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .insert({ user_id: req.userId, ...columns(req.body) })
+    .select('id, title, diagram_type, created_at, updated_at')
+    .single()
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  res.status(201).json(data)
+})
+
+// Guardados sucesivos: UPDATE de un diagrama ya existente. La RLS impide tocar
+// uno ajeno (0 filas → 404). updated_at lo refresca el trigger de S9.1.
+router.patch('/:id', async (req: AuthedRequest, res: Response) => {
+  const v = validate(req.body)
+  if (!v.ok) {
+    res.status(400).json({ error: v.error })
+    return
+  }
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .update(columns(req.body))
+    .eq('id', req.params.id)
+    .select('id, title, diagram_type, created_at, updated_at')
+    .maybeSingle()
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  if (!data) {
+    res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  res.json(data)
+})
+
+export default router
