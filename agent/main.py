@@ -7,9 +7,10 @@ import uuid
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from typing import Optional
 from graph import build_graph, initial_generation_state
 from outcome import classify_outcome
-from schemas import CompactDiagram
+from schemas import CompactDiagram, DiagramType
 
 app = FastAPI()
 
@@ -43,6 +44,11 @@ def _get_checkpointer():
 
 class GenerateRequest(BaseModel):
     prompt: str
+    # S10.2 — Tipo preseleccionado desde la UI (opcional). Ausente/None =
+    # automático: el agente clasifica el tipo como hasta ahora. Pydantic valida
+    # el valor contra el enum DiagramType en el BORDE: un tipo forzado fuera del
+    # enum da 422 explícito, no fallo silencioso (tipos en los bordes, §2).
+    diagram_type: Optional[DiagramType] = None
 
 
 # S7.1 — Refinamiento sobre un diagrama existente. `diagram` es la versión
@@ -73,7 +79,7 @@ async def generate_stream(req: GenerateRequest):
     queue: asyncio.Queue = asyncio.Queue()
     graph = build_graph(queue)
 
-    initial_state = initial_generation_state(req.prompt)
+    initial_state = initial_generation_state(req.prompt, req.diagram_type)
 
     async def run_graph():
         # La taxonomía de desenlaces vive en classify_outcome (S6.9): main.py es el

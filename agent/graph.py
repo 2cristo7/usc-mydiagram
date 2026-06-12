@@ -46,16 +46,21 @@ def route_after_validate_schema(state: DiagramState) -> str:
     return "extract_edges"
 
 
-def initial_generation_state(prompt: str) -> dict:
+def initial_generation_state(prompt: str, diagram_type=None) -> dict:
     """Estado inicial del pipeline de generación S6. Centralizado aquí (S7.3) para
     que /generate/stream y el nodo `regenerate` del agente (escape hatch
     regenerate_from_scratch) arranquen el grafo con EXACTAMENTE los mismos campos
     sembrados — un campo olvidado en uno de los dos sitios daría KeyError en algún
-    nodo según el camino. Una sola fuente de verdad evita ese drift."""
+    nodo según el camino. Una sola fuente de verdad evita ese drift.
+
+    S10.2 — `diagram_type` opcional: si el usuario preseleccionó el tipo en la UI,
+    entra aquí ya parseado (DiagramType) y classify se salta la llamada LLM de
+    clasificación. None = automático (comportamiento histórico: lo clasifica el
+    LLM). El escape hatch regenerate_from_scratch no fuerza tipo → default None."""
     return {
         "prompt": prompt,
         "is_diagram_request": False,
-        "diagram_type": None,
+        "diagram_type": diagram_type,
         "title": None,
         "nodes": [],
         "edges": [],
