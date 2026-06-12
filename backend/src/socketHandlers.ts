@@ -33,6 +33,26 @@ function rateLimitKey(socket: Socket): string {
   return userId ?? `ip:${socket.handshake.address}`
 }
 
+// S10.2 — Normaliza el tipo preseleccionado a `string | undefined`. El gateway
+// NO valida el enum (eso es contrato del agente, que da 422 a un tipo fuera de
+// DiagramType → no es lógica de agente en el gateway, §4): solo descarta lo que
+// no sea un string no vacío. Un tipo inválido nunca llega a cachearse porque el
+// agente lo rechaza antes del `done`.
+function normalizeDiagramType(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+// S10.2 — El payload de generación pasó de string pelado a { prompt, diagram_type? }.
+// Tolerante con el formato antiguo: un string se interpreta como prompt sin tipo.
+function parseGenerationPayload(message: unknown): { prompt: string; diagramType?: string } {
+  if (typeof message === 'string') return { prompt: message }
+  const obj = (message ?? {}) as { prompt?: unknown; diagram_type?: unknown }
+  return {
+    prompt: (obj.prompt ?? '').toString(),
+    diagramType: normalizeDiagramType(obj.diagram_type),
+  }
+}
+
 function emitRateLimited(socket: Socket): void {
   socket.emit('diagram:error', {
     error: 'Has alcanzado el límite de generaciones por minuto. Espera un momento e inténtalo de nuevo.',
@@ -80,7 +100,10 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
     // S9.3b — Generación con admisión (rate limit + caché). useCache=false es el
     // camino de REDO: "Regenerar" fuerza una generación saltándose el lookup y
     // SOBRESCRIBE la entrada (upsert).
-    async function runGeneration(prompt: string, useCache: boolean) {
+    // S10.2 — `diagramType` opcional: el tipo preseleccionado en la UI. Entra en
+    // la clave de caché (getCached/setCached) y viaja al agente en el body. Si es
+    // undefined (automático) la caché usa la clave histórica y el agente clasifica.
+    async function runGeneration(prompt: string, useCache: boolean, diagramType?: string) {
       // S10.1 — frescura del token PRIMERO: un socket con token caducado no llega
       // a consumir rate limit ni a correr el agente. Si caducó, ya se desconectó.
       if (!assertFreshToken(socket)) return
@@ -92,7 +115,7 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
       }
 
       if (useCache) {
-        const cached = await getCached(prompt)
+        const cached = await getCached(prompt, diagramType)
         if (cached) {
           console.log('⚡ cache HIT → se sirve sin llamar al agente')
           socket.emit('diagram:done', {
@@ -106,27 +129,33 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
         }
       }
 
-      await streamAgentToSocket(`${agentBaseUrl}/generate/stream`, { prompt }, socket, (done) => {
+      await streamAgentToSocket(`${agentBaseUrl}/generate/stream`, { prompt, diagram_type: diagramType }, socket, (done) => {
         const nodes = (done.diagram as { nodes?: unknown[] } | null)?.nodes
         if (!done.degraded && Array.isArray(nodes) && nodes.length > 0) {
-          setCached(prompt, done.title ?? null, done.diagram)
+          setCached(prompt, done.title ?? null, done.diagram, diagramType)
         }
       })
     }
 
     // Generación: no hay diagrama previo → el agente parte de cero (S7.1).
+    // S10.2 — el payload pasó de string pelado a { prompt, diagram_type? }. Se
+    // tolera el string antiguo (un cliente sin actualizar manda solo el prompt →
+    // tipo automático) para no romper conexiones a medio desplegar.
     socket.on('message:send', async (message) => {
-      const prompt = message.toString()
-      console.log('Mensaje recibido del cliente (generación):', prompt)
-      await runGeneration(prompt, true)
+      const { prompt, diagramType } = parseGenerationPayload(message)
+      console.log(`Mensaje recibido del cliente (generación): ${prompt}${diagramType ? ` [tipo: ${diagramType}]` : ' [tipo: auto]'}`)
+      await runGeneration(prompt, true, diagramType)
     })
 
     // S9.3b — Redo: regenera el mismo prompt IGNORANDO la caché y sobrescribe.
+    // S10.2 — conserva el tipo forzado original (lo reenvía el frontend) para que
+    // regenerar no cambie el tipo del diagrama bajo los pies del usuario.
     socket.on('message:regenerate', async (payload) => {
       const prompt = (payload?.prompt ?? '').toString()
       if (!prompt) return
-      console.log('Mensaje recibido del cliente (regenerar, sin caché):', prompt)
-      await runGeneration(prompt, false)
+      const diagramType = normalizeDiagramType(payload?.diagram_type)
+      console.log(`Mensaje recibido del cliente (regenerar, sin caché): ${prompt}${diagramType ? ` [tipo: ${diagramType}]` : ' [tipo: auto]'}`)
+      await runGeneration(prompt, false, diagramType)
     })
 
     // Refinamiento: el frontend ya decidió que hay diagrama y adjunta su versión

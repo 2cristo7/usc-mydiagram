@@ -130,3 +130,31 @@ describe('socket auth E2E (frescura de token)', () => {
     expect(c.connected).toBe(true)
   })
 })
+
+describe('S10.2 — tipo preseleccionado viaja al agente', () => {
+  it('message:send con diagram_type lo reenvía en el body del agente', async () => {
+    const c = await connect('fresh')
+    c.emit('message:send', { prompt: 'haz un flujo de login', diagram_type: 'flowchart' })
+    await waitFor(c, 'diagram:done')
+    const body = streamMock.mock.calls[0][1] as { prompt: string; diagram_type?: string }
+    expect(body.prompt).toBe('haz un flujo de login')
+    expect(body.diagram_type).toBe('flowchart')
+  })
+
+  it('message:send sin tipo (string pelado) → body con diagram_type undefined (auto)', async () => {
+    const c = await connect('fresh')
+    c.emit('message:send', 'haz un ERD')
+    await waitFor(c, 'diagram:done')
+    const body = streamMock.mock.calls[0][1] as { prompt: string; diagram_type?: string }
+    expect(body.prompt).toBe('haz un ERD')
+    expect(body.diagram_type).toBeUndefined()
+  })
+
+  it('message:regenerate conserva el tipo forzado original', async () => {
+    const c = await connect('fresh')
+    c.emit('message:regenerate', { prompt: 'haz un flujo', diagram_type: 'flowchart' })
+    await waitFor(c, 'diagram:done')
+    const body = streamMock.mock.calls[0][1] as { prompt: string; diagram_type?: string }
+    expect(body.diagram_type).toBe('flowchart')
+  })
+})

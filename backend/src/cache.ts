@@ -19,8 +19,17 @@ const TTL_DAYS = Number(process.env.CACHE_TTL_DAYS ?? 30)
 // Normalización para MAXIMIZAR aciertos (decisión P2): trim + minúsculas +
 // colapsar espacios. "Crear un ERD de Blog" y "crear un erd de  blog" comparten
 // entrada. El prompt original se guarda aparte (columna prompt) para depurar.
-export function normalizeKey(prompt: string): string {
-  return prompt.trim().toLowerCase().replace(/\s+/g, ' ')
+//
+// S10.2 — El tipo preseleccionado entra en la CLAVE: el mismo prompt forzado a
+// "flowchart" y dejado en automático son peticiones distintas y no deben
+// compartir entrada (un hit cruzado serviría un diagrama del tipo equivocado).
+// Se pliega como sufijo del prompt_key (no una columna nueva → sin migración) y
+// el onConflict 'prompt_key,model' sigue valiendo. AUTO (undefined) → SIN sufijo:
+// la clave queda IDÉNTICA a la histórica, así las entradas ya cacheadas en
+// automático siguen acertando sin invalidarse.
+export function normalizeKey(prompt: string, diagramType?: string): string {
+  const base = prompt.trim().toLowerCase().replace(/\s+/g, ' ')
+  return diagramType ? `${base}|type=${diagramType}` : base
 }
 
 export interface CachedDiagram {
@@ -33,13 +42,13 @@ export interface CachedDiagram {
  * las entradas más viejas que el TTL. Devuelve null en miss o ante cualquier
  * error de BD (la caché es un acelerador, nunca debe tumbar la generación).
  */
-export async function getCached(prompt: string): Promise<CachedDiagram | null> {
+export async function getCached(prompt: string, diagramType?: string): Promise<CachedDiagram | null> {
   const cutoff = new Date(Date.now() - TTL_DAYS * 86_400_000).toISOString()
   try {
     const { data, error } = await supabaseService()
       .from('generation_cache')
       .select('title, diagram')
-      .eq('prompt_key', normalizeKey(prompt))
+      .eq('prompt_key', normalizeKey(prompt, diagramType))
       .eq('model', MODEL)
       .gte('created_at', cutoff)
       .maybeSingle()
@@ -56,13 +65,13 @@ export async function getCached(prompt: string): Promise<CachedDiagram | null> {
  * renueva created_at → resetea el TTL. Best-effort: un fallo se loguea y no
  * propaga (no debe romper la respuesta ya servida al usuario).
  */
-export async function setCached(prompt: string, title: string | null, diagram: unknown): Promise<void> {
+export async function setCached(prompt: string, title: string | null, diagram: unknown, diagramType?: string): Promise<void> {
   try {
     const { error } = await supabaseService()
       .from('generation_cache')
       .upsert(
         {
-          prompt_key: normalizeKey(prompt),
+          prompt_key: normalizeKey(prompt, diagramType),
           prompt,
           model: MODEL,
           title,

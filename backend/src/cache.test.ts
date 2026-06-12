@@ -21,6 +21,19 @@ describe('normalizeKey', () => {
   it('dos prompts que solo difieren en mayúsculas/espacios comparten clave', () => {
     expect(normalizeKey('Diagrama De Flujo')).toBe(normalizeKey('diagrama  de flujo'))
   })
+
+  // S10.2 — el tipo preseleccionado entra en la clave.
+  it('AUTO (sin tipo) deja la clave IDÉNTICA a la histórica (compat hacia atrás)', () => {
+    expect(normalizeKey('Crear ERD', undefined)).toBe(normalizeKey('Crear ERD'))
+    expect(normalizeKey('Crear ERD')).toBe('crear erd')
+  })
+  it('el mismo prompt con tipos distintos NO comparte clave', () => {
+    expect(normalizeKey('Crear blog', 'flowchart')).not.toBe(normalizeKey('Crear blog', 'erd'))
+  })
+  it('forzar un tipo difiere de dejarlo en automático', () => {
+    expect(normalizeKey('Crear blog', 'erd')).not.toBe(normalizeKey('Crear blog'))
+    expect(normalizeKey('Crear blog', 'erd')).toBe('crear blog|type=erd')
+  })
 })
 
 describe('getCached', () => {
@@ -59,5 +72,23 @@ describe('setCached', () => {
     expect(row.prompt_key).toBe('crear erd')
     expect(row.prompt).toBe('  Crear ERD ') // el original se conserva para depurar
     expect(opts).toEqual({ onConflict: 'prompt_key,model' })
+  })
+
+  // S10.2 — el tipo forzado entra en prompt_key al guardar.
+  it('con tipo forzado, la clave incluye el sufijo de tipo', async () => {
+    await setCached('Crear blog', 'Blog', { nodes: [], edges: [] }, 'flowchart')
+    const [row] = upsert.mock.calls[0] as unknown as [Record<string, unknown>]
+    expect(row.prompt_key).toBe('crear blog|type=flowchart')
+  })
+})
+
+// S10.2 — el lookup también namespacia por tipo.
+describe('getCached con tipo', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('busca por la clave con sufijo de tipo cuando se fuerza', async () => {
+    maybeSingle.mockResolvedValueOnce({ data: null, error: null })
+    await getCached('Crear blog', 'erd')
+    expect(eqKey).toHaveBeenCalledWith('prompt_key', 'crear blog|type=erd')
   })
 })
