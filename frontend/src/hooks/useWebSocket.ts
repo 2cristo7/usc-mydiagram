@@ -3,6 +3,8 @@ import type { Message, ConnectionState, Degradation, DegradationCategory, AgentT
 import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
 import { useAuthStore } from "../store/auth";
+import { supabase } from "../lib/supabase";
+import { signOut } from "./useAuth";
 import { diagramToJson } from "../ui/utils/diagramToJson";
 import { persistCurrentDiagram } from "../lib/api";
 
@@ -41,6 +43,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
     useEffect(() => {
 
+        // S10.1 — la suscripción a los refrescos de token se limpia junto al socket.
+        let authUnsub: (() => void) | undefined;
+
         try {
             const token = useAuthStore.getState().session?.access_token;
             socketRef.current = io('http://localhost:3001', {
@@ -48,6 +53,31 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 auth: token ? { token } : {},
             });
             const socket = socketRef.current;
+
+            // S10.1 — supabase-js refresca el access token en segundo plano (mismo
+            // usuario): se lo reenviamos al socket vivo para renovar su `exp` en el
+            // backend SIN recrear la conexión (preserva la traza viva del agente).
+            // Un cambio de identidad (login/logout) NO llega por aquí: recrea el
+            // socket vía la dependencia `userId` de este efecto.
+            const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+                if (event === 'TOKEN_REFRESHED' && session?.access_token) {
+                    socket.emit('auth:refresh', session.access_token);
+                }
+            });
+            authUnsub = () => authSub.subscription.unsubscribe();
+
+            // S10.1 — el backend cortó la conexión por token caducado (o anomalía
+            // de identidad): avisamos y deslogueamos para forzar un login limpio.
+            socket.on('auth:expired', () => {
+                addMessage({
+                    id: crypto.randomUUID(),
+                    text: 'Tu sesión ha expirado. Vuelve a iniciar sesión.',
+                    sender: 'system',
+                    timestamp: new Date(),
+                });
+                setUiState('error');
+                void signOut();
+            });
 
             socket.on('connect', () => {
                 setConnectionState('connected');
@@ -198,6 +228,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         }
 
         return () => {
+            authUnsub?.();
             if (socketRef.current) {
                 socketRef.current.disconnect();
             }
