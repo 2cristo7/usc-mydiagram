@@ -30,6 +30,10 @@ function getJwks(): { jwks: JWTVerifyGetKey; issuer: string } {
 export interface AuthenticatedUser {
   userId: string
   email?: string
+  // S10.1 — Caducidad (epoch en segundos) del token verificado. Se conserva para
+  // guardarla en `socket.data.tokenExp` y poder comprobar la frescura de una
+  // conexión viva sin re-verificar cripto en el camino caliente (ver socketAuth).
+  exp?: number
 }
 
 /**
@@ -50,6 +54,7 @@ export async function verifySupabaseToken(token: string): Promise<AuthenticatedU
   return {
     userId: payload.sub,
     email: typeof payload.email === 'string' ? payload.email : undefined,
+    exp: payload.exp,
   }
 }
 
