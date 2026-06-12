@@ -10,6 +10,8 @@ beforeEach(() => {
       edges: [],
       currentDiagram: null,
       toolTrace: [],
+      selectedDiagramType: null,
+      lastGenerationType: null,
     })
   })
 
@@ -17,6 +19,21 @@ test('addMessage', () => {
   const message = { id: '1', text: 'Hello, world!', sender: 'user' as const, timestamp: new Date() }
   useStore.getState().addMessage(message)
   expect(useStore.getState().messages).toContain(message)
+})
+
+// S10.2 — tipo preseleccionado para la próxima generación.
+test('selectedDiagramType: default null (automático) y se puede fijar/limpiar', () => {
+  expect(useStore.getState().selectedDiagramType).toBeNull()
+  useStore.getState().setSelectedDiagramType('flowchart' as DiagramType)
+  expect(useStore.getState().selectedDiagramType).toBe('flowchart')
+  useStore.getState().setSelectedDiagramType(null)
+  expect(useStore.getState().selectedDiagramType).toBeNull()
+})
+
+test('lastGenerationType: recuerda el tipo que originó el diagrama (para regenerar)', () => {
+  expect(useStore.getState().lastGenerationType).toBeNull()
+  useStore.getState().setLastGenerationType('sequence' as DiagramType)
+  expect(useStore.getState().lastGenerationType).toBe('sequence')
 })
 
 test('setCurrentDiagram', () => {

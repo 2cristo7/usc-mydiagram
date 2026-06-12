@@ -106,6 +106,22 @@ export const diagramImportSchema = diagramSchema.refine(
 );
 
 export type DiagramType = z.infer<typeof diagramTypeSchema>;
+
+// S10.2 — Etiquetas legibles + orden para el selector de tipo de la UI. Deriva
+// del MISMO enum (diagramTypeSchema) que el contrato: añadir un tipo nuevo allí y
+// olvidarlo aquí lo deja sin etiqueta, pero el valor sigue siendo válido. El
+// "Automático" (que el agente clasifique) NO es un valor del enum: se modela como
+// ausencia (null en el store / campo ausente en el mensaje), no como opción aquí.
+export const DIAGRAM_TYPE_OPTIONS: { value: DiagramType; label: string }[] = [
+    { value: 'erd', label: 'Entidad-Relación' },
+    { value: 'uml_class', label: 'Clases UML' },
+    { value: 'sequence', label: 'Secuencia' },
+    { value: 'flowchart', label: 'Diagrama de flujo' },
+    { value: 'architecture', label: 'Arquitectura' },
+    { value: 'state_machine', label: 'Máquina de estados' },
+    { value: 'mindmap', label: 'Mapa mental' },
+];
+
 export type NodeType = z.infer<typeof nodeTypeSchema>;
 export type EdgeType = z.infer<typeof edgeTypeSchema>;
 export type DiagramNode = z.infer<typeof diagramNodeSchema>;

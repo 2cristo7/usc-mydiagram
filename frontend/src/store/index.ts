@@ -1,4 +1,4 @@
-import type { Message, DiagramNode, DiagramEdge, DiagramSchema, UIState, Clarification, AgentToolCall, ToolTraceEntry } from "../types";
+import type { Message, DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry } from "../types";
 import { create } from "zustand";
 
 interface MsgStore {
@@ -35,6 +35,16 @@ interface DiagramStore {
     // hay nada que regenerar.
     lastGenerationPrompt: string | null;
     setLastGenerationPrompt: (prompt: string | null) => void;
+    // S10.2 — tipo preseleccionado en la UI para la PRÓXIMA generación. null =
+    // automático (el agente clasifica, comportamiento histórico). Persiste entre
+    // mensajes: el usuario lo elige una vez y se respeta hasta que lo cambie.
+    selectedDiagramType: DiagramType | null;
+    setSelectedDiagramType: (type: DiagramType | null) => void;
+    // S10.2 — tipo que ORIGINÓ el diagrama vivo (espejo de lastGenerationPrompt),
+    // para que "Regenerar" conserve el tipo forzado en vez de volver a auto. null
+    // = se generó en automático o no se generó en esta sesión.
+    lastGenerationType: DiagramType | null;
+    setLastGenerationType: (type: DiagramType | null) => void;
     setCurrentDiagram: (diagram: DiagramSchema) => void;
     updateNode(id: string, changes: Partial<DiagramNode>): void;
     addNode: (node: DiagramNode) => void;
@@ -75,6 +85,10 @@ export const useStore = create<Store>()((set) => ({
     setCurrentDiagramId: (id) => set({ currentDiagramId: id }),
     lastGenerationPrompt: null,
     setLastGenerationPrompt: (prompt) => set({ lastGenerationPrompt: prompt }),
+    selectedDiagramType: null,
+    setSelectedDiagramType: (type) => set({ selectedDiagramType: type }),
+    lastGenerationType: null,
+    setLastGenerationType: (type) => set({ lastGenerationType: type }),
     setCurrentDiagram: (diagram) => set({
         currentDiagram: diagram,
         nodes: diagram.nodes,

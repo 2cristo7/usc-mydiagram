@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from './ChatMessage';
-import type { ConnectionState, ToolTraceEntry } from '../types';
+import type { ConnectionState, ToolTraceEntry, DiagramType } from '../types';
+import { DIAGRAM_TYPE_OPTIONS } from '../types';
 import { useStore } from '../store/index';
 
 interface ChatPanelProps {
@@ -41,7 +42,8 @@ function Spinner({ className = '' }: { className?: string }) {
 }
 
 export function ChatPanel({ connectionState, onSendMessage, onSendClarificationAnswer }: ChatPanelProps) {
-    const { messages, uiState, pendingClarification, toolTrace } = useStore();
+    const { messages, uiState, pendingClarification, toolTrace,
+            selectedDiagramType, setSelectedDiagramType, currentDiagram } = useStore();
     const [inputValue, setInputValue] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -159,6 +161,34 @@ export function ChatPanel({ connectionState, onSendMessage, onSendClarificationA
 
             {/* Input y botón */}
             <form onSubmit={handleSubmit} className="p-4 border-t border-gray-300">
+                {/* S10.2 — Selector de tipo (solo en generación desde cero: el
+                    refinamiento hereda el tipo del diagrama vivo). "Automático" =
+                    sin valor → el agente clasifica. */}
+                {!currentDiagram && uiState !== 'awaiting_clarification' && (
+                    <div className="flex items-center gap-2 mb-2">
+                        <label htmlFor="diagram-type" className="text-sm text-gray-600">
+                            Tipo
+                        </label>
+                        <select
+                            id="diagram-type"
+                            value={selectedDiagramType ?? ''}
+                            onChange={(e) =>
+                                setSelectedDiagramType(
+                                    e.target.value === '' ? null : (e.target.value as DiagramType),
+                                )
+                            }
+                            disabled={connectionState !== 'connected' || uiState === 'generating'}
+                            className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                        >
+                            <option value="">Automático</option>
+                            {DIAGRAM_TYPE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
                 <div className="flex gap-2">
                     <input
                         type="text"

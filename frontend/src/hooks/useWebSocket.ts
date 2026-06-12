@@ -256,7 +256,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         clearToolTrace();
         lastPromptRef.current = text;
 
-        const { currentDiagram, setCurrentDiagramId, setLastGenerationPrompt } = useStore.getState();
+        const { currentDiagram, setCurrentDiagramId, setLastGenerationPrompt,
+                selectedDiagramType, setLastGenerationType } = useStore.getState();
         if (currentDiagram) {
             socketRef.current?.emit('message:refine', {
                 prompt: text,
@@ -268,7 +269,14 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             setCurrentDiagramId(null);
             // S9.3b — guarda el prompt que origina el diagrama → habilita "Regenerar".
             setLastGenerationPrompt(text);
-            socketRef.current?.emit('message:send', text);
+            // S10.2 — tipo preseleccionado (o null = automático). Se recuerda para
+            // que "Regenerar" conserve el mismo tipo. El campo viaja SOLO si hay
+            // tipo: undefined ⇒ el agente clasifica (no inventamos un valor "auto").
+            setLastGenerationType(selectedDiagramType);
+            socketRef.current?.emit('message:send', {
+                prompt: text,
+                diagram_type: selectedDiagramType ?? undefined,
+            });
         }
         setUiState('generating');
     };
@@ -277,7 +285,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // caché (el backend sobrescribe su entrada con el nuevo resultado). Solo tiene
     // sentido si ese prompt existe (diagrama generado en esta sesión).
     const regenerate = () => {
-        const prompt = useStore.getState().lastGenerationPrompt;
+        const { lastGenerationPrompt: prompt, lastGenerationType } = useStore.getState();
         if (!prompt) return;
         addMessage({
             id: crypto.randomUUID(),
@@ -287,7 +295,11 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         });
         clearToolTrace();
         lastPromptRef.current = prompt;
-        socketRef.current?.emit('message:regenerate', { prompt });
+        // S10.2 — conserva el tipo forzado del diagrama original (o auto si null).
+        socketRef.current?.emit('message:regenerate', {
+            prompt,
+            diagram_type: lastGenerationType ?? undefined,
+        });
         setUiState('generating');
     };
 
