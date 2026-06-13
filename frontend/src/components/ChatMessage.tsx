@@ -1,26 +1,28 @@
 interface ChatMessageProps {
-    text: string;
-    sender: 'user' | 'system';
-    timestamp: Date;
+  text: string
+  sender: 'user' | 'system'
+  timestamp: Date
 }
 
 export function ChatMessage({ text, sender, timestamp }: ChatMessageProps) {
-    const timeString = timestamp.toLocaleTimeString();
+  const timeString = timestamp.toLocaleTimeString()
+  const isUser = sender === 'user'
 
-    const containerClass = sender === 'user'
-        ? 'flex justify-end'
-        : 'flex justify-start';
-
-    const messageClass = sender === 'user'
-        ? 'bg-blue-600 text-white'
-        : 'bg-gray-300 text-gray-900';
-
-    return (
-        <div className={`${containerClass} m-2`}>
-            <div className={`rounded-lg p-3 max-w-xs ${messageClass}`}>
-                <p className="break-words">{text}</p>
-                <span className="text-sm opacity-70">{timeString}</span>
-            </div>
-        </div>
-    );
+  return (
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} m-2`}>
+      <div
+        className={`
+          max-w-xs border-[3px] border-[var(--color-ink)] p-3 rounded-[var(--radius)]
+          shadow-[var(--shadow-brutal)]
+          ${isUser
+            ? 'bg-[var(--color-accent)] text-white'
+            : 'bg-[var(--color-surface)] text-[var(--color-ink)]'
+          }
+        `}
+      >
+        <p className="break-words text-sm">{text}</p>
+        <span className="text-xs opacity-60 font-[family-name:var(--font-mono)]">{timeString}</span>
+      </div>
+    </div>
+  )
 }

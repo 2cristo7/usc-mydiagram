@@ -2,8 +2,11 @@ import { useWebSocket } from "./hooks/useWebSocket";
 import { useAuth } from "./hooks/useAuth";
 import { ChatPanel } from "./components/ChatPanel";
 import { DiagramCanvas } from "./components/DiagramCanvas";
-import { DiagramToolbar } from "./components/DiagramToolbar";
 import { ReactFlowProvider } from "@xyflow/react";
+import { HistoryDrawer } from "./components/HistoryDrawer";
+import { TopBar } from "./components/TopBar";
+import { EditToolbar } from "./components/EditToolbar";
+import { FloatingPrompt } from "./components/FloatingPrompt";
 
 function App() {
   useAuth();
@@ -11,23 +14,33 @@ function App() {
 
   return (
     <ReactFlowProvider>
-        <div className="flex h-screen">
-          <div className="w-1/3">
-            <ChatPanel
-              connectionState={connectionState}
-              onSendMessage={sendMessage}
-              onSendClarificationAnswer={sendClarificationAnswer}
-            />
-          </div>
-          <div className="w-2/3 h-full flex flex-col">
-            <DiagramToolbar onRegenerate={regenerate} />
-            <div className="flex-1 min-h-0 flex">
-              <DiagramCanvas/>
-            </div>
-          </div>
+      <div
+        className="grid h-screen bg-[var(--color-bg)] font-[family-name:var(--font-sans)]"
+        style={{ gridTemplateColumns: "64px 1fr 360px", gridTemplateRows: "auto 1fr" }}
+      >
+        {/* Row 1 — TopBar spans all 3 columns */}
+        <TopBar onRegenerate={regenerate} />
+
+        {/* Row 2, Col 1 — EditToolbar */}
+        <EditToolbar />
+
+        {/* Row 2, Col 2 — Canvas with FloatingPrompt overlay */}
+        <div className="relative min-h-0">
+          <DiagramCanvas />
+          <FloatingPrompt
+            onSendMessage={sendMessage}
+            onSendClarificationAnswer={sendClarificationAnswer}
+          />
+        </div>
+
+        {/* Row 2, Col 3 — ChatPanel */}
+        <ChatPanel connectionState={connectionState} />
       </div>
+
+      {/* Overlay — HistoryDrawer */}
+      <HistoryDrawer />
     </ReactFlowProvider>
   );
 }
 
-export default App
+export default App;

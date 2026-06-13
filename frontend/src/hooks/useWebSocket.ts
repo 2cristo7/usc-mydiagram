@@ -222,8 +222,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 console.error("WebSocket error:", error);
             });
         } catch (error) {
-            setConnectionState('error');
-            setUiState('error');
+            Promise.resolve().then(() => {
+                setConnectionState('error');
+                setUiState('error');
+            });
             console.error("Failed to create WebSocket:", error);
         }
 
@@ -233,6 +235,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 socketRef.current.disconnect();
             }
         }
+        // store actions (addEdge, addMessage, etc.) are stable Zustand references — safe to omit
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [url, userId]);
 
     const sendMessage = (text: string) => {
