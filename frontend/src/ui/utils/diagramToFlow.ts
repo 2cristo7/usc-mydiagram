@@ -2,6 +2,7 @@ import type { DiagramSchema, NodeType } from "../../types";
 import '@xyflow/react/dist/style.css';
 import type { Node, Edge } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
+import { sequenceLayout } from './sequenceLayout';
 
 const nodeTypeMap: Partial<Record<NodeType, string>> = {
     class: 'umlClass',
@@ -16,13 +17,20 @@ const nodeTypeMap: Partial<Record<NodeType, string>> = {
     actor: 'sequenceActor',
     step: 'flow',
     decision: 'flow',
-    terminator: 'flow'
+    terminator: 'flow',
+    table: 'table',
+    state: 'state',
+    topic: 'mindmap'
 };
 
 export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
+    if (diagram.diagram_type === 'sequence') {
+        return sequenceLayout(diagram);
+    }
+
     const graph = new dagre.graphlib.Graph();
 
-    const rankdir = diagram.diagram_type === 'sequence' ? 'LR' : 'TB';
+    const rankdir = 'TB';
 
     graph.setGraph({ rankdir });
     graph.setDefaultEdgeLabel(() => ({}));
@@ -57,6 +65,7 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
             source: edge.source,
             target: edge.target,
             label: edge.label,
+            ...(diagram.diagram_type === 'sequence' ? { type: 'sequenceMessage' } : {}),
         } as Edge;
     });
 

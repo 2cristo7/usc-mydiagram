@@ -1,0 +1,1 @@
+export { SequenceMessageEdge } from './SequenceMessageEdge'
