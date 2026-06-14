@@ -2,9 +2,8 @@ import { expect, test, describe } from 'vitest'
 import type { NodeType, EdgeType } from '../types'
 import {
     stagingNodePositions,
-    stagingEdgeChipPositions,
+    stagingEdges,
     STAGING_NODE_ROW_Y,
-    STAGING_EDGE_ROW_Y,
 } from '../ui/utils/stagingLayout'
 
 // Fixtures reutilizables
@@ -85,79 +84,48 @@ describe('stagingNodePositions', () => {
     })
 })
 
-// ── stagingEdgeChipPositions ────────────────────────────────────────────────
+// ── stagingEdges ────────────────────────────────────────────────────────────
 
-describe('stagingEdgeChipPositions', () => {
+describe('stagingEdges', () => {
     test('sin aristas devuelve array vacío', () => {
-        expect(stagingEdgeChipPositions([], [])).toEqual([])
+        expect(stagingEdges([])).toEqual([])
     })
 
-    test('todos los chips se colocan en STAGING_EDGE_ROW_Y', () => {
-        const nodes = [makeNode('a', 'A'), makeNode('b', 'B')]
-        const edges = [makeEdge('e1', 'a', 'b')]
-        const result = stagingEdgeChipPositions(edges, nodes)
-        for (const c of result) {
-            expect(c.position.y).toBe(STAGING_EDGE_ROW_Y)
-        }
-    })
-
-    test('los chips se ordenan horizontalmente igual que los nodos', () => {
-        const nodes = [makeNode('a', 'A'), makeNode('b', 'B')]
-        const edges = [
-            makeEdge('e1', 'a', 'b'),
-            makeEdge('e2', 'b', 'a'),
-            makeEdge('e3', 'a', 'b'),
-        ]
-        const result = stagingEdgeChipPositions(edges, nodes)
-        expect(result[0].position.x).toBeLessThan(result[1].position.x)
-        expect(result[1].position.x).toBeLessThan(result[2].position.x)
-    })
-
-    test('el id del chip incluye el id de la arista original', () => {
-        const nodes = [makeNode('a', 'A'), makeNode('b', 'B')]
+    test('los ids coinciden con los de la arista original', () => {
         const edges = [makeEdge('my-edge', 'a', 'b')]
-        const result = stagingEdgeChipPositions(edges, nodes)
-        expect(result[0].id).toContain('my-edge')
+        const result = stagingEdges(edges)
+        expect(result[0].id).toBe('my-edge')
     })
 
-    test('type de los chips es edgeChip', () => {
-        const nodes = [makeNode('a', 'A'), makeNode('b', 'B')]
+    test('source y target se preservan', () => {
+        const edges = [makeEdge('e1', 'nodeA', 'nodeB')]
+        const result = stagingEdges(edges)
+        expect(result[0].source).toBe('nodeA')
+        expect(result[0].target).toBe('nodeB')
+    })
+
+    test('el label se expone en data.label', () => {
+        const edges = [makeEdge('e1', 'a', 'b', 'usa')]
+        const result = stagingEdges(edges)
+        expect((result[0].data as { label: string }).label).toBe('usa')
+    })
+
+    test('arista sin label tiene data.label vacío', () => {
         const edges = [makeEdge('e1', 'a', 'b')]
-        const result = stagingEdgeChipPositions(edges, nodes)
-        expect(result[0].type).toBe('edgeChip')
+        const result = stagingEdges(edges)
+        expect((result[0].data as { label: string }).label).toBe('')
     })
 
-    test('data del chip incluye los labels del source y target', () => {
-        const nodes = [makeNode('s', 'Servidor'), makeNode('c', 'Cliente')]
-        const edges = [makeEdge('e1', 's', 'c', 'llama')]
-        const result = stagingEdgeChipPositions(edges, nodes)
-        const data = result[0].data as { sourceLabel: string; targetLabel: string; edgeLabel: string }
-        expect(data.sourceLabel).toBe('Servidor')
-        expect(data.targetLabel).toBe('Cliente')
-        expect(data.edgeLabel).toBe('llama')
-    })
-
-    test('si el nodo no se encuentra en la lista, usa el id como label', () => {
-        const edges = [makeEdge('e1', 'nodo-inexistente', 'otro-inexistente')]
-        const result = stagingEdgeChipPositions(edges, [])
-        const data = result[0].data as { sourceLabel: string; targetLabel: string }
-        expect(data.sourceLabel).toBe('nodo-inexistente')
-        expect(data.targetLabel).toBe('otro-inexistente')
-    })
-
-    test('todos los chips tienen draggable=false y connectable=false', () => {
-        const nodes = [makeNode('a', 'A'), makeNode('b', 'B')]
+    test('tipo de arista es default', () => {
         const edges = [makeEdge('e1', 'a', 'b')]
-        const result = stagingEdgeChipPositions(edges, nodes)
-        expect(result[0].draggable).toBe(false)
-        expect(result[0].connectable).toBe(false)
+        const result = stagingEdges(edges)
+        expect(result[0].type).toBe('default')
     })
 })
 
 // ── Constantes de posición ──────────────────────────────────────────────────
 
-test('STAGING_NODE_ROW_Y es un número positivo menor que STAGING_EDGE_ROW_Y', () => {
+test('STAGING_NODE_ROW_Y es un número positivo', () => {
     expect(typeof STAGING_NODE_ROW_Y).toBe('number')
     expect(STAGING_NODE_ROW_Y).toBeGreaterThan(0)
-    expect(STAGING_NODE_ROW_Y).toBeLessThan(STAGING_EDGE_ROW_Y)
 })

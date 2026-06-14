@@ -41,7 +41,7 @@ export function ChatPanel({ connectionState }: ChatPanelProps) {
   }, [messages])
 
   return (
-    <div className="flex flex-col h-full bg-[var(--color-bg)] border-l-[3px] border-[var(--color-ink)]">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--color-bg)] border-l-[3px] border-[var(--color-ink)]">
       {/* Header */}
       <div className="px-4 py-3 border-b-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] flex items-center gap-2">
         <span className="font-bold text-sm text-[var(--color-ink)]">Chat</span>

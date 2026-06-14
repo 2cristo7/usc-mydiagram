@@ -78,7 +78,7 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
             id: edge.id,
             source: edge.source,
             target: edge.target,
-            label: edge.label,
+            data: { label: edge.label ?? '' },
             ...(diagram.diagram_type === 'sequence' ? { type: 'sequenceMessage' } : {}),
         } as Edge;
     });

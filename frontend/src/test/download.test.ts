@@ -1,4 +1,4 @@
-import { test, expect, describe, vi, afterEach } from 'vitest';
+import { test, expect, describe, vi } from 'vitest';
 import { diagramFilename, getRenderedNodeBounds, getRenderedEdges } from '../ui/utils/download';
 
 // S8.3 — pieza pura del export (PNG y JSON comparten el nombre de fichero). El

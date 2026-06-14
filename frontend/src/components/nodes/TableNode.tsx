@@ -1,14 +1,34 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
+import { useInlineEdit } from '../../hooks/useInlineEdit'
+import { useStore } from '../../store'
 
 type TableData = { label: string; attributes: string[] }
 type TableNodeType = Node<TableData, 'table'>
 
-export function TableNode({ data }: NodeProps<TableNodeType>) {
+export function TableNode({ id, data, selected }: NodeProps<TableNodeType>) {
   const { label, attributes } = data
+  const updateNode = useStore((s) => s.updateNode)
+
+  const { isEditing, inputProps, containerProps } = useInlineEdit({
+    initialValue: label,
+    onCommit: (newLabel) => updateNode(id, { label: newLabel }),
+    selected,
+  })
+
   return (
     <div className="bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] shadow-[var(--shadow-brutal)] min-w-[160px]">
-      <div className="bg-[var(--color-accent)] px-3 py-1.5 border-b-[3px] border-[var(--color-ink)]">
-        <span className="font-bold text-sm text-white">{label}</span>
+      <div
+        {...containerProps}
+        className={`bg-[var(--color-accent)] px-3 py-1.5 border-b-[3px] border-[var(--color-ink)] ${containerProps.className}`}
+      >
+        {isEditing ? (
+          <input
+            {...inputProps}
+            className="font-bold text-sm text-white bg-transparent border-none outline-none w-full"
+          />
+        ) : (
+          <span className="font-bold text-sm text-white">{label}</span>
+        )}
       </div>
       <div className="px-3 py-1.5">
         {attributes.map((attr, i) => {

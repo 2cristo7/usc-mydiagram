@@ -1,4 +1,6 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
+import { useInlineEdit } from '../../hooks/useInlineEdit'
+import { useStore } from '../../store'
 
 type StateData = { label: string; attributes: string[] }
 type StateNodeType = Node<StateData, 'state'>
@@ -11,8 +13,14 @@ function isFinal(label: string) {
   return /^(end|fin|final)$/i.test(label.trim())
 }
 
-export function StateNode({ data }: NodeProps<StateNodeType>) {
+export function StateNode({ data, id, selected }: NodeProps<StateNodeType>) {
   const { label } = data
+  const updateNode = useStore((s) => s.updateNode)
+  const { isEditing, inputProps, containerProps } = useInlineEdit({
+    initialValue: label,
+    onCommit: (newLabel) => updateNode(id, { label: newLabel }),
+    selected,
+  })
 
   if (isInitial(label)) {
     return (
@@ -35,10 +43,20 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
 
   return (
     <div
-      className="bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] px-4 py-2 min-w-[120px] text-center"
+      className={`bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] px-4 py-2 min-w-[120px] text-center ${containerProps.className}`}
       style={{ borderRadius: 12 }}
+      onDoubleClick={containerProps.onDoubleClick}
     >
-      <span className="text-sm font-semibold text-[var(--color-ink)]">{label}</span>
+      {isEditing ? (
+        <textarea
+          {...inputProps}
+          onFocus={(e) => e.target.select()}
+          className="text-sm font-semibold text-[var(--color-ink)] text-center bg-transparent border-none outline-none resize-none w-full"
+          rows={1}
+        />
+      ) : (
+        <span className="text-sm font-semibold text-[var(--color-ink)]">{label}</span>
+      )}
       <Handle type="target" position={Position.Top} />
       <Handle type="source" position={Position.Bottom} />
       <Handle type="target" position={Position.Left} />

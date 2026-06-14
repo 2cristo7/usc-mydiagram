@@ -1,22 +1,20 @@
 // Disposición visual del "almacén" durante la fase de streaming (generationPhase === 'staging').
 //
 // Los nodos reales llegan por streaming y se colocan en una fila horizontal
-// en la parte superior del canvas. Las aristas se representan como "fichas"
-// (chips) en una segunda fila justo debajo, para que el usuario vea ambos
-// llegar sin que se dibujen conexiones reales (aún no hay layout).
+// en la parte superior del canvas. Las aristas se representan como aristas
+// nativas de React Flow con etiqueta, para que el usuario vea ambos llegar.
 //
 // Esta utilidad es PURA (sin side-effects): recibe arrays y devuelve posiciones.
 // DiagramCanvas la llama en cada render durante 'staging'.
 
 import type { DiagramNode, DiagramEdge } from '../../types';
-import type { Node } from '@xyflow/react';
+import type { Node, Edge } from '@xyflow/react';
 
-// Espacio horizontal entre nodos/chips en la fila del almacén.
+// Espacio horizontal entre nodos en la fila del almacén.
 const NODE_ITEM_WIDTH = 180;
 const NODE_ITEM_GAP = 20;
-// Altura fija de las filas (referencial para fitView y chip de arista).
+// Altura fija de la fila de nodos (referencial para fitView).
 export const STAGING_NODE_ROW_Y = 40;
-export const STAGING_EDGE_ROW_Y = 200;
 
 // Calcula las posiciones React Flow de los nodos en la fila superior del almacén.
 // Los nodos conservan su tipo custom real para que el usuario vea el look final.
@@ -50,30 +48,14 @@ export function stagingNodePositions(
     }));
 }
 
-// Calcula las posiciones de los chips de arista en la fila inferior del almacén.
-// Cada chip es un nodo especial de tipo 'edgeChip' que muestra source→target+label.
-// Las aristas REALES de React Flow NO se añaden durante staging.
-export function stagingEdgeChipPositions(
-    edges: DiagramEdge[],
-    nodes: DiagramNode[],
-): Node[] {
-    const nodeLabel = (id: string) =>
-        nodes.find((n) => n.id === id)?.label ?? id;
-
-    return edges.map((edge, index) => ({
-        id: `__chip__${edge.id}`,
-        position: {
-            x: index * (NODE_ITEM_WIDTH + NODE_ITEM_GAP),
-            y: STAGING_EDGE_ROW_Y,
-        },
-        data: {
-            sourceLabel: nodeLabel(edge.source),
-            targetLabel: nodeLabel(edge.target),
-            edgeLabel: edge.label,
-        },
-        draggable: false,
-        type: 'edgeChip',
-        // Evita que React Flow intente resolver handles de conexión para estos chips.
-        connectable: false,
+// Convierte las aristas de staging en aristas nativas de React Flow con data.label,
+// listas para que EditableEdge las renderice como etiquetas editables.
+export function stagingEdges(edges: DiagramEdge[]): Edge[] {
+    return edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        data: { label: edge.label ?? '' },
+        type: 'default',
     }));
 }

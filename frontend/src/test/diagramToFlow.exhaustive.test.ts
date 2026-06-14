@@ -77,7 +77,7 @@ describe('ERD', () => {
     const e1 = edges.find((e) => e.id === 'e1')!
     expect(e1.source).toBe('usuario')
     expect(e1.target).toBe('pedido')
-    expect(e1.label).toBe('realiza')
+    expect(e1.data?.label).toBe('realiza')
     const e2 = edges.find((e) => e.id === 'e2')!
     expect(e2.source).toBe('pedido')
     expect(e2.target).toBe('producto')
@@ -128,10 +128,10 @@ describe('UML Class', () => {
   test('se generan las 4 aristas con label preservado', () => {
     const { edges } = DiagramToFlow(diagram)
     expect(edges).toHaveLength(4)
-    expect(edges.find((e) => e.id === 'e1')!.label).toBe('extends')
-    expect(edges.find((e) => e.id === 'e2')!.label).toBe('implements')
-    expect(edges.find((e) => e.id === 'e3')!.label).toBe('usa')
-    expect(edges.find((e) => e.id === 'e4')!.label).toBe('depende')
+    expect(edges.find((e) => e.id === 'e1')!.data?.label).toBe('extends')
+    expect(edges.find((e) => e.id === 'e2')!.data?.label).toBe('implements')
+    expect(edges.find((e) => e.id === 'e3')!.data?.label).toBe('usa')
+    expect(edges.find((e) => e.id === 'e4')!.data?.label).toBe('depende')
   })
 
   test('arista huérfana rechazada', () => {
@@ -213,8 +213,8 @@ describe('Flowchart', () => {
   test('se generan 4 aristas con source/target/label correctos', () => {
     const { edges } = DiagramToFlow(diagram)
     expect(edges).toHaveLength(4)
-    expect(edges.find((e) => e.id === 'e2')!.label).toBe('Sí')
-    expect(edges.find((e) => e.id === 'e3')!.label).toBe('No')
+    expect(edges.find((e) => e.id === 'e2')!.data?.label).toBe('Sí')
+    expect(edges.find((e) => e.id === 'e3')!.data?.label).toBe('No')
   })
 
   test('arista huérfana rechazada', () => {
@@ -368,9 +368,9 @@ describe('State Machine', () => {
   test('se generan 5 transiciones con label preservado', () => {
     const { edges } = DiagramToFlow(diagram)
     expect(edges).toHaveLength(5)
-    expect(edges.find((e) => e.id === 'e2')!.label).toBe('30s')
-    expect(edges.find((e) => e.id === 'e3')!.label).toBe('25s')
-    expect(edges.find((e) => e.id === 'e4')!.label).toBe('5s')
+    expect(edges.find((e) => e.id === 'e2')!.data?.label).toBe('30s')
+    expect(edges.find((e) => e.id === 'e3')!.data?.label).toBe('25s')
+    expect(edges.find((e) => e.id === 'e4')!.data?.label).toBe('5s')
   })
 
   test('arista huérfana rechazada', () => {

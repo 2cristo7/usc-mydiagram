@@ -87,6 +87,8 @@ export const diagramEdgeSchema = z.object({
     target: z.string(), // Node ID
     label: z.string(),
     edge_type: edgeTypeSchema,
+    sourceHandle: z.string().optional(),
+    targetHandle: z.string().optional(),
 });
 
 export const diagramSchema = z.object({
@@ -141,3 +143,15 @@ export interface Degradation {
 }
 
 export type DiagramSchema = z.infer<typeof diagramSchema>;
+
+// Visual-only data stored in React Flow's edge `data` field. Not part of the
+// DiagramEdge schema (which is the agent contract) — lives only in the canvas.
+export interface EdgeVisualData {
+  label?: string
+  labelT?: number
+  waypoints?: { x: number; y: number }[]
+  shape?: 'straight' | 'elbow' | 'curved'
+  strokeStyle?: 'normal' | 'dashed' | 'dotted'
+  sourceArrow?: boolean
+  targetArrow?: boolean
+}

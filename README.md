@@ -1,6 +1,6 @@
 # MydIAgram
 
-**Conversational AI agent that generates editable software diagrams from natural language.**
+**Conversational AI agent that generates editable software diagrams from natural language — with Miro-style direct manipulation.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
@@ -11,24 +11,38 @@
 
 MydIAgram turns plain-text descriptions into interactive, editable diagrams — ERD, UML class, sequence, flowchart, architecture (C4), state machine, and mindmap — rendered on a drag-and-drop canvas. An AI agent powered by LangGraph classifies the diagram type, extracts nodes and edges via structured LLM tool calls, validates the output against strict schemas, and streams every step to the UI in real time. Users can refine diagrams conversationally, and the agent can ask clarifying questions when the input is ambiguous.
 
+The canvas provides Miro-style direct manipulation: double-click to edit text inline, drag connection handles from node borders with snap feedback, add edge labels and slide them along the path, and bend edges by dragging waypoints — all without side panels or modal forms.
+
 ## Features
 
+### AI-powered diagram generation
 - **Natural language to diagram** — describe what you need; the agent classifies the type, extracts structure, and renders it instantly
 - **7 diagram types** — Entity-Relationship, UML Class, Sequence, Flowchart, Architecture (C4), State Machine, Mindmap — each with dedicated node shapes and layout logic
+- **Conversational refinement** — after generating a diagram, send follow-up prompts to modify it; the agent can ask clarification questions mid-generation
 - **Real-time streaming** — every agent tool call (classify, extract, validate) streams to the frontend via WebSocket, with a collapsible tool tray showing live progress
-- **Interactive canvas** — drag, resize, connect, and edit nodes directly on a React Flow canvas; undo/redo support for session edits
-- **Conversational refinement** — after generating a diagram, send follow-up prompts to modify it; the agent can also ask clarification questions mid-generation
-- **Neobrutalist UI** — bold borders, hard shadows, Space Grotesk / JetBrains Mono typography, orange accent, light/dark theme toggle persisted in localStorage
 - **Multi-LLM support** — switch between local inference (Ollama / Qwen3), OpenAI (GPT-4o), or Anthropic via a single `LLM_PROFILE` env var
+- **Generation cache** — identical prompts return cached results, reducing LLM calls and latency
+
+### Miro-style direct manipulation
+- **Inline node editing** — double-click any node to edit its text in place; `Esc`/`Enter`/click outside to confirm. Select a node and start typing to replace its label. No side panel required
+- **Connection handles on hover** — 4 handles appear at each node border on hover; drag from one to another to create an edge with floating anchor (nearest border intersection)
+- **Snap-to-target feedback** — the destination node glows blue when the cursor enters its area during a connection drag
+- **Inline edge labels** — double-click any edge to add/edit a text label; drag the label along the path (position stored as a `0–1` ratio)
+- **Waypoint manipulation** — drag an edge segment to create a bend point; double-click a waypoint to delete it. Edges support `straight`, `elbow`, and `curved` shapes
+- **Endpoint re-anchoring** — drag an edge's source or target endpoint to reconnect it to a different node, with a dashed preview path during the drag
+- **Edge context menu** — right-click an edge to change its shape, stroke style (`normal`/`dashed`/`dotted`), and toggle source/target arrowheads
+
+### Canvas & UI
+- **Neobrutalist design** — bold borders, hard shadows, Space Grotesk / JetBrains Mono typography, orange accent palette, light/dark theme toggle persisted in localStorage
+- **Undo/redo** — 50-snapshot history stack with keyboard shortcuts
 - **Auth + persistence** — Google OAuth via Supabase; diagrams saved to PostgreSQL with full history, search, and reload
 - **Export** — PNG screenshot or JSON schema export; JSON import for sharing diagrams
-- **Generation cache** — identical prompts return cached results, reducing LLM calls and latency
 - **Rate limiting** — backend throttles requests to prevent abuse
 
 ## Architecture
 
 ```
-┌──────────────┐       WebSocket / HTTP        ┌──────────────┐       HTTP / SSE        ┌──────────────────┐
+┌──────────────┐       WebSocket / HTTP        ┌──────────────┐       HTTP / SSE        ┌───────────────────┐
 │   Frontend   │  ◄──────────────────────────►  │   Backend    │  ◄──────────────────►   │   Agent (Python)  │
 │  React + Vite│       Socket.io + REST         │  Express.js  │     FastAPI streaming   │   LangGraph ReAct │
 │  React Flow  │                                │  Socket.io   │                         │   LLM tool calls  │
@@ -174,6 +188,22 @@ With a diagram loaded, type a follow-up:
 Añade una entidad "Categoría" con relación muchos-a-muchos con Producto.
 ```
 
+### Edit nodes inline
+
+Double-click any node to edit its text directly on the canvas. Press `Esc`, `Enter`, or click outside to confirm. You can also select a node and start typing to replace its label immediately.
+
+### Manipulate edges
+
+| Action | Gesture |
+|---|---|
+| Create a connection | Hover over a node to reveal handles → drag from any handle to another node |
+| Add/edit a label | Double-click the edge path |
+| Slide a label | Drag the label text along the edge |
+| Bend an edge | Drag a midpoint (white dot) on a selected edge to create a waypoint |
+| Remove a waypoint | Double-click the blue control point |
+| Change shape/stroke/arrows | Right-click the edge → context menu |
+| Re-anchor an endpoint | Drag the blue endpoint circle to a different node |
+
 ### Select a diagram type manually
 
 Click one of the type cards in the top bar (ERD, UML Class, Sequence, Flowchart, Architecture, State Machine, Mindmap) before sending your prompt. Select "Auto" to let the agent decide.
@@ -188,7 +218,7 @@ Use the export menu (top-right) to:
 ### Run tests
 
 ```bash
-# Frontend (Vitest + jsdom)
+# Frontend (Vitest — 216+ tests)
 cd frontend && npm test
 
 # Backend (Vitest + supertest)
@@ -209,101 +239,98 @@ cd backend && npm run build     # compiles to backend/dist/
 
 ```
 usc-mydiagram/
-├── frontend/                          # React SPA
+├── frontend/                              # React SPA
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── App.tsx                # Root layout — 3-column CSS grid
-│   │   │   ├── TopBar.tsx             # Navigation bar with type cards, theme toggle, auth
-│   │   │   ├── EditToolbar.tsx        # Left toolbar — add node/edge, undo/redo, zoom
-│   │   │   ├── DiagramCanvas.tsx      # React Flow canvas with all node/edge types
-│   │   │   ├── FloatingPrompt.tsx     # Chat input overlay — auto-resize, 3 modes
-│   │   │   ├── ChatPanel.tsx          # Message history panel (right column)
-│   │   │   ├── ChatMessage.tsx        # Individual message bubble
-│   │   │   ├── ToolTray.tsx           # Collapsible agent tool trace viewer
-│   │   │   ├── HistoryDrawer.tsx      # Slide-out drawer with diagram history + search
-│   │   │   ├── DiagramTypeCards.tsx   # Horizontal type selector cards
-│   │   │   ├── ExportMenu.tsx         # Export PNG/JSON, import, save, regenerate
-│   │   │   ├── AuthButton.tsx         # Google OAuth login/logout
-│   │   │   ├── NodePropertiesPanel.tsx# Floating panel for editing selected node
-│   │   │   ├── nodes/                 # Custom React Flow node components
-│   │   │   │   ├── TableNode.tsx      # ERD table with PK/FK markers
-│   │   │   │   ├── UmlClassNode.tsx   # UML class (attrs/methods bands)
-│   │   │   │   ├── C4Node.tsx         # C4 model (person/system/container/component)
-│   │   │   │   ├── ArchitectureNode.tsx # DB/queue/gateway/service shapes
-│   │   │   │   ├── FlowNode.tsx       # Flowchart (step/decision/terminator)
-│   │   │   │   ├── StateNode.tsx      # State machine states
-│   │   │   │   ├── MindmapNode.tsx    # Mindmap topic nodes
-│   │   │   │   ├── SequenceActorNode.tsx # Sequence diagram participants
-│   │   │   │   ├── LifelineNode.tsx   # Vertical dashed lifelines
-│   │   │   │   └── ActivationNode.tsx # Activation bars on lifelines
-│   │   │   └── edges/
-│   │   │       └── SequenceMessageEdge.tsx # Horizontal sequence messages
+│   │   │   ├── DiagramCanvas.tsx           # React Flow canvas — registers all node/edge types
+│   │   │   ├── TopBar.tsx                 # Nav bar: type cards, theme toggle, auth
+│   │   │   ├── EditToolbar.tsx            # Left toolbar: add node/edge, undo/redo, zoom
+│   │   │   ├── FloatingPrompt.tsx         # Chat input overlay (auto-resize, 3 modes)
+│   │   │   ├── ChatPanel.tsx              # Message history panel (right column)
+│   │   │   ├── ChatMessage.tsx            # Individual message bubble
+│   │   │   ├── ToolTray.tsx               # Collapsible agent tool trace viewer
+│   │   │   ├── HistoryDrawer.tsx          # Slide-out drawer: diagram history + search
+│   │   │   ├── DiagramTypeCards.tsx        # Horizontal type selector cards
+│   │   │   ├── ExportMenu.tsx             # Export PNG/JSON, import, save, regenerate
+│   │   │   ├── AuthButton.tsx             # Google OAuth login/logout
+│   │   │   ├── nodes/                     # Custom React Flow node components
+│   │   │   │   ├── TableNode.tsx          # ERD table with PK/FK markers
+│   │   │   │   ├── UmlClassNode.tsx       # UML class (attrs/methods sections)
+│   │   │   │   ├── C4Node.tsx             # C4 model (person/system/container/component)
+│   │   │   │   ├── ArchitectureNode.tsx   # DB/queue/gateway/service shapes
+│   │   │   │   ├── FlowNode.tsx           # Flowchart (step/decision/terminator)
+│   │   │   │   ├── StateNode.tsx          # State machine states
+│   │   │   │   ├── MindmapNode.tsx        # Mindmap topic nodes
+│   │   │   │   ├── SequenceActorNode.tsx  # Sequence diagram participants
+│   │   │   │   ├── LifelineNode.tsx       # Vertical dashed lifelines
+│   │   │   │   └── ActivationNode.tsx     # Activation bars on lifelines
+│   │   │   └── edges/                     # Custom React Flow edge components
+│   │   │       ├── EditableEdge.tsx       # Full-featured edge: labels, waypoints, re-anchor
+│   │   │       ├── EdgeContextMenu.tsx    # Right-click menu: shape, stroke, arrows
+│   │   │       └── SequenceMessageEdge.tsx# Horizontal sequence messages
 │   │   ├── store/
-│   │   │   ├── index.ts               # Main Zustand store (diagram state, UI state)
-│   │   │   ├── auth.ts                # Authentication store (Supabase session)
-│   │   │   ├── ui.ts                  # UI-only state (drawer, theme, tool tray)
-│   │   │   ├── history.ts             # Undo/redo stack (session-scoped)
-│   │   │   └── historyManager.ts      # Auto-capture snapshots on diagram change
+│   │   │   ├── index.ts                   # Main Zustand store (diagram + generation state)
+│   │   │   ├── auth.ts                    # Authentication store (Supabase session)
+│   │   │   ├── ui.ts                      # UI-only state (drawer, theme, tool tray)
+│   │   │   ├── history.ts                 # Undo/redo stack (50 snapshots, session-scoped)
+│   │   │   └── historyManager.ts          # Auto-capture snapshots on diagram changes
 │   │   ├── hooks/
-│   │   │   ├── useWebSocket.ts        # Socket.io connection + message handling
-│   │   │   └── useAuth.ts             # Supabase auth session hook
+│   │   │   ├── useInlineEdit.ts           # Shared hook: dblclick/type-to-edit, Esc/Enter/blur
+│   │   │   ├── useWebSocket.ts            # Socket.io connection + stream handling
+│   │   │   └── useAuth.ts                 # Supabase auth session hook
 │   │   ├── ui/
-│   │   │   ├── primitives/            # Reusable neobrutalist components
-│   │   │   │   ├── Button.tsx         # Primary/secondary/danger button
-│   │   │   │   ├── IconButton.tsx     # Square icon button with tooltip
-│   │   │   │   ├── Card.tsx           # Bordered container
-│   │   │   │   ├── Panel.tsx          # Floating panel
-│   │   │   │   ├── Drawer.tsx         # Slide-in overlay
-│   │   │   │   ├── Menu.tsx           # Dropdown menu
-│   │   │   │   ├── Badge.tsx          # Status/type badge
-│   │   │   │   └── Tooltip.tsx        # Tooltip popup
+│   │   │   ├── primitives/                # Neobrutalist design system (8 components)
 │   │   │   └── utils/
-│   │   │       ├── diagramToFlow.ts   # Schema → React Flow nodes/edges + layout
-│   │   │       └── sequenceLayout.ts  # Sequence diagram layout engine
+│   │   │       ├── diagramToFlow.ts       # Agent schema → React Flow nodes/edges + layout
+│   │   │       ├── sequenceLayout.ts      # Sequence diagram layout engine
+│   │   │       ├── getFloatingAnchor.ts   # Nearest border intersection for edge anchoring
+│   │   │       ├── getWaypointPath.ts     # SVG path from waypoints (straight/elbow/curved)
+│   │   │       ├── getPathProjection.ts   # Project a point onto an SVG path (label drag)
+│   │   │       └── stagingLayout.ts       # Staging area layout utilities
 │   │   ├── lib/
-│   │   │   └── api.ts                 # Supabase REST client (CRUD operations)
-│   │   ├── types.ts                   # Zod schemas + TypeScript types
-│   │   ├── index.css                  # Tailwind v4 + neobrutalist design tokens
-│   │   └── main.tsx                   # Entry point
+│   │   │   └── api.ts                     # Supabase REST client (diagram CRUD)
+│   │   ├── types.ts                       # Zod schemas + TypeScript types
+│   │   ├── index.css                      # Tailwind v4 + neobrutalist design tokens
+│   │   └── main.tsx                       # Entry point
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── tsconfig.json
-├── backend/                           # API Gateway
+├── backend/                               # API Gateway
 │   └── src/
-│       ├── index.ts                   # Express + Socket.io server (port 3001)
-│       ├── diagrams.ts                # Diagram CRUD endpoints
-│       ├── socketHandlers.ts          # WebSocket handlers — relay agent streams
-│       ├── agentStream.ts             # HTTP/SSE client for agent microservice
-│       ├── auth.ts                    # JWT verification middleware
-│       ├── socketAuth.ts              # WebSocket authentication
-│       ├── cache.ts                   # Generation cache (DB-backed)
-│       ├── rateLimit.ts               # Request rate limiter
-│       └── supabase.ts                # Supabase client singleton
-├── agent/                             # AI Microservice
-│   ├── main.py                        # FastAPI app (/generate/stream, /refine/stream)
-│   ├── graph.py                       # LangGraph graph definition
-│   ├── agent_graph.py                 # ReAct agent workflow
-│   ├── llm.py                         # LLM provider abstraction (Ollama/OpenAI/Anthropic)
-│   ├── prompts.py                     # Structured system + tool prompts
-│   ├── schemas.py                     # Pydantic models for diagram validation
-│   ├── nodes/                         # LangGraph agent nodes
-│   │   ├── classify.py                # Diagram type classification
-│   │   ├── extract_nodes.py           # Node extraction via LLM tool calls
-│   │   ├── extract_edges.py           # Edge extraction via LLM tool calls
-│   │   ├── validate_nodes.py          # Node schema validation
-│   │   ├── validate_edges.py          # Edge schema validation
-│   │   ├── validate_schema.py         # Full diagram schema validation
-│   │   ├── synthesize.py              # Final diagram assembly
-│   │   └── guard.py                   # Safety guardrails
-│   ├── tests/                         # pytest test suite (14 files)
+│       ├── index.ts                       # Express + Socket.io server (port 3001)
+│       ├── diagrams.ts                    # Diagram CRUD endpoints
+│       ├── socketHandlers.ts              # WebSocket handlers — relay agent streams
+│       ├── agentStream.ts                 # HTTP/SSE client for agent microservice
+│       ├── auth.ts                        # JWT verification middleware
+│       ├── socketAuth.ts                  # WebSocket authentication
+│       ├── cache.ts                       # Generation cache (DB-backed)
+│       ├── rateLimit.ts                   # Request rate limiter
+│       └── supabase.ts                    # Supabase client singleton
+├── agent/                                 # AI Microservice
+│   ├── main.py                            # FastAPI app (/generate/stream, /refine/stream)
+│   ├── graph.py                           # LangGraph graph definition
+│   ├── agent_graph.py                     # ReAct agent workflow
+│   ├── llm.py                             # LLM provider abstraction (Ollama/OpenAI/Anthropic)
+│   ├── prompts.py                         # Structured system + tool prompts
+│   ├── schemas.py                         # Pydantic models for diagram validation
+│   ├── nodes/                             # LangGraph workflow nodes
+│   │   ├── classify.py                    # Diagram type classification
+│   │   ├── extract_nodes.py               # Node extraction via LLM tool calls
+│   │   ├── extract_edges.py               # Edge extraction via LLM tool calls
+│   │   ├── validate_nodes.py              # Node schema validation
+│   │   ├── validate_edges.py              # Edge schema validation
+│   │   ├── validate_schema.py             # Full diagram schema validation
+│   │   ├── synthesize.py                  # Final diagram assembly
+│   │   └── guard.py                       # Safety guardrails
+│   ├── tests/                             # pytest test suite
 │   └── requirements.txt
 ├── supabase/
-│   ├── config.toml                    # Local Supabase configuration
-│   └── migrations/                    # SQL migrations (diagrams table, cache)
+│   ├── config.toml                        # Local Supabase configuration
+│   └── migrations/                        # SQL migrations (diagrams, cache, auth)
 ├── scripts/
-│   └── test_tools_e2e.sh              # End-to-end integration test script
-├── docs/                              # Technical documentation
-└── LICENSE                            # MIT
+│   └── test_tools_e2e.sh                  # End-to-end integration test script
+├── docs/                                  # Technical documentation
+└── LICENSE                                # MIT
 ```
 
 ## Contributing

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { DiagramNode, NodeType } from '../types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DiagramEdge, DiagramNode, NodeType } from '../types'
 import '@xyflow/react/dist/style.css'
-import type { Node, NodeDragHandler } from '@xyflow/react'
+import type { Connection, Edge, Node } from '@xyflow/react'
 import {
   ReactFlow,
   Background,
@@ -11,12 +11,12 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  ConnectionMode,
 } from '@xyflow/react'
 import { FileQuestion, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store/index'
-import { NodePropertiesPanel } from './NodePropertiesPanel'
 import { DiagramToFlow } from '../ui/utils/diagramToFlow'
-import { stagingNodePositions, stagingEdgeChipPositions } from '../ui/utils/stagingLayout'
+import { stagingNodePositions, stagingEdges } from '../ui/utils/stagingLayout'
 
 import { UmlClassNode } from './nodes/UmlClassNode'
 import { C4Node } from './nodes/C4Node'
@@ -28,8 +28,8 @@ import { StateNode } from './nodes/StateNode'
 import { MindmapNode } from './nodes/MindmapNode'
 import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
-import { EdgeChipNode } from './nodes/EdgeChipNode'
-import { SequenceMessageEdge } from './edges/SequenceMessageEdge'
+import { SequenceMessageEdge, EditableEdge } from './edges'
+import { EdgeContextMenu } from './edges/EdgeContextMenu'
 
 const nodeTypes = {
   umlClass: UmlClassNode,
@@ -42,12 +42,11 @@ const nodeTypes = {
   mindmap: MindmapNode,
   lifeline: LifelineNode,
   activation: ActivationNode,
-  // Nodo especial para la fase de almacén: representa una arista pendiente de ensamblaje.
-  edgeChip: EdgeChipNode,
 }
 
 const edgeTypes = {
   sequenceMessage: SequenceMessageEdge,
+  default: EditableEdge,
 }
 
 export function DiagramCanvas() {
@@ -56,7 +55,58 @@ export function DiagramCanvas() {
   const generationPhase = useStore((s) => s.generationPhase)
   const streamingNodes = useStore((s) => s.nodes)
   const streamingEdges = useStore((s) => s.edges)
-  const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null)
+  const addEdge = useStore((s) => s.addEdge)
+  const [, setSelectedNode] = useState<DiagramNode | null>(null)
+  const [edgeMenu, setEdgeMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
+
+  const isConnecting = useRef(false)
+  const [, setConnectingTarget] = useState<string | null>(null)
+
+  const onEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
+    event.preventDefault()
+    setEdgeMenu({ edgeId: edge.id, x: event.clientX, y: event.clientY })
+  }, [])
+
+  const closeEdgeMenu = useCallback(() => setEdgeMenu(null), [])
+
+  const onConnectStart = useCallback(() => {
+    isConnecting.current = true
+    setConnectingTarget(null)
+  }, [])
+
+  const onConnectEnd = useCallback(() => {
+    isConnecting.current = false
+    setConnectingTarget(null)
+    document.querySelectorAll('.react-flow__node.snap-target').forEach((el) => {
+      el.classList.remove('snap-target')
+    })
+  }, [])
+
+  const onNodeMouseEnter = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (!isConnecting.current) return
+    setConnectingTarget(node.id)
+    document.querySelector(`.react-flow__node[data-id="${node.id}"]`)?.classList.add('snap-target')
+  }, [])
+
+  const onNodeMouseLeave = useCallback(() => {
+    setConnectingTarget(null)
+    document.querySelectorAll('.react-flow__node.snap-target').forEach((el) => {
+      el.classList.remove('snap-target')
+    })
+  }, [])
+
+  const onConnect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target) return
+    addEdge({
+      id: `e-${connection.source}-${connection.target}-${Date.now()}`,
+      source: connection.source,
+      target: connection.target,
+      sourceHandle: connection.sourceHandle ?? undefined,
+      targetHandle: connection.targetHandle ?? undefined,
+      label: '',
+      type: 'default',
+    } as unknown as DiagramEdge)
+  }, [addEdge])
 
   // ── Estado controlado del canvas interactivo ───────────────────────────────
   // React Flow v12 exige nodos/aristas controlados (con onNodesChange) para que
@@ -77,14 +127,9 @@ export function DiagramCanvas() {
 
   // ── FASE STAGING ────────────────────────────────────────────────────────────
   // Durante 'staging' mostramos el almacén: nodos en fila superior (reales, con
-  // su tipo custom), fichas de arista en fila inferior. Sin aristas reales.
+  // su tipo custom) y aristas nativas con etiqueta.
   // Nunca hay currentDiagram definitivo aquí (el snapshot llega en diagram:done).
   if (generationPhase === 'staging') {
-    const stagingNodes: Node[] = [
-      ...stagingNodePositions(streamingNodes),
-      ...stagingEdgeChipPositions(streamingEdges, streamingNodes),
-    ]
-
     return (
       <div className="relative flex h-full w-full">
         {/* Banner informativo superpuesto */}
@@ -92,12 +137,19 @@ export function DiagramCanvas() {
           Recibiendo elementos… ({streamingNodes.length} nodos · {streamingEdges.length} aristas)
         </div>
         <ReactFlow
-          nodes={stagingNodes}
-          edges={[]}
+          nodes={stagingNodePositions(streamingNodes)}
+          edges={stagingEdges(streamingEdges)}
           fitView
           nodesDraggable={false}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
+          onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
+          onNodeMouseEnter={onNodeMouseEnter}
+          onNodeMouseLeave={onNodeMouseLeave}
+          onEdgeContextMenu={onEdgeContextMenu}
+          onPaneClick={closeEdgeMenu}
           className="bg-[var(--color-bg)]"
           proOptions={{ hideAttribution: false }}
         >
@@ -131,6 +183,13 @@ export function DiagramCanvas() {
           nodesDraggable={false}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
+          onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
+          onNodeMouseEnter={onNodeMouseEnter}
+          onNodeMouseLeave={onNodeMouseLeave}
+          onEdgeContextMenu={onEdgeContextMenu}
+          onPaneClick={closeEdgeMenu}
           className="bg-[var(--color-bg)]"
         >
           <Background
@@ -240,7 +299,7 @@ export function DiagramCanvas() {
   // Para diagramas de secuencia: los actores solo se mueven en X (su Y se fija
   // siempre en la cabecera = 0). Lifelines y activaciones no son arrastrables
   // (draggable:false en sequenceLayout), así que nunca llegan aquí.
-  const onNodeDragStop: NodeDragHandler = (_event, node) => {
+  const onNodeDragStop = (_event: React.MouseEvent, node: Node) => {
     const isSequence = currentDiagram?.diagram_type === 'sequence'
     const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id)
     if (!diagramNode) return
@@ -266,9 +325,16 @@ export function DiagramCanvas() {
         edgeTypes={edgeTypes}
         onDrop={onDrop}
         onDragOver={onDragOver}
+        onConnect={onConnect}
+        onConnectStart={onConnectStart}
+        onConnectEnd={onConnectEnd}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
-        onPaneClick={() => setSelectedNode(null)}
+        onEdgeContextMenu={onEdgeContextMenu}
+        onPaneClick={() => { setSelectedNode(null); closeEdgeMenu() }}
+        connectionMode={ConnectionMode.Loose}
         className="bg-[var(--color-bg)]"
       >
         <Background
@@ -285,7 +351,13 @@ export function DiagramCanvas() {
           style={{ background: 'var(--color-surface)' }}
         />
       </ReactFlow>
-      {selectedNode && <NodePropertiesPanel node={selectedNode} />}
+      {edgeMenu && (
+        <EdgeContextMenu
+          edgeId={edgeMenu.edgeId}
+          position={{ x: edgeMenu.x, y: edgeMenu.y }}
+          onClose={closeEdgeMenu}
+        />
+      )}
     </div>
   )
 }

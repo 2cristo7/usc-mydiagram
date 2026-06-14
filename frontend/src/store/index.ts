@@ -75,6 +75,9 @@ interface DiagramStore {
     // Persiste la posición del nodo tras un drag. Actualiza DiagramNode.position
     // en el store (nodes[] y currentDiagram.nodes[]) y dispara guardado en BD.
     updateNodePosition(id: string, position: { x: number; y: number }): void;
+    // Migration path: EditableEdge uses this to persist inline label/type edits.
+    // updates maps to Partial<DiagramEdge> (the domain type stored in edge data).
+    updateEdge(edgeId: string, updates: Partial<DiagramEdge>): void;
     addNode: (node: DiagramNode) => void;
     addEdge: (edge: DiagramEdge) => void;
     // S7.5 — deltas del agente. El cascade de removeNode lo declara el SERVIDOR
@@ -131,6 +134,10 @@ export const useStore = create<Store>()((set) => ({
      updateNode: (id, changes) => set((state) => ({
         nodes: state.nodes.map(node => node.id === id ? { ...node, ...changes } : node),
         currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes: state.currentDiagram.nodes.map(node => node.id === id ? { ...node, ...changes } : node) } : null
+     })),
+     updateEdge: (edgeId, updates) => set((state) => ({
+        edges: state.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge),
+        currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges: state.currentDiagram.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge) } : null,
      })),
      updateNodePosition: (id, position) => {
         set((state) => ({
