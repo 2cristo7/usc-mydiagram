@@ -16,7 +16,7 @@ function App() {
     <ReactFlowProvider>
       <div
         className="grid h-screen bg-[var(--color-bg)] font-[family-name:var(--font-sans)]"
-        style={{ gridTemplateColumns: "64px 1fr 360px", gridTemplateRows: "auto 1fr" }}
+        style={{ gridTemplateColumns: "auto 1fr 360px", gridTemplateRows: "auto 1fr" }}
       >
         {/* Row 1 — TopBar spans all 3 columns */}
         <TopBar onRegenerate={regenerate} />
