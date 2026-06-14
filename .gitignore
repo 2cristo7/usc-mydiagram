@@ -17,3 +17,6 @@ __pycache__/
 
 # IDEs
 .vscode/settings.json
+
+# Cola transitoria de commits (la consume y reescribe ./commit.sh)
+COMMITS.pending
