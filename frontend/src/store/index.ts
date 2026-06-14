@@ -25,6 +25,9 @@ function schedulePersist() {
 interface MsgStore {
     messages: Message[];
     addMessage: (message: Message) => void;
+    // S10.x — reemplaza la conversación completa. Lo usa la carga del historial
+    // para restaurar los mensajes del diagrama abierto (addMessage solo añade).
+    setMessages: (messages: Message[]) => void;
     uiState: UIState;
     setUiState: (state: MsgStore['uiState']) => void;
     // Fase de animación del streaming. Independiente de uiState para no
@@ -99,6 +102,7 @@ export const useStore = create<Store>()((set) => ({
 
     messages: [],
     addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
+    setMessages: (messages) => set({ messages }),
     uiState: 'idle',
     setUiState: (state) => set({ uiState: state }),
     generationPhase: 'idle',

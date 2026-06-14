@@ -20,7 +20,7 @@ const BADGE_COLORS: Record<string, string> = {
 export function HistoryDrawer() {
   const { drawerOpen, setDrawerOpen } = useUiStore()
   const user = useAuthStore((s) => s.user)
-  const { setCurrentDiagram, setCurrentDiagramId, setLastGenerationPrompt, setUiState } = useStore()
+  const { setCurrentDiagram, setCurrentDiagramId, setLastGenerationPrompt, setUiState, setMessages } = useStore()
   const [items, setItems] = useState<DiagramMeta[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,6 +49,11 @@ export function HistoryDrawer() {
       setCurrentDiagram(row.data)
       setCurrentDiagramId(row.id)
       setLastGenerationPrompt(row.prompt ?? null)
+      // Restaura la conversación del diagrama. El timestamp viaja como string ISO
+      // (jsonb): se revive a Date porque ChatMessage llama a toLocaleTimeString.
+      setMessages(
+        (row.messages ?? []).map((m) => ({ ...m, timestamp: new Date(m.timestamp) })),
+      )
       useHistoryStore.getState().reset()
       setUiState('ready')
       setDrawerOpen(false)

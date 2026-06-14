@@ -1,6 +1,6 @@
 import { useStore } from '../store/index'
 import { useAuthStore } from '../store/auth'
-import type { DiagramSchema } from '../types'
+import type { DiagramSchema, Message } from '../types'
 
 // S9.3 — Cliente REST de persistencia. El frontend NUNCA habla con Supabase
 // directamente (decisión P1): toda la persistencia pasa por el gateway, que es
@@ -18,11 +18,17 @@ export interface DiagramMeta {
   updated_at: string
 }
 
+// Mensaje tal como vuelve de la BD: el timestamp viaja serializado (string ISO),
+// no como Date. Se revive a Date al cargar (ChatMessage llama a toLocaleTimeString).
+export type StoredMessage = Omit<Message, 'timestamp'> & { timestamp: string }
+
 // Fila completa: metadata + data (el diagrama para cargar al canvas) + el prompt
-// de origen (S9.3b: permite regenerar un diagrama cargado del historial).
+// de origen (S9.3b: permite regenerar un diagrama cargado del historial) + la
+// conversación persistida (jsonb messages).
 export interface DiagramRow extends DiagramMeta {
   data: DiagramSchema
   prompt: string | null
+  messages: StoredMessage[]
 }
 
 export interface SaveResult {
@@ -43,12 +49,14 @@ async function doSave(prompt?: string): Promise<SaveResult> {
 
   // Lectura FRESCA del store: al estar serializado, un guardado encadenado ve
   // ya el id que fijó el anterior → POST una vez, PATCH después.
-  const { currentDiagram, currentDiagramId, setCurrentDiagramId } = useStore.getState()
+  const { currentDiagram, currentDiagramId, setCurrentDiagramId, messages } = useStore.getState()
   if (!currentDiagram || !currentDiagram.diagram_type) return { ok: false, error: 'no-diagram' }
 
   const isUpdate = currentDiagramId !== null
   const url = isUpdate ? `${API_URL}/diagrams/${currentDiagramId}` : `${API_URL}/diagrams`
-  const body = JSON.stringify({ diagram: currentDiagram, prompt })
+  // Lectura fresca de messages: el done ya añadió el turno del sistema antes de
+  // disparar el guardado, así que la conversación viaja completa hasta aquí.
+  const body = JSON.stringify({ diagram: currentDiagram, prompt, messages })
 
   try {
     const res = await fetch(url, { method: isUpdate ? 'PATCH' : 'POST', headers, body })

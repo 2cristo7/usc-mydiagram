@@ -22,6 +22,9 @@ interface DiagramPayload {
     edges?: unknown[]
   }
   prompt?: string | null
+  // Conversación del chat que originó/refinó el diagrama. Opcional y tolerante:
+  // un cliente sin actualizar (o una generación anónima) la omite → log vacío.
+  messages?: unknown[]
 }
 
 // La forma mínima que exige el CHECK de la tabla (objeto con nodes[]/edges[]) y
@@ -47,6 +50,8 @@ function columns(payload: DiagramPayload) {
     diagram_type: d.diagram_type,
     prompt: payload.prompt ?? null,
     data: d,
+    // El CHECK diagrams_messages_is_array exige un array: si no llega, log vacío.
+    messages: Array.isArray(payload.messages) ? payload.messages : [],
   }
 }
 
