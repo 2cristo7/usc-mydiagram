@@ -4,8 +4,13 @@ import { createElement } from 'react'
 import { ReactFlowProvider, Position } from '@xyflow/react'
 import {
   TableNode,
+  UmlClassNode,
+  C4Node,
+  ArchitectureNode,
+  FlowNode,
   StateNode,
   MindmapNode,
+  SequenceActorNode,
   LifelineNode,
   ActivationNode,
 } from '../components/nodes'
@@ -102,6 +107,164 @@ describe('Nodes smoke', () => {
             markerEnd: '',
           } as any)
         )
+      )
+    )
+  })
+
+  // -------------------------------------------------------------------------
+  // Smoke tests para nodos no cubiertos anteriormente
+  // -------------------------------------------------------------------------
+
+  it('UmlClassNode renders without crashing — sin métodos', () => {
+    render(
+      withProvider(
+        createElement(UmlClassNode, {
+          ...baseProps,
+          data: { label: 'Animal', attributes: ['- nombre: String', '+ getNombre(): String'] },
+        } as any)
+      )
+    )
+  })
+
+  it('UmlClassNode renders without crashing — con stereotype', () => {
+    render(
+      withProvider(
+        createElement(UmlClassNode, {
+          ...baseProps,
+          data: { label: 'IAnimal', stereotype: 'interface', attributes: [] },
+        } as any)
+      )
+    )
+  })
+
+  it('C4Node renders without crashing — person', () => {
+    render(
+      withProvider(
+        createElement(C4Node, {
+          ...baseProps,
+          data: { label: 'Dev User', nodeType: 'person' },
+        } as any)
+      )
+    )
+  })
+
+  it('C4Node renders without crashing — system', () => {
+    render(
+      withProvider(
+        createElement(C4Node, {
+          ...baseProps,
+          data: { label: 'External System', nodeType: 'system' },
+        } as any)
+      )
+    )
+  })
+
+  it('C4Node renders without crashing — container', () => {
+    render(
+      withProvider(
+        createElement(C4Node, {
+          ...baseProps,
+          data: { label: 'Web App', nodeType: 'container' },
+        } as any)
+      )
+    )
+  })
+
+  it('C4Node renders without crashing — component', () => {
+    render(
+      withProvider(
+        createElement(C4Node, {
+          ...baseProps,
+          data: { label: 'Auth Module', nodeType: 'component' },
+        } as any)
+      )
+    )
+  })
+
+  it('ArchitectureNode renders without crashing — service', () => {
+    render(
+      withProvider(
+        createElement(ArchitectureNode, {
+          ...baseProps,
+          data: { label: 'Auth Service', nodeType: 'service' },
+        } as any)
+      )
+    )
+  })
+
+  it('ArchitectureNode renders without crashing — database', () => {
+    render(
+      withProvider(
+        createElement(ArchitectureNode, {
+          ...baseProps,
+          data: { label: 'PostgreSQL', nodeType: 'database' },
+        } as any)
+      )
+    )
+  })
+
+  it('ArchitectureNode renders without crashing — queue', () => {
+    render(
+      withProvider(
+        createElement(ArchitectureNode, {
+          ...baseProps,
+          data: { label: 'RabbitMQ', nodeType: 'queue' },
+        } as any)
+      )
+    )
+  })
+
+  it('ArchitectureNode renders without crashing — gateway', () => {
+    render(
+      withProvider(
+        createElement(ArchitectureNode, {
+          ...baseProps,
+          data: { label: 'API Gateway', nodeType: 'gateway' },
+        } as any)
+      )
+    )
+  })
+
+  it('FlowNode renders without crashing — step (default path)', () => {
+    render(
+      withProvider(
+        createElement(FlowNode, {
+          ...baseProps,
+          data: { label: 'Procesar pago', nodeType: 'step' },
+        } as any)
+      )
+    )
+  })
+
+  it('FlowNode renders without crashing — decision (rombo)', () => {
+    render(
+      withProvider(
+        createElement(FlowNode, {
+          ...baseProps,
+          data: { label: '¿Válido?', nodeType: 'decision' },
+        } as any)
+      )
+    )
+  })
+
+  it('FlowNode renders without crashing — terminator (inicio/fin)', () => {
+    render(
+      withProvider(
+        createElement(FlowNode, {
+          ...baseProps,
+          data: { label: 'Inicio', nodeType: 'terminator' },
+        } as any)
+      )
+    )
+  })
+
+  it('SequenceActorNode renders without crashing', () => {
+    render(
+      withProvider(
+        createElement(SequenceActorNode, {
+          ...baseProps,
+          data: { label: 'Client' },
+        } as any)
       )
     )
   })

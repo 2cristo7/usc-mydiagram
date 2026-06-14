@@ -11,6 +11,8 @@ import { defineConfig, mergeConfig } from 'vite'
         environment: 'jsdom',
         globals: true,
         setupFiles: ['./src/test/setup.ts'],
+        // Excluir los tests e2e de Playwright: los corre "npm run test:e2e", no Vitest
+        exclude: ['e2e/**', 'node_modules/**'],
       },
     })
   )
