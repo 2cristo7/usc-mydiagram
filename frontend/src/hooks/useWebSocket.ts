@@ -29,6 +29,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         addNode, addEdge, addMessage, setUiState, setPendingClarification,
         updateNode, removeNode, removeEdge, applyDiagram,
         traceToolCall, traceToolResult, clearToolTrace,
+        setGenerationPhase, clearDiagramContent,
     } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
@@ -173,7 +174,16 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                         });
                     }
                 }
-                setUiState('ready');
+                // Animación de ensamblaje: tras ~1 s de que se ve la fila completa en
+                // el almacén, se dispara la transición a las posiciones de layout final.
+                // El CSS de DiagramCanvas añade 'transition: transform 0.6s ease' a los
+                // nodos React Flow SOLO durante 'assembling', de modo que el simple
+                // cambio de posición se anima automáticamente.
+                setGenerationPhase('assembling');
+                setTimeout(() => {
+                    setGenerationPhase('done');
+                    setUiState('ready');
+                }, 800);
             });
 
             // S7.4 — el agente pausó pidiendo aclaración: la pregunta entra al
@@ -202,6 +212,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                     sender: 'system',
                     timestamp: new Date(),
                 });
+                setGenerationPhase('idle');
                 setUiState('error');
             });
 
@@ -283,6 +294,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             });
         }
         setUiState('generating');
+        setGenerationPhase('staging');
     };
 
     // S9.3b — Redo: regenera el prompt que originó el diagrama, IGNORANDO la
@@ -299,12 +311,18 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         });
         clearToolTrace();
         lastPromptRef.current = prompt;
+        // Limpiar el canvas ANTES de emitir: los nodos/aristas viejos desaparecen
+        // inmediatamente; los nuevos poblarán el almacén desde cero vía staging.
+        // El id/title/diagram_type de currentDiagram se conservan para que
+        // applyDiagram reconcilie sobre el MISMO diagrama al llegar el done.
+        clearDiagramContent();
+        setUiState('generating');
+        setGenerationPhase('staging');
         // S10.2 — conserva el tipo forzado del diagrama original (o auto si null).
         socketRef.current?.emit('message:regenerate', {
             prompt,
             diagram_type: lastGenerationType ?? undefined,
         });
-        setUiState('generating');
     };
 
     // S7.4 — responder a la clarificación pendiente (botón u texto libre): la
