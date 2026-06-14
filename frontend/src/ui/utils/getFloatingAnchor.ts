@@ -6,11 +6,21 @@ type AnchorResult = {
   position: Position
 }
 
+// Posición absoluta del nodo: los nodos internos de React Flow exponen
+// `internals.positionAbsolute` (correcta incluso para nodos hijos/anidados);
+// caemos a `position` para nodos planos o llamadas con nodos no-internos.
+function absPos(node: Node): { x: number; y: number } {
+  const internals = (node as unknown as { internals?: { positionAbsolute?: { x: number; y: number } } }).internals
+  return internals?.positionAbsolute ?? node.position
+}
+
 export function getFloatingAnchor(node: Node, otherNode: Node): AnchorResult {
-  const nx = node.position.x + (node.measured?.width ?? node.width ?? 100) / 2
-  const ny = node.position.y + (node.measured?.height ?? node.height ?? 40) / 2
-  const ox = otherNode.position.x + (otherNode.measured?.width ?? otherNode.width ?? 100) / 2
-  const oy = otherNode.position.y + (otherNode.measured?.height ?? otherNode.height ?? 40) / 2
+  const np = absPos(node)
+  const op = absPos(otherNode)
+  const nx = np.x + (node.measured?.width ?? node.width ?? 100) / 2
+  const ny = np.y + (node.measured?.height ?? node.height ?? 40) / 2
+  const ox = op.x + (otherNode.measured?.width ?? otherNode.width ?? 100) / 2
+  const oy = op.y + (otherNode.measured?.height ?? otherNode.height ?? 40) / 2
 
   const w = (node.measured?.width ?? node.width ?? 100) / 2
   const h = (node.measured?.height ?? node.height ?? 40) / 2

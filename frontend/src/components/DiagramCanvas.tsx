@@ -28,7 +28,7 @@ import { StateNode } from './nodes/StateNode'
 import { MindmapNode } from './nodes/MindmapNode'
 import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
-import { SequenceMessageEdge, EditableEdge } from './edges'
+import { SequenceMessageEdge, EditableEdge, EdgeMarkers } from './edges'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 
 const nodeTypes = {
@@ -104,8 +104,10 @@ export function DiagramCanvas() {
       sourceHandle: connection.sourceHandle ?? undefined,
       targetHandle: connection.targetHandle ?? undefined,
       label: '',
-      type: 'default',
-    } as unknown as DiagramEdge)
+      // Tipo semántico por defecto para aristas creadas a mano (Miro-style).
+      edge_type: 'association',
+      data: { shape: 'curved', strokeStyle: 'normal', targetArrow: true },
+    } as DiagramEdge)
   }, [addEdge])
 
   // ── Estado controlado del canvas interactivo ───────────────────────────────
@@ -176,6 +178,7 @@ export function DiagramCanvas() {
 
     return (
       <div className="relative flex h-full w-full is-assembling">
+        <EdgeMarkers />
         <ReactFlow
           nodes={finalNodes}
           edges={finalEdges}
@@ -314,6 +317,7 @@ export function DiagramCanvas() {
 
   return (
     <div className="relative flex h-full w-full">
+      <EdgeMarkers />
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}

@@ -81,14 +81,32 @@ export const diagramNodeSchema = z.object({
     position: z.object({ x: z.number(), y: z.number() }).optional(),
 });
 
+// Datos puramente visuales del edge en el canvas (waypoints, forma, etiqueta
+// deslizable, flechas). NO forman parte del contrato con el agente: se stripean
+// en diagramToJson antes de enviar. Se persisten en el store para que sobrevivan
+// al round-trip currentDiagram → DiagramToFlow → render.
+export const edgeVisualDataSchema = z.object({
+    label: z.string().optional(),
+    labelT: z.number().optional(),
+    waypoints: z.array(z.object({ x: z.number(), y: z.number() })).optional(),
+    shape: z.enum(['straight', 'elbow', 'curved']).optional(),
+    strokeStyle: z.enum(['normal', 'dashed', 'dotted']).optional(),
+    sourceArrow: z.boolean().optional(),
+    targetArrow: z.boolean().optional(),
+});
+
 export const diagramEdgeSchema = z.object({
     id: z.string(),
     source: z.string(), // Node ID
     target: z.string(), // Node ID
     label: z.string(),
-    edge_type: edgeTypeSchema,
+    // edge_type opcional: las aristas creadas a mano en el canvas no siempre
+    // tienen una semántica de tipo (se asigna 'association' por defecto).
+    edge_type: edgeTypeSchema.optional(),
     sourceHandle: z.string().optional(),
     targetHandle: z.string().optional(),
+    // Visual-only; ver edgeVisualDataSchema. Se stripea antes de enviar al agente.
+    data: edgeVisualDataSchema.optional(),
 });
 
 export const diagramSchema = z.object({

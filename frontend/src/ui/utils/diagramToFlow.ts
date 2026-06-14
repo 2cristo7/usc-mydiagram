@@ -78,8 +78,13 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
             id: edge.id,
             source: edge.source,
             target: edge.target,
-            data: { label: edge.label ?? '' },
-            ...(diagram.diagram_type === 'sequence' ? { type: 'sequenceMessage' } : {}),
+            sourceHandle: edge.sourceHandle ?? null,
+            targetHandle: edge.targetHandle ?? null,
+            // Mezclamos los datos visuales persistidos (waypoints/forma/flechas/
+            // labelT) con la etiqueta del contrato. edge.data.label, si existe,
+            // gana sobre edge.label (es la edición inline más reciente).
+            data: { label: edge.label ?? '', ...(edge.data ?? {}) },
+            type: diagram.diagram_type === 'sequence' ? 'sequenceMessage' : 'default',
         } as Edge;
     });
 

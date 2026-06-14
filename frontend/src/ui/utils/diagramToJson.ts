@@ -28,6 +28,8 @@ export function diagramToJson(diagram: DiagramSchema): CompactDiagram {
         // Pydantic (DiagramNode en agent/schemas.py) no incluye ese campo y un
         // extra podría ensuciar el contexto del LLM o romper la validación.
         nodes: diagram.nodes.map(({ position: _pos, ...rest }) => rest as DiagramNode),
-        edges: diagram.edges,
+        // Se stripea `data` (visual-only: waypoints, forma, flechas…) por la misma
+        // razón que `position`: no es parte del contrato Pydantic del agente.
+        edges: diagram.edges.map(({ data: _data, ...rest }) => rest as DiagramEdge),
     };
 }

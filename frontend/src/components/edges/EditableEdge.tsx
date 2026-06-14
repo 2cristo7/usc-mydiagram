@@ -267,7 +267,7 @@ export function EditableEdge({
         ref={pathRef}
         d={edgePath}
         fill="none"
-        stroke="var(--ink)"
+        stroke="var(--color-ink)"
         strokeWidth={2}
         strokeDasharray={strokeDasharray}
         markerEnd={computedMarkerEnd}
@@ -298,14 +298,14 @@ export function EditableEdge({
               pointerEvents: 'all',
               cursor: isEditing ? 'text' : 'grab',
             }}
-            className={`bg-[var(--surface)] border-2 border-[var(--ink)] px-2 py-0.5 text-sm font-[var(--font-body)] shadow-[2px_2px_0_var(--ink)] ${containerProps.className}`}
+            className={`bg-[var(--color-surface)] border-2 border-[var(--color-ink)] px-2 py-0.5 text-sm font-[var(--font-sans)] shadow-[2px_2px_0_var(--color-ink)] ${containerProps.className}`}
             onDoubleClick={containerProps.onDoubleClick}
             onMouseDown={handleLabelMouseDown}
           >
             {isEditing ? (
               <input
                 {...inputProps}
-                className="bg-transparent border-0 outline-none text-sm font-[var(--font-body)] min-w-[4rem]"
+                className="bg-transparent border-0 outline-none text-sm font-[var(--font-sans)] min-w-[4rem]"
               />
             ) : (
               label
