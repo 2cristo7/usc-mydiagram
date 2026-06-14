@@ -16,6 +16,21 @@ const DEGRADATION_LABELS: Record<DegradationCategory, string> = {
     structure: 'El diagrama puede estar estructuralmente incompleto',
 };
 
+// Resumen legible de un refinamiento: describe QUÉ cambió (nodos/aristas
+// añadidos, modificados, eliminados) en vez del genérico "Diagrama generado".
+function refineSummary(c: {
+    added: string[]; updated: string[]; deleted: string[];
+    addedEdges: number; deletedEdges: number;
+}): string {
+    const parts: string[] = [];
+    if (c.added.length) parts.push(`Añadidos nodos: ${c.added.join(', ')}`);
+    if (c.updated.length) parts.push(`Modificados: ${c.updated.join(', ')}`);
+    if (c.deleted.length) parts.push(`Eliminados nodos: ${c.deleted.join(', ')}`);
+    if (c.addedEdges) parts.push(`${c.addedEdges} arista${c.addedEdges > 1 ? 's' : ''} nueva${c.addedEdges > 1 ? 's' : ''}`);
+    if (c.deletedEdges) parts.push(`${c.deletedEdges} arista${c.deletedEdges > 1 ? 's' : ''} eliminada${c.deletedEdges > 1 ? 's' : ''}`);
+    return parts.length ? parts.join(' · ') : 'Sin cambios en el diagrama';
+}
+
 function degradationMessages(degradations: Degradation[]): string[] {
     return degradations.map((d) => {
         const label = DEGRADATION_LABELS[d.category] ?? 'El diagrama quedó incompleto';
@@ -36,6 +51,16 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // S9.3 — último prompt enviado, para guardarlo junto al diagrama (columna
     // prompt). Un ref: no debe provocar re-render ni recrear el efecto del socket.
     const lastPromptRef = useRef<string | undefined>(undefined);
+    // El refinamiento NO pasa por staging/assembling: aplica deltas en vivo sobre
+    // el canvas interactivo. Este ref distingue el run actual (refinamiento vs
+    // generación) en el handler de `done`, donde ya no hay closure del prompt.
+    const isRefiningRef = useRef(false);
+    // Acumula los cambios del refinamiento en curso para componer el mensaje de
+    // resumen ("Añadidos nodos…; Eliminado…") en lugar de "Diagrama generado".
+    const refineChangesRef = useRef<{
+        added: string[]; updated: string[]; deleted: string[];
+        addedEdges: number; deletedEdges: number;
+    }>({ added: [], updated: [], deleted: [], addedEdges: 0, deletedEdges: 0 });
     // S9.2 — el socket se (re)crea al cambiar la identidad (login/logout). El token
     // vigente se lee al conectar; los refrescos de token NO recrean el socket (la
     // verificación del backend ocurre solo en el handshake).
@@ -108,24 +133,31 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 const result = data?.result as Record<string, unknown> | undefined;
                 const isError = !!(result && typeof result === 'object' && 'error' in result);
                 if (!isError) {
+                    // Acumula el delta para el resumen del done. El label del
+                    // borrado se lee ANTES de aplicar removeNode (luego ya no está).
+                    const changes = refineChangesRef.current;
                     switch (data?.tool) {
                         case 'add_node':
-                            if (data.node) addNode(data.node);
+                            if (data.node) { addNode(data.node); changes.added.push(data.node.label); }
                             break;
                         case 'update_node':
-                            if (data.node) updateNode(data.node.id, data.node);
+                            if (data.node) { updateNode(data.node.id, data.node); changes.updated.push(data.node.label); }
                             break;
                         case 'add_edge':
-                            if (data.edge) addEdge(data.edge);
+                            if (data.edge) { addEdge(data.edge); changes.addedEdges++; }
                             break;
                         case 'delete_node':
                             if (typeof result?.deleted_node === 'string') {
-                                removeNode(result.deleted_node, Array.isArray(result.deleted_edges) ? result.deleted_edges : []);
+                                const id = result.deleted_node;
+                                const label = useStore.getState().currentDiagram?.nodes.find((n) => n.id === id)?.label ?? id;
+                                changes.deleted.push(label);
+                                removeNode(id, Array.isArray(result.deleted_edges) ? result.deleted_edges : []);
                             }
                             break;
                         case 'delete_edge':
                             if (typeof result?.deleted_edge === 'string') {
                                 removeEdge(result.deleted_edge);
+                                changes.deletedEdges++;
                             }
                             break;
                     }
@@ -149,7 +181,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 }
                 addMessage({
                     id: crypto.randomUUID(),
-                    text: `Diagrama generado: ${data?.title ?? 'sin título'}`,
+                    text: isRefiningRef.current
+                        ? `Diagrama actualizado — ${refineSummary(refineChangesRef.current)}`
+                        : `Diagrama generado: ${data?.title ?? 'sin título'}`,
                     sender: 'system',
                     timestamp: new Date(),
                 });
@@ -173,6 +207,15 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                             timestamp: new Date(),
                         });
                     }
+                }
+                // Refinamiento: no hubo staging ni fila almacén; el canvas ya mostró
+                // los deltas en vivo. Saltamos la animación de ensamblaje y volvemos
+                // directos a interactivo para no re-disparar un re-layout completo.
+                if (isRefiningRef.current) {
+                    isRefiningRef.current = false;
+                    setGenerationPhase('done');
+                    setUiState('ready');
+                    return;
                 }
                 // Animación de ensamblaje: tras ~1 s de que se ve la fila completa en
                 // el almacén, se dispara la transición a las posiciones de layout final.
@@ -274,11 +317,19 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         const { currentDiagram, setCurrentDiagramId, setLastGenerationPrompt,
                 selectedDiagramType, setLastGenerationType } = useStore.getState();
         if (currentDiagram) {
+            // Refinamiento: el canvas permanece interactivo y recibe deltas en vivo
+            // (sin pasar por la fila almacén de staging, que haría "desaparecer" el
+            // diagrama). Reseteamos el acumulador de cambios para este run.
+            isRefiningRef.current = true;
+            refineChangesRef.current = { added: [], updated: [], deleted: [], addedEdges: 0, deletedEdges: 0 };
             socketRef.current?.emit('message:refine', {
                 prompt: text,
                 diagram: diagramToJson(currentDiagram),
             });
+            setUiState('generating');
+            return;
         } else {
+            isRefiningRef.current = false;
             // S9.3 — generación desde cero: el diagrama resultante es nuevo, así
             // que su id persistido se resetea a null → el primer done hará POST.
             setCurrentDiagramId(null);
@@ -311,6 +362,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         });
         clearToolTrace();
         lastPromptRef.current = prompt;
+        isRefiningRef.current = false;
         // Limpiar el canvas ANTES de emitir: los nodos/aristas viejos desaparecen
         // inmediatamente; los nuevos poblarán el almacén desde cero vía staging.
         // El id/title/diagram_type de currentDiagram se conservan para que
