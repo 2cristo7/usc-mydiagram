@@ -21,6 +21,7 @@ import { stagingNodePositions, stagingEdges } from '../ui/utils/stagingLayout'
 import { UmlClassNode } from './nodes/UmlClassNode'
 import { C4Node } from './nodes/C4Node'
 import { ArchitectureNode } from './nodes/ArchitectureNode'
+import { ArchitectureGroupNode } from './nodes/ArchitectureGroupNode'
 import { SequenceActorNode } from './nodes/SequenceActorNode'
 import { FlowNode } from './nodes/FlowNode'
 import { TableNode } from './nodes/TableNode'
@@ -28,7 +29,8 @@ import { StateNode } from './nodes/StateNode'
 import { MindmapNode } from './nodes/MindmapNode'
 import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
-import { SequenceMessageEdge, EditableEdge, EdgeMarkers, MindmapBranchEdge } from './edges'
+import { SequenceMessageEdge, EditableEdge, EdgeMarkers, MindmapBranchEdge, ArchitectureEdge } from './edges'
+import { architectureLayoutElk } from '../ui/utils/architectureLayout'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
 import { persistCurrentDiagram } from '../lib/api'
@@ -37,6 +39,7 @@ const nodeTypes = {
   umlClass: UmlClassNode,
   c4: C4Node,
   architecture: ArchitectureNode,
+  architectureGroup: ArchitectureGroupNode,
   sequenceActor: SequenceActorNode,
   flow: FlowNode,
   table: TableNode,
@@ -49,6 +52,7 @@ const nodeTypes = {
 const edgeTypes = {
   sequenceMessage: SequenceMessageEdge,
   mindmapBranch: MindmapBranchEdge,
+  architecture: ArchitectureEdge,
   default: EditableEdge,
 }
 
@@ -161,6 +165,25 @@ export function DiagramCanvas() {
     setRfNodes(derived.nodes)
     setRfEdges(derived.edges)
   }, [derived, setRfNodes, setRfEdges])
+
+  // Refinamiento async ELK para diagramas de arquitectura.
+  // El layout provisional síncrono (de useMemo) ya pintó algo; cuando ELK resuelve
+  // sobrescribimos las posiciones con el resultado final, sin parpadeo perceptible.
+  useEffect(() => {
+    if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return
+    if (generationPhase === 'staging' || generationPhase === 'assembling') return
+
+    let cancelled = false
+    architectureLayoutElk(currentDiagram).then(({ nodes: elkNodes, edges: elkEdges }) => {
+      if (cancelled) return
+      setRfNodes(elkNodes)
+      setRfEdges(elkEdges)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentDiagram, generationPhase, setRfNodes, setRfEdges])
 
   // ── FASE STAGING ────────────────────────────────────────────────────────────
   // Durante 'staging' mostramos el almacén: nodos en fila superior (reales, con
@@ -335,7 +358,7 @@ export function DiagramCanvas() {
   // Para diagramas de secuencia: los actores solo se mueven en X (su Y se fija
   // siempre en la cabecera = 0). Lifelines y activaciones no son arrastrables
   // (draggable:false en sequenceLayout), así que nunca llegan aquí.
-  const onNodeDragStop = (_event: React.MouseEvent, node: Node) => {
+  const onNodeDragStop = (_event: MouseEvent | TouchEvent, node: Node) => {
     const isSequence = currentDiagram?.diagram_type === 'sequence'
     const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id)
     if (!diagramNode) return

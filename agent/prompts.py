@@ -168,21 +168,43 @@ _ARCHITECTURE_NODE_PROMPT = """Esto es un diagrama de arquitectura de software. 
 - Niveles C4, cuando la descripción trata de personas y sistemas:
   "person" (un usuario humano), "system" (un sistema completo), "container" (una app/runtime
   dentro de un sistema), "component" (un módulo dentro de un container).
-- attributes: etiqueta(s) de tecnología opcional(es), p. ej. ["tech: PostgreSQL"]; si no, [].
-Ejemplo:
-[{"id": "api_gateway", "label": "API Gateway", "node_type": "gateway", "attributes": []},
- {"id": "servicio_auth", "label": "Servicio de Autenticación", "node_type": "service", "attributes": ["tech: Node.js"]},
- {"id": "bd_usuarios", "label": "BD de Usuarios", "node_type": "database", "attributes": ["tech: PostgreSQL"]},
- {"id": "bus_eventos", "label": "Bus de Eventos", "node_type": "queue", "attributes": ["tech: Kafka"]}]"""
 
-_ARCHITECTURE_EDGE_PROMPT = """Las aristas son relaciones en tiempo de ejecución entre componentes.
+AGRUPACIÓN OBLIGATORIA: cada nodo DEBE declarar a qué módulo pertenece con el atributo
+"group: <NombreMódulo>" dentro de su lista attributes. Agrupa por subsistema funcional o capa
+(p. ej. "group: Backend", "group: Frontend", "group: Datos", "group: Externos"). Un diagrama
+bien formado tiene 2–5 grupos con varios nodos cada uno. Las personas/actores externos pueden
+ir sin grupo o en "group: Externos".
+
+TECNOLOGÍA: incluye "tech: <Tecnología>" en services, containers y components. La tecnología
+sustituye a la decoración visual — es el dato concreto que diferencia un servicio de otro.
+
+COHERENCIA C4: no mezcles niveles (no pongas component suelto junto a system sin su container).
+Elige un nivel de abstracción y sé consistente en todo el diagrama.
+
+SOBRIEDAD: las etiquetas son nombres concretos del sistema ("Servicio de Pagos", no "Servicio").
+
+Ejemplo:
+[{"id": "api_gateway", "label": "API Gateway", "node_type": "gateway", "attributes": ["group: Borde"]},
+ {"id": "servicio_auth", "label": "Servicio de Autenticación", "node_type": "service", "attributes": ["group: Backend", "tech: Node.js"]},
+ {"id": "servicio_pagos", "label": "Servicio de Pagos", "node_type": "service", "attributes": ["group: Backend", "tech: Java"]},
+ {"id": "bd_usuarios", "label": "BD de Usuarios", "node_type": "database", "attributes": ["group: Datos", "tech: PostgreSQL"]},
+ {"id": "cache", "label": "Caché de Sesiones", "node_type": "database", "attributes": ["group: Datos", "tech: Redis"]},
+ {"id": "bus_eventos", "label": "Bus de Eventos", "node_type": "queue", "attributes": ["group: Datos", "tech: Kafka"]},
+ {"id": "usuario", "label": "Usuario Web", "node_type": "person", "attributes": []}]"""
+
+_ARCHITECTURE_EDGE_PROMPT = """Las aristas son relaciones entre componentes de arquitectura.
 - edge_type:
-  - "calls": un componente envía una petición a otro (HTTP/RPC síncrono) o publica en una cola.
-  - "depends_on": una dependencia estructural que no es una llamada directa.
-- label: protocolo o propósito ("REST", "publica eventos", "lee/escribe").
+  - "calls": interacción en tiempo de ejecución — petición síncrona (HTTP, gRPC) o publicación en cola.
+  - "depends_on": dependencia estructural (configuración, despliegue, importación).
+- label: protocolo o propósito CONCRETO ("REST", "gRPC", "publica eventos", "lee/escribe", "JWT").
+  Evita etiquetas vacías o genéricas como "usa" o "llama".
+- Las aristas pueden cruzar grupos (una llamada de Backend a Datos es lo normal).
 Ejemplo:
 [{"id": "e1", "source": "api_gateway", "target": "servicio_auth", "label": "REST", "edge_type": "calls"},
- {"id": "e2", "source": "servicio_auth", "target": "bd_usuarios", "label": "lee/escribe", "edge_type": "depends_on"}]"""
+ {"id": "e2", "source": "api_gateway", "target": "servicio_pagos", "label": "REST", "edge_type": "calls"},
+ {"id": "e3", "source": "servicio_auth", "target": "bd_usuarios", "label": "lee/escribe", "edge_type": "calls"},
+ {"id": "e4", "source": "servicio_pagos", "target": "bus_eventos", "label": "publica eventos", "edge_type": "calls"},
+ {"id": "e5", "source": "servicio_auth", "target": "cache", "label": "sesiones", "edge_type": "depends_on"}]"""
 
 
 # ---------------------------------------------------------------------------

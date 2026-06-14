@@ -4,6 +4,7 @@ import type { Node, Edge } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
 import { sequenceLayout } from './sequenceLayout';
 import { mindmapLayout } from './mindmapLayout';
+import { architectureLayoutSync } from './architectureLayout';
 
 const nodeTypeMap: Partial<Record<NodeType, string>> = {
     class: 'umlClass',
@@ -40,6 +41,9 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
     }
     if (diagram.diagram_type === 'mindmap') {
         return mindmapLayout(diagram);
+    }
+    if (diagram.diagram_type === 'architecture') {
+        return architectureLayoutSync(diagram);
     }
 
     const graph = new dagre.graphlib.Graph();

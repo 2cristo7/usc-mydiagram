@@ -3,7 +3,7 @@ import type { NodeType } from '../../types'
 import { useInlineEdit } from '../../hooks/useInlineEdit'
 import { useStore } from '../../store'
 
-type ArchData = { label: string; nodeType: NodeType }
+type ArchData = { label: string; nodeType: NodeType; attributes: string[] }
 type ArchNodeType = Node<ArchData, 'architecture'>
 
 const ARCH_COLORS: Partial<Record<NodeType, string>> = {
@@ -13,17 +13,17 @@ const ARCH_COLORS: Partial<Record<NodeType, string>> = {
   gateway: '#a855f7',
 }
 
-const ARCH_ICONS: Partial<Record<NodeType, string>> = {
-  service: '⚙️',
-  database: '🗄️',
-  queue: '📬',
-  gateway: '🚪',
+function extractTech(attributes: string[]): string | null {
+  const techAttr = attributes.find((a) => /^tech\s*:/i.test(a))
+  if (!techAttr) return null
+  const m = techAttr.match(/^tech\s*:\s*(.+)/i)
+  return m ? m[1].trim() : null
 }
 
 export function ArchitectureNode({ id, data, selected }: NodeProps<ArchNodeType>) {
-  const { label, nodeType } = data
+  const { label, nodeType, attributes = [] } = data
   const color = ARCH_COLORS[nodeType] ?? 'var(--color-accent)'
-  const icon = ARCH_ICONS[nodeType] ?? '❓'
+  const tech = extractTech(attributes)
   const updateNode = useStore((s) => s.updateNode)
 
   const { isEditing, inputProps, containerProps } = useInlineEdit({
@@ -42,7 +42,7 @@ export function ArchitectureNode({ id, data, selected }: NodeProps<ArchNodeType>
         className="px-3 py-1 border-b-[3px] border-[var(--color-ink)] text-xs font-semibold text-white text-center"
         style={{ backgroundColor: color }}
       >
-        {icon} {nodeType}
+        {nodeType}
       </div>
       <div className="px-3 py-2 text-center">
         {isEditing ? (
@@ -54,6 +54,9 @@ export function ArchitectureNode({ id, data, selected }: NodeProps<ArchNodeType>
           <div className="text-sm font-semibold text-[var(--color-ink)] text-center">
             {label}
           </div>
+        )}
+        {tech && (
+          <div className="text-xs text-[var(--color-ink)]/60 mt-0.5">{tech}</div>
         )}
       </div>
       <Handle type="target" position={Position.Top} />

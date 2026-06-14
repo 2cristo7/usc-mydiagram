@@ -20,6 +20,7 @@
     "@supabase/supabase-js": "^2.108.1",
     "@types/dagre": "^0.7.54",
     "@xyflow/react": "^12.10.2",
+    "elkjs": "^0.9.3",
     "html-to-image": "^1.11.13",
     "lucide-react": "^1.18.0",
     "react": "^19.2.4",
