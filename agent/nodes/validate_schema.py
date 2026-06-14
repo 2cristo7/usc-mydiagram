@@ -1,7 +1,7 @@
 from state import DiagramState
 from structural import validate_structure
 
-MAX_SCHEMA_RETRIES = 3
+MAX_SCHEMA_RETRIES = 10
 
 
 async def validate_schema(state: DiagramState) -> DiagramState:

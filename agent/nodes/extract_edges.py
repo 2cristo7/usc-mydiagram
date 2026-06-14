@@ -65,7 +65,7 @@ Cada elemento DEBE tener exactamente esta forma:
         # una arista ya válida durante el feedback, no se vuelve a mandar al canvas.
         already_streamed = {e.id for e in state["edges"]}
 
-        raw_stream = stream_llm(system=system, user=prompt, tier="capable", max_tokens=500)
+        raw_stream = stream_llm(system=system, user=prompt, tier="capable", max_tokens=2048)
 
         events = ijson.sendable_list()
         coro = ijson.items_coro(events, "item")

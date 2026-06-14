@@ -1,6 +1,6 @@
 from state import DiagramState
 
-MAX_NODE_RETRIES = 3
+MAX_NODE_RETRIES = 10
 
 
 async def validate_nodes(state: DiagramState) -> DiagramState:

@@ -1,6 +1,6 @@
 from state import DiagramState
 
-MAX_RETRIES = 3
+MAX_RETRIES = 10
 
 
 async def validate_edges(state: DiagramState) -> DiagramState:
