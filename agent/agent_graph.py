@@ -107,7 +107,9 @@ def build_tools(ws: DiagramWorkspace) -> list[StructuredTool]:
             description="Resuelve un texto al/los nodo(s) existentes por nombre (substring o fuzzy). Úsalo ANTES de referenciar un nodo por id."),
         StructuredTool.from_function(
             func=_add_node, name="add_node", args_schema=AddNodeArgs,
-            description="Crea un nodo nuevo. La posición la decide el layout automático; devuelve el id asignado. "
+            description="Crea un nodo nuevo que representa una ENTIDAD o PARTICIPANTE (tabla, clase, servicio, actor…). "
+                        "NUNCA uses add_node para una acción, proceso, fase, mensaje, handshake o transferencia: "
+                        "esos conceptos son ARISTAS (add_edge), no nodos. "
                         "OJO: el nodo nace DESCONECTADO — si debe relacionarse con otros, llama después a add_edge."),
         StructuredTool.from_function(
             func=_update_node, name="update_node", args_schema=UpdateNodeArgs,
@@ -117,7 +119,10 @@ def build_tools(ws: DiagramWorkspace) -> list[StructuredTool]:
             description="Borra un nodo; sus aristas conectadas se borran en cascada."),
         StructuredTool.from_function(
             func=_add_edge, name="add_edge", args_schema=AddEdgeArgs,
-            description="Crea una arista tipada entre dos nodos que YA existen. No crea nodos."),
+            description="Crea una arista tipada entre dos nodos que YA existen. No crea nodos. "
+                        "Úsala para toda INTERACCIÓN, MENSAJE, LLAMADA, RELACIÓN o PROCESO entre nodos: "
+                        "en secuencia, cosas como 'handshake', 'login', 'transferencia de datos', "
+                        "'SYN', 'ACK', 'validar', 'enviar' son aristas, no nodos."),
         StructuredTool.from_function(
             func=_delete_edge, name="delete_edge", args_schema=DeleteEdgeArgs,
             description="Borra una arista. Indica su id, o bien source y target (ids de los nodos extremos); "
@@ -138,11 +143,38 @@ def build_tools(ws: DiagramWorkspace) -> list[StructuredTool]:
 # System prompt del agente
 # ---------------------------------------------------------------------------
 
+_SEQUENCE_AGENT_GUIDE = """
+Guía específica para diagramas de SECUENCIA:
+- Los NODOS son ÚNICAMENTE participantes (actores, servicios, objetos que intercambian mensajes).
+  NUNCA crees un nodo para una acción, proceso, fase, mensaje, handshake o transferencia.
+- Las ARISTAS son los mensajes/interacciones entre participantes, en orden cronológico.
+  Acciones como "handshake", "transferencia de datos", "login", "validar", "SYN/ACK",
+  "enviar", "recibir" son SIEMPRE aristas (add_edge) entre participantes ya existentes.
+  Una respuesta es otra arista con source/target intercambiados.
+- Solo es legítimo crear un nodo nuevo si la petición introduce un participante que aún
+  no existe en el diagrama (p. ej. "añade una caché Redis" → nuevo nodo Redis). Un proceso
+  o fase entre participantes ya presentes es siempre una arista, nunca un nodo nuevo.
+
+Ejemplos correctos:
+  Petición: "Añade un handshake inicial entre Cliente TCP y Servidor TCP"
+  → add_edge(source=cliente_tcp, target=servidor_tcp, label="SYN", edge_type="sequence")
+  → add_edge(source=servidor_tcp, target=cliente_tcp, label="SYN-ACK", edge_type="sequence")
+  → add_edge(source=cliente_tcp, target=servidor_tcp, label="ACK", edge_type="sequence")
+  NO crear nodo "Handshake inicial".
+
+  Petición: "Simula una transferencia de datos"
+  → add_edge(source=cliente_tcp, target=servidor_tcp, label="DATA", edge_type="sequence")
+  → add_edge(source=servidor_tcp, target=cliente_tcp, label="ACK datos", edge_type="sequence")
+  NO crear nodo "Transferencia de datos"."""
+
+
 def build_system_prompt(ws: DiagramWorkspace) -> str:
+    from schemas import DiagramType
     dt = ws.diagram_type
     allowed_nodes = ", ".join(sorted(t.value for t in (ALLOWED_NODE_TYPES.get(dt) or set(NodeType))))
     allowed_edges = ", ".join(sorted(t.value for t in (ALLOWED_EDGE_TYPES.get(dt) or set(EdgeType))))
     diagram_json = ws.to_compact().model_dump_json(indent=2)
+    sequence_guide = _SEQUENCE_AGENT_GUIDE if dt == DiagramType.SEQUENCE else ""
     return f"""Eres un agente que REFINA un diagrama de software existente usando tools.
 
 Diagrama actual (tipo «{dt.value}»):
@@ -150,7 +182,7 @@ Diagrama actual (tipo «{dt.value}»):
 
 node_type válidos para este diagrama: {allowed_nodes}
 edge_type válidos para este diagrama: {allowed_edges}
-
+{sequence_guide}
 Reglas:
 - Cumple la petición COMPLETA antes de terminar. «Añade X entre A y B» significa: crear el nodo X con add_node Y conectarlo a A y a B con add_edge. Crear un nodo NO lo conecta a nada.
 - No dejes nodos nuevos desconectados salvo que el usuario lo pida explícitamente. Antes de dar tu respuesta final, repasa si la petición implicaba relaciones que aún no has creado.
