@@ -1,8 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DiagramNode, NodeType } from '../types'
 import '@xyflow/react/dist/style.css'
 import type { Node, NodeDragHandler } from '@xyflow/react'
-import { ReactFlow, Background, BackgroundVariant, Controls, MiniMap } from '@xyflow/react'
+import {
+  ReactFlow,
+  Background,
+  BackgroundVariant,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  useReactFlow,
+} from '@xyflow/react'
 import { FileQuestion, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store/index'
 import { NodePropertiesPanel } from './NodePropertiesPanel'
@@ -48,6 +57,23 @@ export function DiagramCanvas() {
   const streamingNodes = useStore((s) => s.nodes)
   const streamingEdges = useStore((s) => s.edges)
   const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null)
+
+  // ── Estado controlado del canvas interactivo ───────────────────────────────
+  // React Flow v12 exige nodos/aristas controlados (con onNodesChange) para que
+  // el arrastre siga al ratón en vivo. Derivamos del store via DiagramToFlow y
+  // re-sembramos el estado local cada vez que cambia currentDiagram (nueva
+  // generación, edición desde IA, persistencia de posición tras soltar).
+  const { screenToFlowPosition, getNodes } = useReactFlow()
+  const derived = useMemo(
+    () => (currentDiagram ? DiagramToFlow(currentDiagram) : { nodes: [], edges: [] }),
+    [currentDiagram],
+  )
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState(derived.nodes)
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(derived.edges)
+  useEffect(() => {
+    setRfNodes(derived.nodes)
+    setRfEdges(derived.edges)
+  }, [derived, setRfNodes, setRfEdges])
 
   // ── FASE STAGING ────────────────────────────────────────────────────────────
   // Durante 'staging' mostramos el almacén: nodos en fila superior (reales, con
@@ -169,8 +195,6 @@ export function DiagramCanvas() {
     )
   }
 
-  const { nodes, edges } = DiagramToFlow(currentDiagram)
-
   function onDragOver(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
@@ -179,11 +203,30 @@ export function DiagramCanvas() {
   function onDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault()
     const nodeType = event.dataTransfer.getData('nodeType') as NodeType
+    if (!nodeType) return
+    const label = event.dataTransfer.getData('nodeLabel') || nodeType
+
+    // Congela las posiciones renderizadas actuales para que dagre no reordene el
+    // canvas al añadir el nodo (mismo criterio que la antigua NodePalette).
+    getNodes().forEach((rfNode) => {
+      const storeNode = currentDiagram?.nodes.find((n) => n.id === rfNode.id)
+      if (storeNode && !storeNode.position) {
+        updateNodePosition(rfNode.id, rfNode.position)
+      }
+    })
+
+    // Traduce las coordenadas de pantalla del cursor a coordenadas de flujo.
+    const dropped = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+    // En secuencia los actores viven en la cabecera (y:0); solo respetamos X.
+    const isSequence = currentDiagram?.diagram_type === 'sequence'
+    const position = isSequence ? { x: dropped.x, y: 0 } : dropped
+
     const diagramNode: DiagramNode = {
       id: crypto.randomUUID(),
-      label: nodeType.charAt(0).toUpperCase() + nodeType.slice(1),
+      label: `Nuevo ${label}`,
       node_type: nodeType,
       attributes: [],
+      position,
     }
     addNode(diagramNode)
   }
@@ -213,8 +256,10 @@ export function DiagramCanvas() {
   return (
     <div className="relative flex h-full w-full">
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={rfNodes}
+        edges={rfEdges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         fitView
         nodesDraggable
         nodeTypes={nodeTypes}
