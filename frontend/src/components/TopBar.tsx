@@ -1,4 +1,4 @@
-import { Menu as MenuIcon, Sun, Moon } from 'lucide-react'
+import { Menu as MenuIcon } from 'lucide-react'
 import { IconButton } from '../ui/primitives'
 import { useUiStore } from '../store/ui'
 import { DiagramTypeCards } from './DiagramTypeCards'
@@ -10,7 +10,7 @@ interface TopBarProps {
 }
 
 export function TopBar({ onRegenerate }: TopBarProps) {
-  const { toggleDrawer, toggleTheme, theme } = useUiStore()
+  const { toggleDrawer } = useUiStore()
 
   return (
     <div className="col-span-3 flex items-center gap-3 border-b-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] px-3 py-2">
@@ -25,11 +25,6 @@ export function TopBar({ onRegenerate }: TopBarProps) {
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <ExportMenu onRegenerate={onRegenerate} />
-        <IconButton
-          icon={theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          tooltip={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'}
-          onClick={toggleTheme}
-        />
         <AuthButton />
       </div>
     </div>

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { useUiStore } from '../store/ui'
 
 beforeEach(() => {
-  useUiStore.setState({ drawerOpen: false, toolTrayExpanded: false, theme: 'light' })
+  useUiStore.setState({ drawerOpen: false, toolTrayExpanded: false })
 })
 
 describe('ui store', () => {
@@ -27,14 +27,5 @@ describe('ui store', () => {
     const { setToolTrayExpanded } = useUiStore.getState()
     setToolTrayExpanded(true)
     expect(useUiStore.getState().toolTrayExpanded).toBe(true)
-  })
-
-  it('theme toggles', () => {
-    const { toggleTheme } = useUiStore.getState()
-    expect(useUiStore.getState().theme).toBe('light')
-    toggleTheme()
-    expect(useUiStore.getState().theme).toBe('dark')
-    toggleTheme()
-    expect(useUiStore.getState().theme).toBe('light')
   })
 })

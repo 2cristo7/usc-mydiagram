@@ -22,10 +22,7 @@ export function DiagramTypeCards() {
   ]
 
   return (
-    <div
-      className="flex gap-1.5 overflow-x-auto py-0.5"
-      style={{ scrollbarWidth: 'none' }}
-    >
+    <div className="flex flex-wrap gap-1.5 py-0.5">
       {options.map((opt) => {
         const key = opt.value ?? 'auto'
         const isSelected = opt.value === selectedDiagramType
@@ -34,18 +31,20 @@ export function DiagramTypeCards() {
           <button
             key={key}
             onClick={() => setSelectedDiagramType(opt.value)}
+            aria-pressed={isSelected}
+            title={opt.label}
             className={`
               shrink-0 flex items-center gap-1 px-2.5 py-1 text-xs font-semibold
               border-[3px] border-[var(--color-ink)] rounded-[var(--radius)]
-              transition-all duration-75
+              transition-all duration-75 cursor-pointer select-none
               ${
                 isSelected
-                  ? 'bg-[var(--color-accent)] text-white shadow-[var(--shadow-brutal)]'
-                  : 'bg-[var(--color-surface)] text-[var(--color-ink)] hover:shadow-[var(--shadow-brutal)] hover:-translate-y-px'
+                  ? 'bg-[var(--color-accent)] text-white shadow-[var(--shadow-brutal)] -translate-y-px'
+                  : 'bg-[var(--color-surface)] text-[var(--color-ink)] hover:shadow-[var(--shadow-brutal)] hover:-translate-y-px active:translate-y-0 active:shadow-none'
               }
             `}
           >
-            <span aria-hidden="true">{icon}</span>
+            <span aria-hidden="true" className="text-sm leading-none">{icon}</span>
             <span>{opt.label}</span>
           </button>
         )
