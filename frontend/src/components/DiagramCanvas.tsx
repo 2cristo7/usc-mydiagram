@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DiagramEdge, DiagramNode, NodeType } from '../types'
 import '@xyflow/react/dist/style.css'
-import type { Connection, Edge, Node } from '@xyflow/react'
+import type { Connection, Edge, Node, OnNodeDrag } from '@xyflow/react'
 import {
   ReactFlow,
   Background,
@@ -358,7 +358,7 @@ export function DiagramCanvas() {
   // Para diagramas de secuencia: los actores solo se mueven en X (su Y se fija
   // siempre en la cabecera = 0). Lifelines y activaciones no son arrastrables
   // (draggable:false en sequenceLayout), así que nunca llegan aquí.
-  const onNodeDragStop = (_event: MouseEvent | TouchEvent, node: Node) => {
+  const onNodeDragStop: OnNodeDrag<Node> = (_event, node) => {
     const isSequence = currentDiagram?.diagram_type === 'sequence'
     const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id)
     if (!diagramNode) return
