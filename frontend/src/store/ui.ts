@@ -9,6 +9,12 @@ interface UiStore {
   nodePaletteOpen: boolean
   setNodePaletteOpen: (open: boolean) => void
   toggleNodePalette: () => void
+  // S10.x — bloqueo del lienzo (equivale al candado de <Controls> de React Flow):
+  // cuando está activo, los nodos no se arrastran/seleccionan/conectan. Vive aquí
+  // porque el botón (EditToolbar) y el consumidor (DiagramCanvas) están en celdas
+  // distintas del grid.
+  canvasLocked: boolean
+  toggleCanvasLock: () => void
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -20,4 +26,6 @@ export const useUiStore = create<UiStore>((set) => ({
   nodePaletteOpen: false,
   setNodePaletteOpen: (open) => set({ nodePaletteOpen: open }),
   toggleNodePalette: () => set((s) => ({ nodePaletteOpen: !s.nodePaletteOpen })),
+  canvasLocked: false,
+  toggleCanvasLock: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
 }))

@@ -1,4 +1,4 @@
-import { Plus, GitBranch, Undo2, Redo2, Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
+import { SquarePen, Plus, GitBranch, Undo2, Redo2, Maximize2, ZoomIn, ZoomOut, Lock, Unlock } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { IconButton } from '../ui/primitives/IconButton';
 import { useHistoryStore } from '../store/history';
@@ -8,15 +8,32 @@ import { NodePalette } from './NodePalette';
 
 export function EditToolbar() {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
-  const { undo, redo, canUndo, canRedo } = useHistoryStore();
+  const { undo, redo, canUndo, canRedo, reset: resetHistory } = useHistoryStore();
   const currentDiagram = useStore((s) => s.currentDiagram);
-  const { nodePaletteOpen, toggleNodePalette } = useUiStore();
+  const newDiagram = useStore((s) => s.newDiagram);
+  const { nodePaletteOpen, toggleNodePalette, canvasLocked, toggleCanvasLock } = useUiStore();
+
+  // Nuevo diagrama: limpia el workspace vivo (canvas + chat) y resetea el
+  // historial undo/redo. No borra nada de la BD; el próximo prompt genera desde
+  // cero. Cierra la paleta si estaba abierta para no dejar UI huérfana.
+  function handleNewDiagram() {
+    newDiagram();
+    resetHistory();
+    if (nodePaletteOpen) toggleNodePalette();
+  }
 
   return (
     // El wrapper es flex-row para que la paleta se expanda a la derecha del toolbar.
     <div className="flex flex-row h-full">
       {/* Columna de botones */}
       <div className="flex flex-col items-center border-r-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] py-2 gap-1" style={{ width: 64 }}>
+        <IconButton
+          icon={<SquarePen size={16} />}
+          tooltip="Nuevo diagrama"
+          onClick={handleNewDiagram}
+          aria-label="Crear un diagrama nuevo"
+        />
+        <div className="my-1 h-px w-8 bg-[var(--color-ink)]" />
         <IconButton
           icon={<Plus size={16} />}
           tooltip="Añadir nodo"
@@ -58,6 +75,13 @@ export function EditToolbar() {
           icon={<ZoomOut size={16} />}
           tooltip="Alejar"
           onClick={() => zoomOut()}
+        />
+        <IconButton
+          icon={canvasLocked ? <Lock size={16} /> : <Unlock size={16} />}
+          tooltip={canvasLocked ? 'Desbloquear lienzo' : 'Bloquear lienzo'}
+          onClick={toggleCanvasLock}
+          aria-pressed={canvasLocked}
+          aria-label={canvasLocked ? 'Desbloquear lienzo' : 'Bloquear lienzo'}
         />
       </div>
 
