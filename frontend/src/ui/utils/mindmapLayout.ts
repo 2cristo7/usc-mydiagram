@@ -2,14 +2,16 @@ import type { Node, Edge } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
 import type { DiagramSchema } from '../../types'
 
+// Paleta por rama: tonos lo bastante oscuros para texto blanco legible y
+// con buen contraste sobre el fondo crema del lienzo.
 const BRANCH_COLORS = [
-  '#3b82f6', // azul
-  '#ef4444', // rojo
-  '#22c55e', // verde
-  '#f97316', // naranja
-  '#a855f7', // violeta
-  '#eab308', // amarillo
-  '#ec4899', // rosa
+  '#2563eb', // azul
+  '#dc2626', // rojo
+  '#16a34a', // verde
+  '#d97706', // ámbar
+  '#7c3aed', // violeta
+  '#0891b2', // cian
+  '#db2777', // rosa
 ]
 
 // Radio por nivel (el nivel 0 es la raíz en el origen)
@@ -58,6 +60,26 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
     outCount.set(e.source, (outCount.get(e.source) ?? 0) + 1)
   })
 
+  // Adyacencia dirigida (padre → hijos) a partir de las aristas association
+  const adj = new Map<string, string[]>()
+  diagram.nodes.forEach((n) => adj.set(n.id, []))
+  assocEdges.forEach((e) => {
+    if (adj.has(e.source)) adj.get(e.source)!.push(e.target)
+  })
+
+  // Nº de nodos alcanzables desde un nodo (tamaño de su subárbol/componente)
+  function countReachable(start: string): number {
+    const seen = new Set<string>([start])
+    const q = [start]
+    while (q.length > 0) {
+      const cur = q.shift()!
+      for (const c of (adj.get(cur) ?? [])) {
+        if (!seen.has(c)) { seen.add(c); q.push(c) }
+      }
+    }
+    return seen.size
+  }
+
   // Detectar raíz: nodo topic sin aristas entrantes
   const rootCandidates = diagram.nodes.filter(
     (n) => n.node_type === 'topic' && (inCount.get(n.id) ?? 0) === 0,
@@ -68,7 +90,7 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
   if (rootCandidates.length === 1) {
     rootId = rootCandidates[0].id
   } else if (rootCandidates.length === 0) {
-    // Fallback: nodo con más salientes
+    // Sin candidatos claros: nodo topic con más salientes
     let maxOut = -1
     for (const n of diagram.nodes) {
       if (n.node_type === 'topic') {
@@ -77,19 +99,20 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
       }
     }
   } else {
-    // Múltiples componentes inconexas → dagre
-    return buildDagreFallback(diagram)
+    // Varios candidatos (nodos sueltos añadidos a mano, u orphan del LLM):
+    // NO degradar todo a un dagre plano (perdería colores y aristas de rama);
+    // elegir como raíz la del MAYOR subárbol y dejar el resto como nodos sueltos
+    // (se posicionan aparte más abajo, en el bloque de nonTreeNodes).
+    let best = -1
+    for (const cand of rootCandidates) {
+      const size = countReachable(cand.id)
+      if (size > best) { best = size; rootId = cand.id }
+    }
   }
 
   if (!rootId) return buildDagreFallback(diagram)
 
   // Construir árbol por BFS (ignora aristas que crearían segundo padre o ciclo)
-  const adj = new Map<string, string[]>()
-  diagram.nodes.forEach((n) => adj.set(n.id, []))
-  assocEdges.forEach((e) => {
-    if (adj.has(e.source)) adj.get(e.source)!.push(e.target)
-  })
-
   const children = new Map<string, string[]>()
   const visited = new Set<string>()
   const queue: string[] = [rootId]
@@ -192,7 +215,9 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
 
   assignPositions(rootId, 0, 2 * Math.PI, 0)
 
-  // Nodos que no son topic (no pertenecen al árbol): posición dagre
+  // Nodos sueltos (no alcanzables desde la raíz): posición dagre y estilo NEUTRO,
+  // para que no parezcan una rama real del mapa.
+  const NEUTRAL_COLOR = '#9ca3af'
   const nonTreeNodes = diagram.nodes.filter((n) => !visited.has(n.id))
   if (nonTreeNodes.length > 0) {
     const fallbackGraph = new dagre.graphlib.Graph()
@@ -207,6 +232,9 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
       } else {
         positions.set(n.id, n.position)
       }
+      levels.set(n.id, 1)
+      roles.set(n.id, 'leaf')
+      branchColors.set(n.id, NEUTRAL_COLOR)
     })
   }
 

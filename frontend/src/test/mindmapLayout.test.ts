@@ -224,3 +224,41 @@ describe('mindmapLayout — fallback a dagre', () => {
     expect(nodes).toHaveLength(2)
   })
 })
+
+describe('mindmapLayout — robustez ante nodos sueltos (regresión de colores)', () => {
+  // Un nodo "Nuevo Tema" suelto (sin aristas) crea una 2ª raíz candidata.
+  // Antes esto degradaba TODO a dagre plano y se perdían branchColor/role/tipo de
+  // arista (nodos azules iguales, aristas negras). Ahora debe elegir la raíz del
+  // mayor subárbol y conservar los colores del árbol principal.
+  function makeMindmapWithStrayNode(): DiagramSchema {
+    const d = makeSimpleMindmap()
+    d.nodes.push({ id: 'stray', label: 'Nuevo Tema', node_type: 'topic', attributes: [] })
+    return d
+  }
+
+  it('elige el árbol grande como raíz pese al nodo suelto', () => {
+    const { nodes } = mindmapLayout(makeMindmapWithStrayNode())
+    const root = nodes.find((n) => n.id === 'root')!
+    expect(root.data.role).toBe('root')
+  })
+
+  it('las ramas conservan branchColor (no se degrada a plano)', () => {
+    const { nodes } = mindmapLayout(makeMindmapWithStrayNode())
+    const b1 = nodes.find((n) => n.id === 'b1')!
+    const b2 = nodes.find((n) => n.id === 'b2')!
+    expect(b1.data.role).toBe('branch')
+    expect(b1.data.branchColor).toBeTruthy()
+    expect(b1.data.branchColor).not.toBe(b2.data.branchColor) // color por rama distinto
+  })
+
+  it('las aristas del árbol siguen siendo de tipo mindmapBranch', () => {
+    const { edges } = mindmapLayout(makeMindmapWithStrayNode())
+    expect(edges.every((e) => e.type === 'mindmapBranch')).toBe(true)
+  })
+
+  it('el nodo suelto sale en estilo neutro (no como una rama real)', () => {
+    const { nodes } = mindmapLayout(makeMindmapWithStrayNode())
+    const stray = nodes.find((n) => n.id === 'stray')!
+    expect(stray.data.branchColor).toBe('#9ca3af')
+  })
+})

@@ -12,12 +12,21 @@ type MindmapData = {
 }
 type MindmapNodeType = Node<MindmapData, 'mindmap'>
 
-// Variante semitransparente del color de rama para las hojas
+// Añade alfa (0–1) a un color hex de 6 dígitos → '#rrggbbaa'
+function hexWithAlpha(hex: string, alpha: number): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return hex
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+    .toString(16)
+    .padStart(2, '0')
+  return `${hex}${a}`
+}
+
+// Hoja: relleno tintado del color de su rama (refuerza la pertenencia a la rama)
 function leafStyle(branchColor: string): React.CSSProperties {
   return {
     borderColor: branchColor,
-    color: branchColor,
-    backgroundColor: 'transparent',
+    color: 'var(--color-ink)',
+    backgroundColor: hexWithAlpha(branchColor, 0.16),
     borderWidth: 2,
     borderStyle: 'solid',
     borderRadius: 9999,
