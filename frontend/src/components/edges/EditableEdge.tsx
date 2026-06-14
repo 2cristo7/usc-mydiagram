@@ -305,7 +305,7 @@ export function EditableEdge({
             {isEditing ? (
               <input
                 {...inputProps}
-                className="bg-transparent border-0 outline-none text-sm font-[var(--font-sans)] min-w-[4rem]"
+                className="bg-transparent border-0 outline-none text-sm font-[var(--font-sans)] min-w-[1.5rem]"
               />
             ) : (
               label
