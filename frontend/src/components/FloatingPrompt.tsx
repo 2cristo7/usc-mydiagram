@@ -63,9 +63,9 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
         <button
           onClick={send}
           disabled={disabled || !value.trim()}
-          className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center border-[2px] border-[var(--color-ink)] bg-[var(--color-accent)] text-white rounded-[var(--radius)] hover:shadow-[var(--shadow-brutal)] disabled:opacity-40 disabled:pointer-events-none transition-all duration-75"
+          className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center border-[2px] border-[var(--color-ink)] bg-[var(--color-accent)] text-white rounded-[var(--radius)] hover:shadow-[var(--shadow-brutal)] disabled:opacity-40 disabled:pointer-events-none transition-all duration-75"
         >
-          <Send size={12} />
+          <Send size={12} className="-ml-px" />
         </button>
       </div>
     </div>
