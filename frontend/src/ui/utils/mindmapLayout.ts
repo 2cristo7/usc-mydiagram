@@ -60,14 +60,21 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
     outCount.set(e.source, (outCount.get(e.source) ?? 0) + 1)
   })
 
-  // Adyacencia dirigida (padre → hijos) a partir de las aristas association
+  // Adyacencia NO DIRIGIDA. Un mapa mental es un árbol no dirigido; al REFINAR, el
+  // LLM puede emitir alguna arista en sentido hijo→padre. Si construyéramos el árbol
+  // con el sentido de la arista, ese subárbol se "despegaría" (quedaría suelto). Con
+  // adyacencia no dirigida + orientación por BFS desde la raíz, el sentido deja de
+  // importar y el árbol siempre queda conexo.
   const adj = new Map<string, string[]>()
   diagram.nodes.forEach((n) => adj.set(n.id, []))
   assocEdges.forEach((e) => {
-    if (adj.has(e.source)) adj.get(e.source)!.push(e.target)
+    if (adj.has(e.source) && adj.has(e.target)) {
+      adj.get(e.source)!.push(e.target)
+      adj.get(e.target)!.push(e.source)
+    }
   })
 
-  // Nº de nodos alcanzables desde un nodo (tamaño de su subárbol/componente)
+  // Nº de nodos en la componente conexa de un nodo (adyacencia no dirigida)
   function countReachable(start: string): number {
     const seen = new Set<string>([start])
     const q = [start]
@@ -215,22 +222,23 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
 
   assignPositions(rootId, 0, 2 * Math.PI, 0)
 
-  // Nodos sueltos (no alcanzables desde la raíz): posición dagre y estilo NEUTRO,
-  // para que no parezcan una rama real del mapa.
+  // Nodos sueltos (no alcanzables desde la raíz: otra componente, o un orphan que
+  // el refine no llegó a conectar): estilo NEUTRO y colocados en una FILA DEBAJO del
+  // árbol, para que no se amontonen sobre el centro radial (origen) pisándolo.
   const NEUTRAL_COLOR = '#9ca3af'
   const nonTreeNodes = diagram.nodes.filter((n) => !visited.has(n.id))
   if (nonTreeNodes.length > 0) {
-    const fallbackGraph = new dagre.graphlib.Graph()
-    fallbackGraph.setGraph({ rankdir: 'TB' })
-    fallbackGraph.setDefaultEdgeLabel(() => ({}))
-    nonTreeNodes.forEach((n) => fallbackGraph.setNode(n.id, { label: n.label, width: 150, height: 50 }))
-    dagre.layout(fallbackGraph)
+    const treePositions = [...positions.values()]
+    const maxY = treePositions.length ? Math.max(...treePositions.map((p) => p.y)) : 0
+    const minX = treePositions.length ? Math.min(...treePositions.map((p) => p.x)) : 0
+    const STRAY_GAP = 180
+    let cursorX = minX
     nonTreeNodes.forEach((n) => {
-      if (!n.position) {
-        const { x, y } = fallbackGraph.node(n.id)
-        positions.set(n.id, { x, y })
-      } else {
+      if (n.position) {
         positions.set(n.id, n.position)
+      } else {
+        positions.set(n.id, { x: cursorX, y: maxY + 220 })
+        cursorX += STRAY_GAP
       }
       levels.set(n.id, 1)
       roles.set(n.id, 'leaf')

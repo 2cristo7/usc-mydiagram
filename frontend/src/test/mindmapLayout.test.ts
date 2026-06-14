@@ -262,3 +262,49 @@ describe('mindmapLayout — robustez ante nodos sueltos (regresión de colores)'
     expect(stray.data.branchColor).toBe('#9ca3af')
   })
 })
+
+describe('mindmapLayout — robustez al refinar (aristas invertidas y desconexión)', () => {
+  // Al refinar, el LLM a veces emite una arista en sentido hijo→padre. El árbol no
+  // dirigido debe reconectar ese subárbol en vez de dejarlo suelto.
+  it('una arista invertida (hijo→padre) NO despega el subárbol', () => {
+    const d: DiagramSchema = {
+      title: 'T', diagram_type: 'mindmap',
+      nodes: [
+        { id: 'root', label: 'R', node_type: 'topic', attributes: [] },
+        { id: 'a', label: 'A', node_type: 'topic', attributes: [] },
+        { id: 'a1', label: 'A1', node_type: 'topic', attributes: [] },
+      ],
+      edges: [
+        { id: 'e1', source: 'root', target: 'a', label: '', edge_type: 'association' },
+        { id: 'e2', source: 'a1', target: 'a', label: '', edge_type: 'association' }, // invertida
+      ],
+    }
+    const { nodes } = mindmapLayout(d)
+    const a = nodes.find((n) => n.id === 'a')!
+    const a1 = nodes.find((n) => n.id === 'a1')!
+    expect(a.data.role).toBe('branch')          // a mantiene su hijo
+    expect(a1.data.role).toBe('leaf')
+    expect(a1.data.branchColor).toBe(a.data.branchColor) // color de rama heredado, no gris suelto
+    expect(a1.data.branchColor).not.toBe('#9ca3af')
+  })
+
+  // Un nodo/sub-árbol desconectado debe quedar DEBAJO del árbol, no sobre el centro.
+  it('los nodos sueltos se colocan por debajo del árbol (no pisan el centro)', () => {
+    const d: DiagramSchema = {
+      title: 'T', diagram_type: 'mindmap',
+      nodes: [
+        { id: 'root', label: 'R', node_type: 'topic', attributes: [] },
+        { id: 'a', label: 'A', node_type: 'topic', attributes: [] },
+        { id: 'stray', label: 'Suelto', node_type: 'topic', attributes: [] },
+      ],
+      edges: [
+        { id: 'e1', source: 'root', target: 'a', label: '', edge_type: 'association' },
+      ],
+    }
+    const { nodes } = mindmapLayout(d)
+    const a = nodes.find((n) => n.id === 'a')!
+    const stray = nodes.find((n) => n.id === 'stray')!
+    expect(stray.data.branchColor).toBe('#9ca3af')
+    expect(stray.position.y).toBeGreaterThan(a.position.y) // por debajo del árbol
+  })
+})
