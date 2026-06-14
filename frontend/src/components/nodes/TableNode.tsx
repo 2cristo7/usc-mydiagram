@@ -13,6 +13,7 @@ export function TableNode({ id, data, selected }: NodeProps<TableNodeType>) {
     initialValue: label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   return (

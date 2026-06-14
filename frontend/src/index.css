@@ -89,3 +89,12 @@ p {
 .react-flow__node.snap-target {
   box-shadow: 0 0 0 3px var(--color-accent);
 }
+
+/* Nodo seleccionado: halo visible alrededor del bounding box, agnóstico a la
+   forma del nodo (rectángulos, píldoras, rombos). outline-offset lo separa del
+   borde propio del nodo para que se note la selección sin confundirse con él. */
+.react-flow__node.selected {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}

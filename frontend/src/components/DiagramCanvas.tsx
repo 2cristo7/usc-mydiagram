@@ -6,7 +6,6 @@ import {
   ReactFlow,
   Background,
   BackgroundVariant,
-  Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -15,6 +14,7 @@ import {
 } from '@xyflow/react'
 import { FileQuestion, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store/index'
+import { useUiStore } from '../store/ui'
 import { DiagramToFlow } from '../ui/utils/diagramToFlow'
 import { stagingNodePositions, stagingEdges } from '../ui/utils/stagingLayout'
 
@@ -30,6 +30,8 @@ import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
 import { SequenceMessageEdge, EditableEdge, EdgeMarkers, MindmapBranchEdge } from './edges'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
+import { NodeContextMenu } from './nodes/NodeContextMenu'
+import { persistCurrentDiagram } from '../lib/api'
 
 const nodeTypes = {
   umlClass: UmlClassNode,
@@ -57,18 +59,50 @@ export function DiagramCanvas() {
   const streamingNodes = useStore((s) => s.nodes)
   const streamingEdges = useStore((s) => s.edges)
   const addEdge = useStore((s) => s.addEdge)
+  const canvasLocked = useUiStore((s) => s.canvasLocked)
   const [, setSelectedNode] = useState<DiagramNode | null>(null)
   const [edgeMenu, setEdgeMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
+  const [nodeMenu, setNodeMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null)
 
   const isConnecting = useRef(false)
   const [, setConnectingTarget] = useState<string | null>(null)
 
   const onEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
     event.preventDefault()
+    setNodeMenu(null)
     setEdgeMenu({ edgeId: edge.id, x: event.clientX, y: event.clientY })
   }, [])
 
   const closeEdgeMenu = useCallback(() => setEdgeMenu(null), [])
+
+  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault()
+    setEdgeMenu(null)
+    setNodeMenu({ nodeId: node.id, x: event.clientX, y: event.clientY })
+  }, [])
+
+  const closeNodeMenu = useCallback(() => setNodeMenu(null), [])
+
+  // Borrado de nodos (tecla Supr/Retroceso): React Flow quita el nodo de su estado
+  // local, pero la verdad vive en el store (currentDiagram), que se re-siembra; hay
+  // que reflejar el borrado allí (removeNode arrastra las aristas incidentes) y
+  // persistir para que sobreviva a una recarga. Lectura fresca del store por si el
+  // borrado afecta a varios nodos a la vez (selección múltiple).
+  const onNodesDelete = useCallback((deleted: Node[]) => {
+    const { edges, removeNode } = useStore.getState()
+    deleted.forEach((n) => {
+      const edgeIds = edges.filter((e) => e.source === n.id || e.target === n.id).map((e) => e.id)
+      removeNode(n.id, edgeIds)
+    })
+    void persistCurrentDiagram()
+  }, [])
+
+  // Borrado de aristas por teclado (mismo motivo: reflejar en el store + persistir).
+  const onEdgesDelete = useCallback((deleted: Edge[]) => {
+    const { removeEdge } = useStore.getState()
+    deleted.forEach((e) => removeEdge(e.id))
+    void persistCurrentDiagram()
+  }, [])
 
   const onConnectStart = useCallback(() => {
     isConnecting.current = true
@@ -163,7 +197,6 @@ export function DiagramCanvas() {
             size={1}
             style={{ opacity: 0.12 }}
           />
-          <Controls className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]" />
         </ReactFlow>
       </div>
     )
@@ -203,7 +236,6 @@ export function DiagramCanvas() {
             size={1}
             style={{ opacity: 0.12 }}
           />
-          <Controls className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]" />
           <MiniMap
             className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]"
             nodeColor="var(--color-accent)"
@@ -325,9 +357,14 @@ export function DiagramCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
-        nodesDraggable
+        nodesDraggable={!canvasLocked}
+        nodesConnectable={!canvasLocked}
+        elementsSelectable={!canvasLocked}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        deleteKeyCode={['Delete', 'Backspace']}
+        onNodesDelete={onNodesDelete}
+        onEdgesDelete={onEdgesDelete}
         onDrop={onDrop}
         onDragOver={onDragOver}
         onConnect={onConnect}
@@ -336,9 +373,10 @@ export function DiagramCanvas() {
         onNodeMouseEnter={onNodeMouseEnter}
         onNodeMouseLeave={onNodeMouseLeave}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onNodeDragStop={onNodeDragStop}
         onEdgeContextMenu={onEdgeContextMenu}
-        onPaneClick={() => { setSelectedNode(null); closeEdgeMenu() }}
+        onPaneClick={() => { setSelectedNode(null); closeEdgeMenu(); closeNodeMenu() }}
         connectionMode={ConnectionMode.Loose}
         className="bg-[var(--color-bg)]"
       >
@@ -349,7 +387,6 @@ export function DiagramCanvas() {
           size={1}
           style={{ opacity: 0.12 }}
         />
-        <Controls className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]" />
         <MiniMap
           className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]"
           nodeColor="var(--color-accent)"
@@ -361,6 +398,13 @@ export function DiagramCanvas() {
           edgeId={edgeMenu.edgeId}
           position={{ x: edgeMenu.x, y: edgeMenu.y }}
           onClose={closeEdgeMenu}
+        />
+      )}
+      {nodeMenu && (
+        <NodeContextMenu
+          nodeId={nodeMenu.nodeId}
+          position={{ x: nodeMenu.x, y: nodeMenu.y }}
+          onClose={closeNodeMenu}
         />
       )}
     </div>

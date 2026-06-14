@@ -15,6 +15,7 @@ export function UmlClassNode({ id, data, selected }: NodeProps<UmlNode>) {
     initialValue: label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   return (

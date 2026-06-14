@@ -28,6 +28,11 @@ interface MsgStore {
     // S10.x — reemplaza la conversación completa. Lo usa la carga del historial
     // para restaurar los mensajes del diagrama abierto (addMessage solo añade).
     setMessages: (messages: Message[]) => void;
+    // S10.x — petición de edición inline de un nodo desde fuera del componente
+    // (menú contextual "Editar"). El nodo con este id arranca su edición y limpia
+    // la petición. null = sin petición pendiente.
+    editRequestNodeId: string | null;
+    requestNodeEdit: (id: string | null) => void;
     uiState: UIState;
     setUiState: (state: MsgStore['uiState']) => void;
     // Fase de animación del streaming. Independiente de uiState para no
@@ -94,6 +99,12 @@ interface DiagramStore {
     // id/title/diagram_type para que applyDiagram reconcilie sobre el MISMO
     // diagrama (no crea uno nuevo). No-op si no hay diagrama vivo.
     clearDiagramContent: () => void;
+    // S10.x — "Nuevo diagrama": resetea el workspace al estado inicial en blanco
+    // (canvas vacío + conversación vacía), como abrir un chat nuevo. NO toca la
+    // BD: los diagramas guardados siguen en el historial; esto solo limpia el
+    // estado vivo en memoria. El primer prompt tras esto arranca una generación
+    // desde cero (currentDiagramId null → POST).
+    newDiagram: () => void;
 }
 
 export type Store = MsgStore & DiagramStore;
@@ -103,6 +114,8 @@ export const useStore = create<Store>()((set) => ({
     messages: [],
     addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
     setMessages: (messages) => set({ messages }),
+    editRequestNodeId: null,
+    requestNodeEdit: (id) => set({ editRequestNodeId: id }),
     uiState: 'idle',
     setUiState: (state) => set({ uiState: state }),
     generationPhase: 'idle',
@@ -205,6 +218,20 @@ export const useStore = create<Store>()((set) => ({
                 edges: [],
             },
         }
+     }),
+     newDiagram: () => set({
+        nodes: [],
+        edges: [],
+        currentDiagram: null,
+        currentDiagramId: null,
+        lastGenerationPrompt: null,
+        lastGenerationType: null,
+        messages: [],
+        toolTrace: [],
+        pendingClarification: null,
+        editRequestNodeId: null,
+        uiState: 'idle',
+        generationPhase: 'idle',
      }),
      applyDiagram: (diagram) => set((state) => {
         // El done SIEMPRE manda (reconciliación incondicional), pero si los

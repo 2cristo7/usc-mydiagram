@@ -20,6 +20,7 @@ export function StateNode({ data, id, selected }: NodeProps<StateNodeType>) {
     initialValue: label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   if (isInitial(label)) {

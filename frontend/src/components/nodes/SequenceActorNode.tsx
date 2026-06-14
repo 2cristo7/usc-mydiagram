@@ -11,6 +11,7 @@ export function SequenceActorNode({ data, id, selected }: NodeProps<ActorNodeTyp
     initialValue: data.label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   return (

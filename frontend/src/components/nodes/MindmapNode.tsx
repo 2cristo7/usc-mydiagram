@@ -40,14 +40,15 @@ export function MindmapNode({ data, id, selected }: NodeProps<MindmapNodeType>) 
     initialValue: label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   const sharedEdit = (
     <textarea
       {...inputProps}
       onFocus={(e) => e.target.select()}
-      className="bg-transparent border-none outline-none resize-none w-full text-center"
-      style={{ color: 'inherit', font: 'inherit' }}
+      className="bg-transparent border-none outline-none resize-none text-center"
+      style={{ color: 'inherit', font: 'inherit', width: inputProps.style.width }}
       rows={1}
     />
   )

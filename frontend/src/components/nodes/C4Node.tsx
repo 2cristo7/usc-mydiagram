@@ -31,6 +31,7 @@ export function C4Node({ id, data, selected }: NodeProps<C4NodeType>) {
     initialValue: label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   return (

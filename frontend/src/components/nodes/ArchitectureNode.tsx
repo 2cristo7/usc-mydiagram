@@ -30,6 +30,7 @@ export function ArchitectureNode({ id, data, selected }: NodeProps<ArchNodeType>
     initialValue: label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   return (

@@ -13,6 +13,7 @@ export function FlowNode({ data, id, selected }: NodeProps<FlowNodeType>) {
     initialValue: label,
     onCommit: (newLabel) => updateNode(id, { label: newLabel }),
     selected,
+    nodeId: id,
   })
 
   if (nodeType === 'decision') {
