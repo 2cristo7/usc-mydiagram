@@ -220,3 +220,27 @@ test('sequence diagram dispatches to sequenceLayout', async () => {
 
     expect(sequenceLayout).toHaveBeenCalledWith(diagram);
 });
+
+test('nodo con position guardada usa esa posición y no la calculada por dagre', () => {
+    const savedPos = { x: 999, y: 888 }
+    const diagram: DiagramSchema = {
+        title: 'Posición persistida',
+        diagram_type: 'erd' as DiagramType,
+        nodes: [
+            { id: '1', label: 'Nodo A', node_type: 'table' as NodeType, attributes: [], position: savedPos },
+            { id: '2', label: 'Nodo B', node_type: 'table' as NodeType, attributes: [] },
+        ],
+        edges: [],
+    }
+
+    const { nodes } = DiagramToFlow(diagram)
+
+    // El nodo con posición guardada debe conservar exactamente esas coordenadas.
+    const nodeA = nodes.find((n) => n.id === '1')!
+    expect(nodeA.position).toEqual(savedPos)
+
+    // El nodo sin posición guardada recibe la de dagre (cualquier número).
+    const nodeB = nodes.find((n) => n.id === '2')!
+    expect(typeof nodeB.position.x).toBe('number')
+    expect(typeof nodeB.position.y).toBe('number')
+});

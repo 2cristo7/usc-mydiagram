@@ -75,6 +75,10 @@ export const diagramNodeSchema = z.object({
     node_type: nodeTypeSchema,
     // Tolerante: un nodo sin `attributes` (editado a mano, otra versión) cae a [].
     attributes: z.array(z.string()).default([]),
+    // Coordenadas persistidas. Opcional para compatibilidad con diagramas
+    // importados sin posición (dagre da la posición inicial en ese caso).
+    // NO se envía al agente Python (diagramToJson lo stripea).
+    position: z.object({ x: z.number(), y: z.number() }).optional(),
 });
 
 export const diagramEdgeSchema = z.object({

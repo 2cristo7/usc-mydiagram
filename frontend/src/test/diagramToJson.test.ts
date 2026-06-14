@@ -33,3 +33,16 @@ test('OMITE title: es human-facing, no contexto de refinamiento', () => {
     expect('title' in compact).toBe(false);
     expect(Object.keys(compact).sort()).toEqual(['diagram_type', 'edges', 'nodes']);
 });
+
+test('OMITE position de los nodos: el contrato Pydantic del agente no incluye ese campo', () => {
+    const diagramWithPositions: DiagramSchema = {
+        ...diagram,
+        nodes: diagram.nodes.map((n, i) => ({ ...n, position: { x: i * 100, y: i * 50 } })),
+    };
+
+    const compact = diagramToJson(diagramWithPositions);
+
+    compact.nodes.forEach((n) => {
+        expect('position' in n).toBe(false);
+    });
+});

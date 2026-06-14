@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import type { DiagramNode, NodeType } from '../types'
 import '@xyflow/react/dist/style.css'
-import type { Node } from '@xyflow/react'
+import type { Node, NodeDragHandler } from '@xyflow/react'
 import { ReactFlow, Background, BackgroundVariant, Controls, MiniMap } from '@xyflow/react'
 import { FileQuestion, AlertTriangle } from 'lucide-react'
 import { useStore } from '../store/index'
 import { NodePropertiesPanel } from './NodePropertiesPanel'
 import { DiagramToFlow } from '../ui/utils/diagramToFlow'
+import { stagingNodePositions, stagingEdgeChipPositions } from '../ui/utils/stagingLayout'
 
 import { UmlClassNode } from './nodes/UmlClassNode'
 import { C4Node } from './nodes/C4Node'
@@ -18,6 +19,7 @@ import { StateNode } from './nodes/StateNode'
 import { MindmapNode } from './nodes/MindmapNode'
 import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
+import { EdgeChipNode } from './nodes/EdgeChipNode'
 import { SequenceMessageEdge } from './edges/SequenceMessageEdge'
 
 const nodeTypes = {
@@ -31,6 +33,8 @@ const nodeTypes = {
   mindmap: MindmapNode,
   lifeline: LifelineNode,
   activation: ActivationNode,
+  // Nodo especial para la fase de almacén: representa una arista pendiente de ensamblaje.
+  edgeChip: EdgeChipNode,
 }
 
 const edgeTypes = {
@@ -38,9 +42,92 @@ const edgeTypes = {
 }
 
 export function DiagramCanvas() {
-  const { currentDiagram, addNode } = useStore()
+  const { currentDiagram, addNode, updateNodePosition } = useStore()
   const uiState = useStore((s) => s.uiState)
+  const generationPhase = useStore((s) => s.generationPhase)
+  const streamingNodes = useStore((s) => s.nodes)
+  const streamingEdges = useStore((s) => s.edges)
   const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null)
+
+  // ── FASE STAGING ────────────────────────────────────────────────────────────
+  // Durante 'staging' mostramos el almacén: nodos en fila superior (reales, con
+  // su tipo custom), fichas de arista en fila inferior. Sin aristas reales.
+  // Nunca hay currentDiagram definitivo aquí (el snapshot llega en diagram:done).
+  if (generationPhase === 'staging') {
+    const stagingNodes: Node[] = [
+      ...stagingNodePositions(streamingNodes),
+      ...stagingEdgeChipPositions(streamingEdges, streamingNodes),
+    ]
+
+    return (
+      <div className="relative flex h-full w-full">
+        {/* Banner informativo superpuesto */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 bg-[var(--color-surface)] border-[2px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] text-xs font-semibold text-[var(--color-ink)] pointer-events-none">
+          Recibiendo elementos… ({streamingNodes.length} nodos · {streamingEdges.length} aristas)
+        </div>
+        <ReactFlow
+          nodes={stagingNodes}
+          edges={[]}
+          fitView
+          nodesDraggable={false}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          className="bg-[var(--color-bg)]"
+          proOptions={{ hideAttribution: false }}
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            color="var(--color-ink)"
+            gap={20}
+            size={1}
+            style={{ opacity: 0.12 }}
+          />
+          <Controls className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]" />
+        </ReactFlow>
+      </div>
+    )
+  }
+
+  // ── FASE ASSEMBLING ─────────────────────────────────────────────────────────
+  // El snapshot final ya llegó (applyDiagram ya actualizó currentDiagram).
+  // Calculamos el layout final y renderizamos con la clase 'is-assembling' en el
+  // wrapper, que activa via CSS una transición de transform en los nodos React Flow.
+  // React Flow verá que las posiciones cambiaron y animará el movimiento.
+  if (generationPhase === 'assembling' && currentDiagram) {
+    const { nodes: finalNodes, edges: finalEdges } = DiagramToFlow(currentDiagram)
+
+    return (
+      <div className="relative flex h-full w-full is-assembling">
+        <ReactFlow
+          nodes={finalNodes}
+          edges={finalEdges}
+          fitView
+          nodesDraggable={false}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          className="bg-[var(--color-bg)]"
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            color="var(--color-ink)"
+            gap={20}
+            size={1}
+            style={{ opacity: 0.12 }}
+          />
+          <Controls className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]" />
+          <MiniMap
+            className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]"
+            nodeColor="var(--color-accent)"
+            style={{ background: 'var(--color-surface)' }}
+          />
+        </ReactFlow>
+      </div>
+    )
+  }
+
+  // ── FASE DONE / IDLE ────────────────────────────────────────────────────────
+  // Comportamiento normal: sin diagrama → estados vacíos; con diagrama → canvas
+  // interactivo completo (drag, drop, propiedades).
 
   if (!currentDiagram) {
     if (uiState === 'generating') {
@@ -106,17 +193,36 @@ export function DiagramCanvas() {
     setSelectedNode(diagramNode)
   }
 
+  // Persiste la posición tras soltar un nodo.
+  // Para diagramas de secuencia: los actores solo se mueven en X (su Y se fija
+  // siempre en la cabecera = 0). Lifelines y activaciones no son arrastrables
+  // (draggable:false en sequenceLayout), así que nunca llegan aquí.
+  const onNodeDragStop: NodeDragHandler = (_event, node) => {
+    const isSequence = currentDiagram?.diagram_type === 'sequence'
+    const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id)
+    if (!diagramNode) return
+
+    const x = node.position.x
+    // En diagramas de secuencia los actores quedan siempre en y:0 (HEADER_H fija la
+    // cabecera). Fijamos y=0 aquí para neutralizar cualquier deriva vertical.
+    const y = isSequence && diagramNode.node_type === 'actor' ? 0 : node.position.y
+
+    updateNodePosition(node.id, { x, y })
+  }
+
   return (
     <div className="relative flex h-full w-full">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         fitView
+        nodesDraggable
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onDrop={onDrop}
         onDragOver={onDragOver}
         onNodeClick={onNodeClick}
+        onNodeDragStop={onNodeDragStop}
         onPaneClick={() => setSelectedNode(null)}
         className="bg-[var(--color-bg)]"
       >

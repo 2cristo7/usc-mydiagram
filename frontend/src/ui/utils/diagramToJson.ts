@@ -24,7 +24,10 @@ export interface CompactDiagram {
 export function diagramToJson(diagram: DiagramSchema): CompactDiagram {
     return {
         diagram_type: diagram.diagram_type,
-        nodes: diagram.nodes,
+        // Se stripea `position` antes de enviar al agente Python: el schema
+        // Pydantic (DiagramNode en agent/schemas.py) no incluye ese campo y un
+        // extra podría ensuciar el contexto del LLM o romper la validación.
+        nodes: diagram.nodes.map(({ position: _pos, ...rest }) => rest as DiagramNode),
         edges: diagram.edges,
     };
 }

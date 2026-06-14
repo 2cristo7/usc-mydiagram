@@ -1,11 +1,18 @@
-import { beforeEach, expect, test } from 'vitest'
+import { beforeEach, expect, test, vi } from 'vitest'
 import { useStore } from '../store'
 import type { DiagramType, NodeType } from '../types'
+import type { GenerationPhase } from '../store'
+
+// Mock de api para no disparar fetch en tests de store.
+vi.mock('../lib/api', () => ({
+    persistCurrentDiagram: vi.fn(() => Promise.resolve({ ok: true })),
+}))
 
 beforeEach(() => {
     useStore.setState({
       messages: [],
       uiState: 'idle',
+      generationPhase: 'idle',
       nodes: [],
       edges: [],
       currentDiagram: null,
@@ -54,6 +61,25 @@ test('updateNode', () => {
     { id: '1', label: 'Nodo A modificado', node_type: 'table' as NodeType, attributes: [] },
     { id: '2', label: 'Nodo B', node_type: 'table' as NodeType, attributes: [] },
   ])
+})
+
+test('updateNodePosition actualiza position en nodes[] y en currentDiagram.nodes[]', () => {
+  const diagram = {
+    title: 'Test',
+    diagram_type: 'erd' as DiagramType,
+    nodes: [
+      { id: 'n1', label: 'Tabla A', node_type: 'table' as NodeType, attributes: [] },
+      { id: 'n2', label: 'Tabla B', node_type: 'table' as NodeType, attributes: [] },
+    ],
+    edges: [],
+  }
+  useStore.getState().setCurrentDiagram(diagram)
+  useStore.getState().updateNodePosition('n1', { x: 123, y: 456 })
+
+  const { nodes, currentDiagram } = useStore.getState()
+  expect(nodes.find((n) => n.id === 'n1')?.position).toEqual({ x: 123, y: 456 })
+  expect(nodes.find((n) => n.id === 'n2')?.position).toBeUndefined()
+  expect(currentDiagram!.nodes.find((n) => n.id === 'n1')?.position).toEqual({ x: 123, y: 456 })
 })
 
 test('addNode', () => {
@@ -121,6 +147,91 @@ test('applyDiagram con estado distinto reemplaza (reconciliación del done)', ()
   useStore.getState().applyDiagram(snapshot)
   expect(useStore.getState().nodes.map((n) => n.id)).toContain('carrito')
   expect(useStore.getState().currentDiagram!.nodes).toHaveLength(3)
+})
+
+// ── Fases de generación (generationPhase) ──────────────────────────────────
+
+test('generationPhase: valor inicial es idle', () => {
+  expect(useStore.getState().generationPhase).toBe('idle')
+})
+
+test('generationPhase: transición idle → staging al iniciar streaming', () => {
+  useStore.getState().setGenerationPhase('staging' as GenerationPhase)
+  expect(useStore.getState().generationPhase).toBe('staging')
+})
+
+test('generationPhase: transición staging → assembling al recibir diagram:done', () => {
+  useStore.getState().setGenerationPhase('staging' as GenerationPhase)
+  useStore.getState().setGenerationPhase('assembling' as GenerationPhase)
+  expect(useStore.getState().generationPhase).toBe('assembling')
+})
+
+test('generationPhase: transición assembling → done al completar la animación', () => {
+  useStore.getState().setGenerationPhase('assembling' as GenerationPhase)
+  useStore.getState().setGenerationPhase('done' as GenerationPhase)
+  expect(useStore.getState().generationPhase).toBe('done')
+})
+
+test('generationPhase: cargar diagrama existente (setCurrentDiagram) NO entra en staging', () => {
+  // Simula carga desde historial: setCurrentDiagram nunca toca generationPhase.
+  const diagram = { title: 'Test', diagram_type: 'erd' as DiagramType, nodes: [], edges: [] }
+  useStore.getState().setCurrentDiagram(diagram)
+  // La fase sigue en 'idle' (o el valor que tenía), no en 'staging'.
+  expect(useStore.getState().generationPhase).toBe('idle')
+})
+
+test('generationPhase: error de generación vuelve a idle', () => {
+  useStore.getState().setGenerationPhase('staging' as GenerationPhase)
+  // En useWebSocket, diagram:error llama a setGenerationPhase('idle')
+  useStore.getState().setGenerationPhase('idle' as GenerationPhase)
+  expect(useStore.getState().generationPhase).toBe('idle')
+})
+
+// ── clearDiagramContent — limpieza previa al regenerar ────────────────────────
+
+test('clearDiagramContent vacía nodes/edges conservando id/title/diagram_type', () => {
+  const diagram = erdSeed()
+  useStore.getState().setCurrentDiagram(diagram)
+
+  useStore.getState().clearDiagramContent()
+
+  const { nodes, edges, currentDiagram } = useStore.getState()
+  expect(nodes).toEqual([])
+  expect(edges).toEqual([])
+  // currentDiagram sigue existiendo, con los metadatos originales
+  expect(currentDiagram).not.toBeNull()
+  expect(currentDiagram!.title).toBe(diagram.title)
+  expect(currentDiagram!.diagram_type).toBe(diagram.diagram_type)
+  expect(currentDiagram!.nodes).toEqual([])
+  expect(currentDiagram!.edges).toEqual([])
+})
+
+test('clearDiagramContent es no-op si no hay diagrama vivo', () => {
+  // currentDiagram ya es null por el beforeEach
+  useStore.getState().clearDiagramContent()
+  expect(useStore.getState().nodes).toEqual([])
+  expect(useStore.getState().edges).toEqual([])
+  expect(useStore.getState().currentDiagram).toBeNull()
+})
+
+test('clearDiagramContent: applyDiagram posterior reconcilia sobre el mismo diagrama', () => {
+  const diagram = erdSeed()
+  useStore.getState().setCurrentDiagram(diagram)
+  useStore.getState().clearDiagramContent()
+
+  // Simula el done: snapshot con nodos nuevos, mismo diagram_type
+  const snapshot = {
+    ...erdSeed(),
+    nodes: [
+      ...erdSeed().nodes,
+      { id: 'carrito', label: 'Carrito', node_type: 'table' as import('../types').NodeType, attributes: [] },
+    ],
+  }
+  useStore.getState().applyDiagram(snapshot)
+
+  const { nodes, currentDiagram } = useStore.getState()
+  expect(nodes).toHaveLength(3)
+  expect(currentDiagram!.diagram_type).toBe('erd')
 })
 
 test('traza de tool calls: running al pedirse, ok/error al resolverse', () => {

@@ -1,11 +1,36 @@
 import type { Message, DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry } from "../types";
 import { create } from "zustand";
+import { persistCurrentDiagram } from "../lib/api";
+
+// Fase de animación de generación por streaming.
+// - 'idle': sin diagrama en curso, comportamiento normal.
+// - 'staging': los nodos/aristas van llegando; se muestran en la fila almacén.
+// - 'assembling': diagram:done recibido; animando transición al layout final.
+// - 'done': animación completada; canvas interactivo normal.
+// Solo la generación/refinamiento por streaming pasa por 'staging' y 'assembling'.
+// Cargar un diagrama guardado va directamente a 'done'.
+export type GenerationPhase = 'idle' | 'staging' | 'assembling' | 'done';
+
+// Debounce de persistencia de posición: si el usuario arrastra rápido varios
+// nodos, esperamos 800 ms tras el último drag antes de llamar al servidor.
+let _positionSaveTimer: ReturnType<typeof setTimeout> | null = null
+function schedulePersist() {
+    if (_positionSaveTimer !== null) clearTimeout(_positionSaveTimer)
+    _positionSaveTimer = setTimeout(() => {
+        _positionSaveTimer = null
+        persistCurrentDiagram()
+    }, 800)
+}
 
 interface MsgStore {
     messages: Message[];
     addMessage: (message: Message) => void;
     uiState: UIState;
     setUiState: (state: MsgStore['uiState']) => void;
+    // Fase de animación del streaming. Independiente de uiState para no
+    // mezclar lógica de conexión con lógica de presentación de animación.
+    generationPhase: GenerationPhase;
+    setGenerationPhase: (phase: GenerationPhase) => void;
     // S7.4 — clarificación pendiente del agente (null si no hay ninguna)
     pendingClarification: Clarification | null;
     setPendingClarification: (c: Clarification | null) => void;
@@ -47,6 +72,9 @@ interface DiagramStore {
     setLastGenerationType: (type: DiagramType | null) => void;
     setCurrentDiagram: (diagram: DiagramSchema) => void;
     updateNode(id: string, changes: Partial<DiagramNode>): void;
+    // Persiste la posición del nodo tras un drag. Actualiza DiagramNode.position
+    // en el store (nodes[] y currentDiagram.nodes[]) y dispara guardado en BD.
+    updateNodePosition(id: string, position: { x: number; y: number }): void;
     addNode: (node: DiagramNode) => void;
     addEdge: (edge: DiagramEdge) => void;
     // S7.5 — deltas del agente. El cascade de removeNode lo declara el SERVIDOR
@@ -56,6 +84,10 @@ interface DiagramStore {
     // S7.5 — reconciliación del done: aplica el snapshot completo SIEMPRE, con
     // guarda de idempotencia del render (no reemplazar estado React idéntico).
     applyDiagram: (diagram: DiagramSchema) => void;
+    // Regenerar: vacía nodes/edges del canvas y de currentDiagram, conservando
+    // id/title/diagram_type para que applyDiagram reconcilie sobre el MISMO
+    // diagrama (no crea uno nuevo). No-op si no hay diagrama vivo.
+    clearDiagramContent: () => void;
 }
 
 export type Store = MsgStore & DiagramStore;
@@ -66,6 +98,8 @@ export const useStore = create<Store>()((set) => ({
     addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
     uiState: 'idle',
     setUiState: (state) => set({ uiState: state }),
+    generationPhase: 'idle',
+    setGenerationPhase: (phase) => set({ generationPhase: phase }),
     pendingClarification: null,
     setPendingClarification: (c) => set({ pendingClarification: c }),
 
@@ -98,6 +132,22 @@ export const useStore = create<Store>()((set) => ({
         nodes: state.nodes.map(node => node.id === id ? { ...node, ...changes } : node),
         currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes: state.currentDiagram.nodes.map(node => node.id === id ? { ...node, ...changes } : node) } : null
      })),
+     updateNodePosition: (id, position) => {
+        set((state) => ({
+            nodes: state.nodes.map((node) =>
+                node.id === id ? { ...node, position } : node
+            ),
+            currentDiagram: state.currentDiagram
+                ? {
+                    ...state.currentDiagram,
+                    nodes: state.currentDiagram.nodes.map((node) =>
+                        node.id === id ? { ...node, position } : node
+                    ),
+                  }
+                : null,
+        }))
+        schedulePersist()
+     },
      addNode: (node: DiagramNode) => set((state) => {
         const updatedNodes = [...state.nodes, node]
         return {
@@ -131,6 +181,18 @@ export const useStore = create<Store>()((set) => ({
         return {
             edges,
             currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges } : null,
+        }
+     }),
+     clearDiagramContent: () => set((state) => {
+        if (!state.currentDiagram) return {}
+        return {
+            nodes: [],
+            edges: [],
+            currentDiagram: {
+                ...state.currentDiagram,
+                nodes: [],
+                edges: [],
+            },
         }
      }),
      applyDiagram: (diagram) => set((state) => {

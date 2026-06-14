@@ -1,4 +1,4 @@
-import type { DiagramSchema, NodeType } from "../../types";
+import type { DiagramSchema, DiagramType, NodeType } from "../../types";
 import '@xyflow/react/dist/style.css';
 import type { Node, Edge } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
@@ -21,6 +21,16 @@ const nodeTypeMap: Partial<Record<NodeType, string>> = {
     table: 'table',
     state: 'state',
     topic: 'mindmap'
+};
+
+// Overrides específicos por diagram_type para node_types que comparten nombre entre
+// diagramas pero necesitan componentes distintos. El caso principal es `terminator`:
+// en flowchart → FlowNode (rombo inicio/fin); en state_machine → StateNode (el único
+// componente de estado disponible, evita renderizar FlowNode en un diagrama de estados).
+const nodeTypeOverrides: Partial<Record<DiagramType, Partial<Record<NodeType, string>>>> = {
+    state_machine: {
+        terminator: 'state',
+    },
 };
 
 export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
@@ -46,16 +56,20 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
     dagre.layout(graph);
 
     const nodes = diagram.nodes.map( (node) => {
-        const { x, y } = graph.node(node.id);
+        // Si el nodo tiene posición guardada, respeta la del usuario.
+        // Dagre solo actúa como layout inicial cuando no hay posición previa.
+        const { x, y } = node.position ?? graph.node(node.id);
         return {
             id: node.id,
             position: { x, y },
-            data: { 
+            data: {
                 label: node.label,
                 nodeType: node.node_type,
                 attributes: node.attributes,
             },
-            type: nodeTypeMap[node.node_type] ?? 'default'        
+            type: nodeTypeOverrides[diagram.diagram_type]?.[node.node_type]
+                ?? nodeTypeMap[node.node_type]
+                ?? 'default'
         } as Node;
     });
 
