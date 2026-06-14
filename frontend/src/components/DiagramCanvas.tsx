@@ -28,7 +28,7 @@ import { StateNode } from './nodes/StateNode'
 import { MindmapNode } from './nodes/MindmapNode'
 import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
-import { SequenceMessageEdge, EditableEdge } from './edges'
+import { SequenceMessageEdge, EditableEdge, MindmapBranchEdge } from './edges'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 
 const nodeTypes = {
@@ -46,6 +46,7 @@ const nodeTypes = {
 
 const edgeTypes = {
   sequenceMessage: SequenceMessageEdge,
+  mindmapBranch: MindmapBranchEdge,
   default: EditableEdge,
 }
 

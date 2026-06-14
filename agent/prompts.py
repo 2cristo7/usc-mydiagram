@@ -212,22 +212,67 @@ Ejemplo:
 # Mapa mental
 # ---------------------------------------------------------------------------
 
-_MINDMAP_NODE_PROMPT = """Esto es un mapa mental. Cada nodo es un tema.
-- node_type: siempre "topic". Incluye el único tema central más sus ramas y sub-ramas.
-- attributes: déjalo vacío ([]).
-Ejemplo:
-[{"id": "ml", "label": "Aprendizaje Automático", "node_type": "topic", "attributes": []},
- {"id": "supervisado", "label": "Supervisado", "node_type": "topic", "attributes": []},
- {"id": "no_supervisado", "label": "No Supervisado", "node_type": "topic", "attributes": []},
- {"id": "regresion", "label": "Regresión", "node_type": "topic", "attributes": []}]"""
+_MINDMAP_NODE_PROMPT = """Esto es un mapa mental radial. Sigue ESTAS REGLAS SIN EXCEPCIÓN:
 
-_MINDMAP_EDGE_PROMPT = """Las aristas conectan un tema padre con cada uno de sus temas hijos (un árbol, del centro hacia afuera).
+ESTRUCTURA:
+- Un ÚNICO tema central (el primero de la lista). NO tiene padre. Es el nodo del que irradian todas las ramas.
+- 3–6 ramas principales equilibradas que cubran las facetas MÁS RELEVANTES del tema (no solo las 3 más obvias).
+- Cada rama se subdivide según su riqueza conceptual real.
+- node_type: siempre "topic". attributes: siempre [].
+
+ÁRBOL ESTRICTO:
+- Cada nodo tiene EXACTAMENTE UN padre (o ninguno, si es la raíz).
+- No hay ciclos ni nodos con dos padres.
+- Las aristas van siempre del centro hacia afuera (padre → hijo).
+
+PROFUNDIDAD ADAPTATIVA (obligatorio, no uniforme):
+- Antes de cerrar una rama pregúntate: ¿tiene este subtema entidad suficiente para desarrollarse más?
+- Ramas ricas en conceptos: 3–4 niveles de profundidad.
+- Ramas simples o terminales: 1–2 niveles.
+- NO todas las ramas deben tener la misma profundidad.
+
+CALIDAD DE NODOS:
+- Cada nodo añade un concepto NUEVO y CONCRETO (dato, ejemplo, técnica, principio…).
+- Prohibido el relleno genérico o repetir al padre con otras palabras.
+- Las hojas son frases cortas (2–5 palabras) pero SIGNIFICATIVAS: un concepto, ejemplo o dato específico.
+- Un experto en el tema no debería echar en falta dimensiones evidentes.
+
+EJEMPLO DE MAPA POBRE (no hagas esto):
+  Raíz: "Machine Learning"
+  ├── Supervisado  →  Regresión, Clasificación
+  ├── No supervisado  →  Clustering, Reducción
+  └── Refuerzo  →  Recompensa, Agente
+  [Uniforme, superficial, sin datos concretos, ramas idénticas de 2 hojas cada una]
+
+EJEMPLO DE MAPA RICO (haz esto):
+  Raíz: "Machine Learning"
+  ├── Supervisado (4 niveles)
+  │   ├── Regresión  →  Lineal, Ridge/Lasso, Gradient Boosting  →  XGBoost (SOTA tabular)
+  │   └── Clasificación  →  SVM (kernel trick), Random Forest  →  Importancia de variables
+  ├── No supervisado (2 niveles)
+  │   ├── Clustering  →  k-means, DBSCAN (densidad), GMM
+  │   └── Reducción dim.  →  PCA, t-SNE (visualización)
+  ├── Refuerzo (3 niveles)
+  │   └── Value-based  →  Q-learning  →  DQN (Deep Q-Network, Atari 2013)
+  ├── Evaluación (2 niveles)
+  │   └── Métricas  →  AUC-ROC, F1, RMSE
+  └── Flujo de trabajo (1 nivel)
+      └── EDA → split → baseline → tune → deploy
+  [Profundidad variable, hojas con nombres y datos concretos, cobertura real del tema]"""
+
+_MINDMAP_EDGE_PROMPT = """Las aristas forman un ÁRBOL ESTRICTO, del tema central hacia afuera.
 - edge_type: siempre "association".
-- label: normalmente vacío.
-Ejemplo:
+- label: déjalo vacío ("").
+- Cada nodo (salvo la raíz) tiene EXACTAMENTE UNA arista entrante (un solo padre).
+- Las aristas van del padre al hijo: source = padre, target = hijo.
+- No hay ciclos ni aristas que apunten hacia la raíz o creen un segundo padre.
+
+Ejemplo (fragmento de mapa sobre ML):
 [{"id": "e1", "source": "ml", "target": "supervisado", "label": "", "edge_type": "association"},
  {"id": "e2", "source": "ml", "target": "no_supervisado", "label": "", "edge_type": "association"},
- {"id": "e3", "source": "supervisado", "target": "regresion", "label": "", "edge_type": "association"}]"""
+ {"id": "e3", "source": "supervisado", "target": "regresion", "label": "", "edge_type": "association"},
+ {"id": "e4", "source": "regresion", "target": "xgboost", "label": "", "edge_type": "association"},
+ {"id": "e5", "source": "supervisado", "target": "clasificacion", "label": "", "edge_type": "association"}]"""
 
 
 # ---------------------------------------------------------------------------

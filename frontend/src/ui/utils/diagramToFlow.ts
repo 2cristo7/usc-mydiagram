@@ -3,6 +3,7 @@ import '@xyflow/react/dist/style.css';
 import type { Node, Edge } from "@xyflow/react";
 import dagre from '@dagrejs/dagre';
 import { sequenceLayout } from './sequenceLayout';
+import { mindmapLayout } from './mindmapLayout';
 
 const nodeTypeMap: Partial<Record<NodeType, string>> = {
     class: 'umlClass',
@@ -36,6 +37,9 @@ const nodeTypeOverrides: Partial<Record<DiagramType, Partial<Record<NodeType, st
 export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
     if (diagram.diagram_type === 'sequence') {
         return sequenceLayout(diagram);
+    }
+    if (diagram.diagram_type === 'mindmap') {
+        return mindmapLayout(diagram);
     }
 
     const graph = new dagre.graphlib.Graph();
