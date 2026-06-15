@@ -15,6 +15,11 @@ interface UiStore {
   // distintas del grid.
   canvasLocked: boolean
   toggleCanvasLock: () => void
+  // S10.x — grid de snapping. Cuando está activo, el fondo muestra una rejilla y
+  // tanto los nodos (snapGrid de React Flow) como los waypoints de las aristas se
+  // fijan a las celdas del grid al arrastrarlos. Al desactivarlo, movimiento libre.
+  gridEnabled: boolean
+  toggleGrid: () => void
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -28,4 +33,6 @@ export const useUiStore = create<UiStore>((set) => ({
   toggleNodePalette: () => set((s) => ({ nodePaletteOpen: !s.nodePaletteOpen })),
   canvasLocked: false,
   toggleCanvasLock: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
+  gridEnabled: false,
+  toggleGrid: () => set((s) => ({ gridEnabled: !s.gridEnabled })),
 }))

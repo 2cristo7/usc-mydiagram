@@ -34,6 +34,7 @@ import { architectureLayoutElk } from '../ui/utils/architectureLayout'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
 import { persistCurrentDiagram } from '../lib/api'
+import { GRID_SIZE } from '../ui/utils/grid'
 
 const nodeTypes = {
   umlClass: UmlClassNode,
@@ -64,6 +65,7 @@ export function DiagramCanvas() {
   const streamingEdges = useStore((s) => s.edges)
   const addEdge = useStore((s) => s.addEdge)
   const canvasLocked = useUiStore((s) => s.canvasLocked)
+  const gridEnabled = useUiStore((s) => s.gridEnabled)
   const [, setSelectedNode] = useState<DiagramNode | null>(null)
   const [edgeMenu, setEdgeMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
   const [nodeMenu, setNodeMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null)
@@ -383,6 +385,8 @@ export function DiagramCanvas() {
         nodesDraggable={!canvasLocked}
         nodesConnectable={!canvasLocked}
         elementsSelectable={!canvasLocked}
+        snapToGrid={gridEnabled}
+        snapGrid={[GRID_SIZE, GRID_SIZE]}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         deleteKeyCode={['Delete', 'Backspace']}
@@ -404,11 +408,11 @@ export function DiagramCanvas() {
         className="bg-[var(--color-bg)]"
       >
         <Background
-          variant={BackgroundVariant.Dots}
+          variant={gridEnabled ? BackgroundVariant.Lines : BackgroundVariant.Dots}
           color="var(--color-ink)"
-          gap={20}
+          gap={GRID_SIZE}
           size={1}
-          style={{ opacity: 0.12 }}
+          style={{ opacity: gridEnabled ? 0.18 : 0.12 }}
         />
         <MiniMap
           className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]"
