@@ -1,14 +1,12 @@
-import { useRef, useState, useLayoutEffect, useCallback } from 'react'
+import { useRef, useState, useLayoutEffect } from 'react'
 import {
   EdgeLabelRenderer,
   useInternalNode,
-  useReactFlow,
   type EdgeProps,
 } from '@xyflow/react'
 import { useInlineEdit } from '../../hooks/useInlineEdit'
 import { useStore } from '../../store'
 import { useUiStore } from '../../store/ui'
-import { projectOntoPath } from '../../ui/utils/getPathProjection'
 import { getFloatingAnchor } from '../../ui/utils/getFloatingAnchor'
 import { getWaypointPath } from '../../ui/utils/getWaypointPath'
 import { snapPoint } from '../../ui/utils/grid'
@@ -37,7 +35,6 @@ export function EditableEdge({
 
   const updateEdge = useStore((s) => s.updateEdge)
   const gridEnabled = useUiStore((s) => s.gridEnabled)
-  const { screenToFlowPosition } = useReactFlow()
 
   const sourceNode = useInternalNode(source)
   const targetNode = useInternalNode(target)
@@ -56,7 +53,15 @@ export function EditableEdge({
   const defaultSrcPt = gridEnabled ? snapPoint(rawDefaultSrc) : rawDefaultSrc
   const defaultTgtPt = gridEnabled ? snapPoint(rawDefaultTgt) : rawDefaultTgt
 
-  const { srcPt, tgtPt, waypoints, editingLayer, handleEdgePointerDown } = useEdgeEditing({
+  const {
+    srcPt,
+    tgtPt,
+    waypoints,
+    editingLayer,
+    handleEdgePointerDown,
+    handlePathDoubleClick,
+    handleLabelPointerDown,
+  } = useEdgeEditing({
     id,
     source,
     target,
@@ -66,6 +71,7 @@ export function EditableEdge({
     defaultTgtPt,
     hasLabel: label !== '',
     labelT,
+    segmentEditing: shape === 'elbow',
   })
 
   const [edgePath, labelX, labelY] = getWaypointPath(srcPt, tgtPt, waypoints, shape)
@@ -80,8 +86,6 @@ export function EditableEdge({
 
   const pathRef = useRef<SVGPathElement>(null)
   const [labelPos, setLabelPos] = useState({ x: labelX, y: labelY })
-  const edgeDataRef = useRef(edgeData)
-  edgeDataRef.current = edgeData
 
   useLayoutEffect(() => {
     if (pathRef.current && labelT !== 0.5) {
@@ -100,33 +104,12 @@ export function EditableEdge({
     },
   })
 
-  const handlePathDoubleClick = useCallback(() => {
-    startEditing()
-  }, [startEditing])
-
-  const handleLabelMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (isEditing) return
-      e.stopPropagation()
-      const pathEl = pathRef.current
-      if (!pathEl) return
-
-      const onMove = (mv: MouseEvent) => {
-        const flowPt = screenToFlowPosition({ x: mv.clientX, y: mv.clientY })
-        const result = projectOntoPath(pathEl, flowPt)
-        updateEdge(id, { data: { ...edgeDataRef.current, labelT: result.t } } as never)
-      }
-
-      const onUp = () => {
-        window.removeEventListener('mousemove', onMove)
-        window.removeEventListener('mouseup', onUp)
-      }
-
-      window.addEventListener('mousemove', onMove)
-      window.addEventListener('mouseup', onUp)
-    },
-    [id, isEditing, updateEdge, screenToFlowPosition]
-  )
+  // Doble clic sobre la línea: en elbow crea una esquina; en curva/recta sigue
+  // editando la etiqueta (allí no hay modelo de segmentos).
+  const onPathDoubleClick = (e: React.MouseEvent) => {
+    if (shape === 'elbow') handlePathDoubleClick(e)
+    else startEditing()
+  }
 
   const showLabel = label !== '' || isEditing
 
@@ -141,7 +124,7 @@ export function EditableEdge({
         stroke="transparent"
         strokeWidth={20}
         onPointerDown={handleEdgePointerDown}
-        onDoubleClick={handlePathDoubleClick}
+        onDoubleClick={onPathDoubleClick}
       />
       {/* visible path */}
       <path
@@ -156,6 +139,7 @@ export function EditableEdge({
         markerStart={computedMarkerStart}
         style={style}
         onPointerDown={handleEdgePointerDown}
+        onDoubleClick={onPathDoubleClick}
       />
       {showLabel && (
         <EdgeLabelRenderer>
@@ -168,7 +152,10 @@ export function EditableEdge({
             }}
             className={`bg-[var(--color-surface)] border-2 border-[var(--color-ink)] px-2 py-0.5 text-sm font-[var(--font-sans)] shadow-[2px_2px_0_var(--color-ink)] ${containerProps.className}`}
             onDoubleClick={containerProps.onDoubleClick}
-            onMouseDown={handleLabelMouseDown}
+            onPointerDown={(e) => {
+              if (isEditing) return
+              handleLabelPointerDown(e, pathRef.current)
+            }}
           >
             {isEditing ? (
               <input

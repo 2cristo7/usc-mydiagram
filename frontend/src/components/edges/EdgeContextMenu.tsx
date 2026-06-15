@@ -65,6 +65,21 @@ export function EdgeContextMenu({ edgeId, position, onClose }: EdgeContextMenuPr
       className="min-w-[180px] bg-[var(--color-surface)] border-2 border-[var(--color-ink)] shadow-[3px_3px_0_var(--color-ink)] rounded-lg p-2 flex flex-col gap-3"
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {/* Etiqueta — única vía para añadir/editar el texto desde que el doble
+          clic sobre la línea pasó a crear esquinas. */}
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink)]/60 mb-1 px-1">
+          Etiqueta
+        </p>
+        <input
+          type="text"
+          value={edgeData.label ?? ''}
+          placeholder="Texto de la arista"
+          onChange={(e) => updateData({ label: e.target.value })}
+          className="w-full px-2 py-1 text-xs bg-[var(--color-surface)] border-2 border-[var(--color-ink)] rounded outline-none focus:bg-[var(--color-ink)]/5"
+        />
+      </div>
+
       {/* Shape */}
       <div>
         <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink)]/60 mb-1 px-1">
