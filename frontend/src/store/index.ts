@@ -92,6 +92,10 @@ interface DiagramStore {
     // (deleted_edges): aquí se aplica literal, sin reinferir qué aristas caen.
     removeNode: (id: string, edgeIds: string[]) => void;
     removeEdge: (id: string) => void;
+    // Recalcular layout: descarta las posiciones manuales de los nodos y los
+    // waypoints de las aristas para que DiagramToFlow (dagre/ELK/...) vuelva a
+    // posicionar todo desde cero. Persiste el resultado.
+    relayout: () => void;
     // S7.5 — reconciliación del done: aplica el snapshot completo SIEMPRE, con
     // guarda de idempotencia del render (no reemplazar estado React idéntico).
     applyDiagram: (diagram: DiagramSchema) => void;
@@ -207,6 +211,25 @@ export const useStore = create<Store>()((set) => ({
             currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges } : null,
         }
      }),
+     relayout: () => {
+        set((state) => {
+            if (!state.currentDiagram) return {}
+            // Quitamos position de cada nodo y waypoints de cada arista: sin esos
+            // datos persistidos, DiagramToFlow recalcula el layout automático.
+            const nodes = state.currentDiagram.nodes.map(({ position: _pos, ...node }) => node)
+            const edges = state.currentDiagram.edges.map((edge) => {
+                if (!edge.data?.waypoints) return edge
+                const { waypoints: _wp, ...data } = edge.data
+                return { ...edge, data }
+            })
+            return {
+                nodes,
+                edges,
+                currentDiagram: { ...state.currentDiagram, nodes, edges },
+            }
+        })
+        schedulePersist()
+     },
      clearDiagramContent: () => set((state) => {
         if (!state.currentDiagram) return {}
         return {
