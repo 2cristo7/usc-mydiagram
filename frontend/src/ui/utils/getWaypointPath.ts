@@ -35,14 +35,20 @@ function buildStraight(
 // elbow (Manhattan routing)
 // ---------------------------------------------------------------------------
 
-function buildElbow(
+const ELBOW_RADIUS = 8;
+
+// Vértices reales (esquinas) de la ruta ortogonal que dibuja el elbow, incluidos
+// los extremos: [source, ...esquinas, target]. Cada par consecutivo es
+// axis-aligned (solo varía en un eje). Es la fuente de verdad para colocar las
+// píldoras de segmento y mover tramos enteros: el editor opera sobre estas
+// esquinas, no sobre los waypoints crudos (que el L-bend puede reinterpretar).
+export function getElbowCorners(
   source: Point,
   target: Point,
   waypoints: Point[]
-): [string, number, number] {
+): Point[] {
   const pts = [source, ...waypoints, target];
   const segments: Point[] = [pts[0]];
-
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i];
     const b = pts[i + 1];
@@ -50,14 +56,73 @@ function buildElbow(
     segments.push({ x: b.x, y: a.y });
     segments.push(b);
   }
+  // Quitar vértices colineales/duplicados: el L-bend genera puntos repetidos
+  // cuando los extremos ya están alineados, y redondear sobre ellos daría
+  // longitudes cero (NaN).
+  return dedupeCollinear(segments);
+}
 
-  let d = `M ${segments[0].x} ${segments[0].y}`;
-  for (let i = 1; i < segments.length; i++) {
-    d += ` L ${segments[i].x} ${segments[i].y}`;
-  }
+function buildElbow(
+  source: Point,
+  target: Point,
+  waypoints: Point[]
+): [string, number, number] {
+  // Tras limpiar, redondeamos cada esquina (look MIRO).
+  const clean = getElbowCorners(source, target, waypoints);
+  const d = roundedPath(clean, ELBOW_RADIUS);
 
-  const [lx, ly] = midOfPolyline(segments);
+  const [lx, ly] = midOfPolyline(clean);
   return [d, lx, ly];
+}
+
+// Elimina puntos consecutivos coincidentes o colineales (mismo eje), dejando
+// solo los vértices reales de la polilínea ortogonal.
+function dedupeCollinear(pts: Point[]): Point[] {
+  const out: Point[] = [];
+  for (const p of pts) {
+    const last = out[out.length - 1];
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) < 0.01) continue;
+    if (out.length >= 2) {
+      const a = out[out.length - 2];
+      const b = last;
+      // si a, b, p están alineados (colineales), b es redundante
+      const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+      if (Math.abs(cross) < 0.01) out.pop();
+    }
+    out.push(p);
+  }
+  return out;
+}
+
+function pointAlong(from: Point, to: Point, d: number): Point {
+  const len = dist(from, to) || 1;
+  const t = Math.min(1, d / len);
+  return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+}
+
+// Convierte una polilínea en un path con esquinas redondeadas: en cada vértice
+// interior recorta `radius` por ambos lados y une con una curva cuadrática que
+// usa el vértice como punto de control.
+function roundedPath(pts: Point[], radius: number): string {
+  if (pts.length < 3) {
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i].x} ${pts[i].y}`;
+    return d;
+  }
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const r1 = Math.min(radius, dist(p0, p1) / 2);
+    const r2 = Math.min(radius, dist(p1, p2) / 2);
+    const a = pointAlong(p1, p0, r1);
+    const b = pointAlong(p1, p2, r2);
+    d += ` L ${a.x} ${a.y} Q ${p1.x} ${p1.y} ${b.x} ${b.y}`;
+  }
+  const last = pts[pts.length - 1];
+  d += ` L ${last.x} ${last.y}`;
+  return d;
 }
 
 // ---------------------------------------------------------------------------
