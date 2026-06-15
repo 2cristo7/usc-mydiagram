@@ -93,6 +93,11 @@ export const edgeVisualDataSchema = z.object({
     strokeStyle: z.enum(['normal', 'dashed', 'dotted']).optional(),
     sourceArrow: z.boolean().optional(),
     targetArrow: z.boolean().optional(),
+    // Anclaje fijo del extremo sobre el perímetro del nodo, normalizado [0..1]
+    // relativo a su caja. Si está presente, sustituye al anclaje flotante
+    // automático (el usuario deslizó el extremo por el borde, estilo MIRO).
+    sourceAnchor: z.object({ x: z.number(), y: z.number() }).optional(),
+    targetAnchor: z.object({ x: z.number(), y: z.number() }).optional(),
 });
 
 export const diagramEdgeSchema = z.object({
@@ -172,4 +177,6 @@ export interface EdgeVisualData {
   strokeStyle?: 'normal' | 'dashed' | 'dotted'
   sourceArrow?: boolean
   targetArrow?: boolean
+  sourceAnchor?: { x: number; y: number }
+  targetAnchor?: { x: number; y: number }
 }

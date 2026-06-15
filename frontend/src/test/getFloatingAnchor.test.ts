@@ -12,6 +12,15 @@ function makeNode(x: number, y: number, width = 100, height = 40): Node {
   } as Node
 }
 
+function makeDiamond(x: number, y: number, size = 128): Node {
+  return {
+    id: 'd',
+    position: { x, y },
+    data: { nodeType: 'decision' },
+    measured: { width: size, height: size },
+  } as Node
+}
+
 describe('getFloatingAnchor', () => {
   it('other node to the right → returns Position.Right', () => {
     const node = makeNode(0, 0)
@@ -43,6 +52,26 @@ describe('getFloatingAnchor', () => {
     const other = makeNode(0, 300)
     const result = getFloatingAnchor(node, other)
     expect(result.position).toBe(Position.Bottom)
+  })
+
+  it('decision node, other to the right → lands on the right vertex of the diamond', () => {
+    const node = makeDiamond(0, 0) // center (64,64), vertices touch box-side midpoints
+    const other = makeNode(400, 64 - 20) // a la derecha, casi a la misma altura
+    const result = getFloatingAnchor(node, other)
+    expect(result.position).toBe(Position.Right)
+    expect(result.x).toBeCloseTo(128) // vértice derecho del rombo, no la esquina de la caja
+    expect(result.y).toBeCloseTo(64)
+  })
+
+  it('decision node, other diagonal down-right → lands on the slanted edge, not the box corner', () => {
+    const node = makeDiamond(0, 0)
+    const other = makeNode(564, 564) // centro en (614,584): dx≈dy desde (64,64)
+    const result = getFloatingAnchor(node, other)
+    // punto medio de la arista vértice-derecho→vértice-inferior: (96,96)
+    expect(result.x).toBeLessThan(128) // dentro del rombo, lejos de la esquina (128,128)
+    expect(result.y).toBeLessThan(128)
+    // sobre el perímetro del rombo: |x-64|/64 + |y-64|/64 === 1
+    expect(Math.abs(result.x - 64) / 64 + Math.abs(result.y - 64) / 64).toBeCloseTo(1)
   })
 
   it('nodes at same position → does not crash and returns a valid position', () => {

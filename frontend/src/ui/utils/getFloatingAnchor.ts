@@ -9,9 +9,17 @@ type AnchorResult = {
 // Posición absoluta del nodo: los nodos internos de React Flow exponen
 // `internals.positionAbsolute` (correcta incluso para nodos hijos/anidados);
 // caemos a `position` para nodos planos o llamadas con nodos no-internos.
-function absPos(node: Node): { x: number; y: number } {
+export function absPos(node: Node): { x: number; y: number } {
   const internals = (node as unknown as { internals?: { positionAbsolute?: { x: number; y: number } } }).internals
   return internals?.positionAbsolute ?? node.position
+}
+
+// Un nodo de decisión se dibuja como un rombo inscrito en su caja (cuadrado
+// rotado 45°), así que sus vértices tocan los puntos medios de los lados de la
+// caja y sus aristas son diagonales. Intersecar con la caja dejaría el extremo
+// en los triángulos vacíos de las esquinas; hay que intersecar con el rombo.
+function isDiamond(node: Node): boolean {
+  return (node.data as { nodeType?: string } | undefined)?.nodeType === 'decision'
 }
 
 export function getFloatingAnchor(node: Node, otherNode: Node): AnchorResult {
@@ -30,6 +38,20 @@ export function getFloatingAnchor(node: Node, otherNode: Node): AnchorResult {
 
   const absDx = Math.abs(dx)
   const absDy = Math.abs(dy)
+
+  // Posición dominante (lado por el que sale/entra la arista): común a caja y rombo.
+  const position =
+    absDx / w > absDy / h
+      ? dx > 0 ? Position.Right : Position.Left
+      : dy > 0 ? Position.Bottom : Position.Top
+
+  // Rombo: punto donde el rayo centro→centro corta el perímetro |X|/w + |Y|/h = 1.
+  // El extremo aterriza sobre el lado real del rombo, apuntando al otro nodo.
+  if (isDiamond(node)) {
+    const denom = absDx / w + absDy / h
+    const t = denom > 0 ? 1 / denom : 0
+    return { x: nx + dx * t, y: ny + dy * t, position }
+  }
 
   // Use aspect ratio to determine if intersection is on horizontal or vertical edge
   if (absDx / w > absDy / h) {
