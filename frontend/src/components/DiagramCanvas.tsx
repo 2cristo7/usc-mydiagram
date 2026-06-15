@@ -34,6 +34,7 @@ import { architectureLayoutElk } from '../ui/utils/architectureLayout'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
 import { persistCurrentDiagram } from '../lib/api'
+import { beginHistoryInteraction, endHistoryInteraction } from '../store/historyManager'
 import { GRID_SIZE } from '../ui/utils/grid'
 
 const nodeTypes = {
@@ -360,10 +361,20 @@ export function DiagramCanvas() {
   // Para diagramas de secuencia: los actores solo se mueven en X (su Y se fija
   // siempre en la cabecera = 0). Lifelines y activaciones no son arrastrables
   // (draggable:false en sequenceLayout), así que nunca llegan aquí.
+  // Inicio del arrastre de un nodo: marca el comienzo del gesto para que el
+  // historial capture una sola entrada (el estado previo) en vez de una por cada
+  // posición intermedia.
+  const onNodeDragStart: OnNodeDrag<Node> = () => {
+    beginHistoryInteraction()
+  }
+
   const onNodeDragStop: OnNodeDrag<Node> = (_event, node) => {
     const isSequence = currentDiagram?.diagram_type === 'sequence'
     const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id)
-    if (!diagramNode) return
+    if (!diagramNode) {
+      endHistoryInteraction()
+      return
+    }
 
     const x = node.position.x
     // En diagramas de secuencia los actores quedan siempre en y:0 (HEADER_H fija la
@@ -371,6 +382,9 @@ export function DiagramCanvas() {
     const y = isSequence && diagramNode.node_type === 'actor' ? 0 : node.position.y
 
     updateNodePosition(node.id, { x, y })
+    // Cierra el gesto: el cambio de posición ya se aplicó dentro de la ventana
+    // suspendida, así que queda una única entrada de historial.
+    endHistoryInteraction()
   }
 
   return (
@@ -401,6 +415,7 @@ export function DiagramCanvas() {
         onNodeMouseLeave={onNodeMouseLeave}
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
+        onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onEdgeContextMenu={onEdgeContextMenu}
         onPaneClick={() => { setSelectedNode(null); closeEdgeMenu(); closeNodeMenu() }}

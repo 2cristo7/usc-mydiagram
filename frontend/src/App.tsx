@@ -1,5 +1,6 @@
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAuth } from "./hooks/useAuth";
+import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
 import { ChatPanel } from "./components/ChatPanel";
 import { DiagramCanvas } from "./components/DiagramCanvas";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -10,6 +11,7 @@ import { FloatingPrompt } from "./components/FloatingPrompt";
 
 function App() {
   useAuth();
+  useUndoRedoShortcuts();
   const { connectionState, sendMessage, sendClarificationAnswer, regenerate } = useWebSocket();
 
   return (
