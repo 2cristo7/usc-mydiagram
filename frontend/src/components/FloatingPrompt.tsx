@@ -47,8 +47,16 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
   }
 
   return (
-    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 max-w-[720px] w-[calc(100%-48px)] z-20">
-      <div className="relative border-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] shadow-[var(--shadow-brutal)] focus-within:shadow-[var(--shadow-brutal-lg)] focus-within:-translate-y-px transition-all duration-75 rounded-[var(--radius)]">
+    // Centered in the gap between the left toolbar and the canvas right edge.
+    // Once a diagram exists the bottom-right minimap appears (221px footprint),
+    // so we reserve that space on the right and animate the prompt into place.
+    <div
+      className={`absolute bottom-6 left-0 z-20 flex justify-center px-6 transition-[right] duration-300 ease-out ${
+        currentDiagram ? 'right-[221px]' : 'right-0'
+      }`}
+    >
+      {/* -translate-x-[2px] offsets the 4px brutal drop-shadow so the box reads as centered */}
+      <div className="relative w-full max-w-[560px] -translate-x-[2px] border-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] shadow-[var(--shadow-brutal)] focus-within:shadow-[var(--shadow-brutal-lg)] focus-within:-translate-y-px transition-all duration-75 rounded-[var(--radius)]">
         <textarea
           ref={textareaRef}
           value={value}
