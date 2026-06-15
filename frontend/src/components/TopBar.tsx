@@ -1,7 +1,7 @@
 import { Menu as MenuIcon } from 'lucide-react'
 import { IconButton } from '../ui/primitives'
 import { useUiStore } from '../store/ui'
-import { DiagramTypeCards } from './DiagramTypeCards'
+import { DiagramTypeBar } from './DiagramTypeBar'
 import { ExportMenu } from './ExportMenu'
 import { AuthButton } from './AuthButton'
 
@@ -20,8 +20,8 @@ export function TopBar({ onRegenerate }: TopBarProps) {
         onClick={toggleDrawer}
         className="shrink-0"
       />
-      <div className="flex-1 min-w-0 overflow-hidden">
-        <DiagramTypeCards />
+      <div className="flex-1 min-w-0">
+        <DiagramTypeBar />
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <ExportMenu onRegenerate={onRegenerate} />

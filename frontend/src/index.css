@@ -27,6 +27,26 @@
   margin: 0;
 }
 
+/* Oculta la barra de scroll del carrusel de tipos de diagrama sin perder el
+   desplazamiento (rueda/trackpad/flechas siguen funcionando). */
+.no-scrollbar {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE/Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;                  /* Chrome/Safari */
+}
+
+/* Entrada del título de sesión (selector → tipo → título-tipo). Se reproduce
+   cada vez que cambia la `key` del nodo en DiagramTypeBar. */
+@keyframes titleSwap {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-title-swap {
+  animation: titleSwap 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 body {
   margin: 0;
 }
@@ -88,6 +108,56 @@ p {
 /* Snap highlight when dragging a new edge over a target node */
 .react-flow__node.snap-target {
   box-shadow: 0 0 0 3px var(--color-accent);
+}
+
+/* ---------------------------------------------------------------------------
+   Handles de edición de aristas (píldora de segmento, esquina, extremo).
+   El wrapper .edge-handle lleva el posicionado (transform translate) y los
+   eventos; el hijo lleva el aspecto visual, así el :hover puede escalarlo sin
+   pelearse con el transform de posición.
+   --------------------------------------------------------------------------- */
+.edge-handle {
+  pointer-events: all;
+}
+
+.edge-handle__pill {
+  background: var(--color-surface);
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.edge-handle:hover .edge-handle__pill {
+  background: var(--color-accent);
+  transform: scale(1.15);
+}
+
+.edge-handle__dot {
+  background: var(--color-surface);
+  border: 2px solid var(--color-ink);
+  border-radius: 50%;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.edge-handle:hover .edge-handle__dot {
+  background: var(--color-accent);
+  transform: scale(1.25);
+}
+
+.edge-handle__endpoint {
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent-2);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--color-surface);
+  transition: background 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.edge-handle:hover .edge-handle__endpoint {
+  background: var(--color-accent-2);
+  transform: scale(1.25);
+}
+/* Flash al pegarse al punto medio de un lado del nodo */
+.edge-handle__endpoint.is-flash {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 /* Nodo seleccionado: halo visible alrededor del bounding box, agnóstico a la
