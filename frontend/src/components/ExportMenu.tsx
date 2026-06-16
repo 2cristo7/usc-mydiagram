@@ -1,8 +1,7 @@
-import { useRef, useState } from 'react'
-import { Download, Upload, RefreshCw, Save, Check } from 'lucide-react'
+import { useRef } from 'react'
+import { Download, Upload, RefreshCw } from 'lucide-react'
 import { toPng } from 'html-to-image'
 import { useStore } from '../store/index'
-import { useAuthStore } from '../store/auth'
 import { diagramImportSchema } from '../types'
 import { Button, Menu } from '../ui/primitives'
 import {
@@ -36,28 +35,14 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
   const currentDiagram = useStore((s) => s.currentDiagram)
   const importDiagram = useStore((s) => s.importDiagram)
   const lastGenerationPrompt = useStore((s) => s.lastGenerationPrompt)
-  const user = useAuthStore((s) => s.user)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [saving, setSaving] = useState(false)
-  const [savedTick, setSavedTick] = useState(false)
 
+  // No hay botón "Guardar": toda edición del canvas autoguarda sola (debounce en
+  // el store) y los cambios de la IA persisten en el done. Aquí solo quedan
+  // exportar/importar/regenerar.
   const canExport = uiState === 'ready'
-  const canSave = !!user && !!currentDiagram && uiState === 'ready' && !saving
   const canRegenerate = uiState === 'ready' && !!lastGenerationPrompt
   const canImport = uiState === 'idle' || uiState === 'ready' || uiState === 'error'
-
-  async function handleSave() {
-    setSaving(true)
-    setSavedTick(false)
-    const r = await persistCurrentDiagram()
-    setSaving(false)
-    if (r.ok) {
-      setSavedTick(true)
-      setTimeout(() => setSavedTick(false), 1500)
-    } else if (r.error !== 'no-session') {
-      window.alert(`No se pudo guardar: ${r.error}`)
-    }
-  }
 
   async function handleExportPng() {
     const viewportEl = document.querySelector<HTMLElement>('.react-flow__viewport')
@@ -149,16 +134,6 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <Button
-        variant="secondary"
-        onClick={handleSave}
-        disabled={!canSave}
-        title={saving ? 'Guardando…' : savedTick ? 'Guardado' : 'Guardar'}
-        aria-label="Guardar diagrama"
-        className="text-xs p-1.5 flex items-center"
-      >
-        {savedTick ? <Check size={14} /> : <Save size={14} />}
-      </Button>
       <Button
         variant="secondary"
         onClick={onRegenerate}

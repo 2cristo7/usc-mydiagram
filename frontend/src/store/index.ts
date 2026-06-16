@@ -11,13 +11,22 @@ import { persistCurrentDiagram } from "../lib/api";
 // Cargar un diagrama guardado va directamente a 'done'.
 export type GenerationPhase = 'idle' | 'staging' | 'assembling' | 'done';
 
-// Debounce de persistencia de posición: si el usuario arrastra rápido varios
-// nodos, esperamos 800 ms tras el último drag antes de llamar al servidor.
-let _positionSaveTimer: ReturnType<typeof setTimeout> | null = null
+// Autoguardado con debounce: TODA edición manual del diagrama (renombrar nodos,
+// añadir/borrar nodos y aristas, editar aristas, arrastrar, recalcular layout)
+// persiste sola. Un único temporizador coalesce ráfagas: tras 800 ms sin cambios
+// se dispara un guardado. No hay botón "Guardar"; el usuario nunca persiste a
+// mano. (Los cambios de la IA persisten aparte, en el handler de diagram:done.)
+let _saveTimer: ReturnType<typeof setTimeout> | null = null
 function schedulePersist() {
-    if (_positionSaveTimer !== null) clearTimeout(_positionSaveTimer)
-    _positionSaveTimer = setTimeout(() => {
-        _positionSaveTimer = null
+    // Solo autoguarda la edición MANUAL (canvas interactivo). Las mismas acciones
+    // (addNode, updateNode, removeEdge…) las dispara también el agente en streaming
+    // (diagram:node_ready y deltas de refinamiento) con uiState='generating': ahí
+    // NO queremos un POST a medias del diagrama — de eso ya se encarga el handler
+    // de diagram:done una vez cerrado el run.
+    if (useStore.getState().uiState !== 'ready') return
+    if (_saveTimer !== null) clearTimeout(_saveTimer)
+    _saveTimer = setTimeout(() => {
+        _saveTimer = null
         persistCurrentDiagram()
     }, 800)
 }
@@ -159,16 +168,22 @@ export const useStore = create<Store>()((set) => ({
     setCurrentDiagram: (diagram) => set({
         currentDiagram: diagram,
         nodes: diagram.nodes,
-        edges: diagram.edges
+        edges: diagram.edges,
      }),
-     updateNode: (id, changes) => set((state) => ({
-        nodes: state.nodes.map(node => node.id === id ? { ...node, ...changes } : node),
-        currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes: state.currentDiagram.nodes.map(node => node.id === id ? { ...node, ...changes } : node) } : null
-     })),
-     updateEdge: (edgeId, updates) => set((state) => ({
-        edges: state.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge),
-        currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges: state.currentDiagram.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge) } : null,
-     })),
+     updateNode: (id, changes) => {
+        set((state) => ({
+            nodes: state.nodes.map(node => node.id === id ? { ...node, ...changes } : node),
+            currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes: state.currentDiagram.nodes.map(node => node.id === id ? { ...node, ...changes } : node) } : null
+        }))
+        schedulePersist()
+     },
+     updateEdge: (edgeId, updates) => {
+        set((state) => ({
+            edges: state.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge),
+            currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges: state.currentDiagram.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge) } : null,
+        }))
+        schedulePersist()
+     },
      updateNodePosition: (id, position) => {
         set((state) => ({
             nodes: state.nodes.map((node) =>
@@ -185,41 +200,53 @@ export const useStore = create<Store>()((set) => ({
         }))
         schedulePersist()
      },
-     addNode: (node: DiagramNode) => set((state) => {
-        const updatedNodes = [...state.nodes, node]
-        return {
-            nodes: updatedNodes,
-            currentDiagram: state.currentDiagram
-                ? { ...state.currentDiagram, nodes: updatedNodes }
-                : { title: '', diagram_type: null, nodes: updatedNodes, edges: [] } as unknown as DiagramSchema,
-        }
-     }),
-     addEdge: (edge: DiagramEdge) => set((state) => {
-        const updatedEdges = [...state.edges, edge]
-        return {
-            edges: updatedEdges,
-            currentDiagram: state.currentDiagram
-                ? { ...state.currentDiagram, edges: updatedEdges }
-                : { title: '', diagram_type: null, nodes: [], edges: updatedEdges } as unknown as DiagramSchema,
-        }
-     }),
-     removeNode: (id, edgeIds) => set((state) => {
-        const cascade = new Set(edgeIds)
-        const nodes = state.nodes.filter((n) => n.id !== id)
-        const edges = state.edges.filter((e) => !cascade.has(e.id))
-        return {
-            nodes,
-            edges,
-            currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes, edges } : null,
-        }
-     }),
-     removeEdge: (id) => set((state) => {
-        const edges = state.edges.filter((e) => e.id !== id)
-        return {
-            edges,
-            currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges } : null,
-        }
-     }),
+     addNode: (node: DiagramNode) => {
+        set((state) => {
+            const updatedNodes = [...state.nodes, node]
+            return {
+                nodes: updatedNodes,
+                currentDiagram: state.currentDiagram
+                    ? { ...state.currentDiagram, nodes: updatedNodes }
+                    : { title: '', diagram_type: null, nodes: updatedNodes, edges: [] } as unknown as DiagramSchema,
+            }
+        })
+        schedulePersist()
+     },
+     addEdge: (edge: DiagramEdge) => {
+        set((state) => {
+            const updatedEdges = [...state.edges, edge]
+            return {
+                edges: updatedEdges,
+                currentDiagram: state.currentDiagram
+                    ? { ...state.currentDiagram, edges: updatedEdges }
+                    : { title: '', diagram_type: null, nodes: [], edges: updatedEdges } as unknown as DiagramSchema,
+            }
+        })
+        schedulePersist()
+     },
+     removeNode: (id, edgeIds) => {
+        set((state) => {
+            const cascade = new Set(edgeIds)
+            const nodes = state.nodes.filter((n) => n.id !== id)
+            const edges = state.edges.filter((e) => !cascade.has(e.id))
+            return {
+                nodes,
+                edges,
+                currentDiagram: state.currentDiagram ? { ...state.currentDiagram, nodes, edges } : null,
+            }
+        })
+        schedulePersist()
+     },
+     removeEdge: (id) => {
+        set((state) => {
+            const edges = state.edges.filter((e) => e.id !== id)
+            return {
+                edges,
+                currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges } : null,
+            }
+        })
+        schedulePersist()
+     },
      relayout: () => {
         set((state) => {
             if (!state.currentDiagram) return {}
