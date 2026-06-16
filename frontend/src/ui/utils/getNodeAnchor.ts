@@ -1,5 +1,5 @@
 import { Position, type Node } from '@xyflow/react'
-import { absPos } from './getFloatingAnchor'
+import { absPos, anchorPointOnShape } from './getFloatingAnchor'
 
 type Point = { x: number; y: number }
 
@@ -13,10 +13,11 @@ function dims(node: Node): { w: number; h: number } {
 // Punto absoluto en coordenadas de flujo a partir de un anclaje normalizado
 // [0..1] relativo a la caja del nodo. Como es relativo, sobrevive a mover y
 // redimensionar el nodo: el extremo se queda en el mismo punto del borde.
+// Se proyecta sobre el contorno VISIBLE de la forma (cápsula, círculo, rombo,
+// rect redondeado), no sobre la caja envolvente, así el extremo deslizable se
+// pega al borde dibujado y no flota en las esquinas vacías de la caja.
 export function getAnchorPoint(node: Node, anchor: Point): Point {
-  const p = absPos(node)
-  const { w, h } = dims(node)
-  return { x: p.x + anchor.x * w, y: p.y + anchor.y * h }
+  return anchorPointOnShape(node, anchor)
 }
 
 // Proyecta un punto en coordenadas de flujo sobre el perímetro del nodo y lo

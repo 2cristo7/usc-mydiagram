@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { Position } from '@xyflow/react'
-import { getFloatingAnchor } from '../ui/utils/getFloatingAnchor'
+import { getFloatingAnchor, anchorPointOnShape } from '../ui/utils/getFloatingAnchor'
 import type { Node } from '@xyflow/react'
 
 function makeNode(x: number, y: number, width = 100, height = 40): Node {
@@ -74,6 +74,37 @@ describe('getFloatingAnchor', () => {
     expect(Math.abs(result.x - 64) / 64 + Math.abs(result.y - 64) / 64).toBeCloseTo(1)
   })
 
+  it('pill (mindmap) node, other diagonal → lands on the rounded border, inside the box corner', () => {
+    // Cápsula 120x40 centrada en (60,20): radio = min(120,40)/2 = 20 (extremos circulares).
+    const pill = {
+      id: 'p',
+      position: { x: 0, y: 0 },
+      type: 'mindmap',
+      data: { role: 'leaf' },
+      measured: { width: 120, height: 40 },
+    } as unknown as Node
+    const other = makeNode(400, 20) // a la derecha y ligeramente abajo → sale por el extremo
+    const result = getFloatingAnchor(pill, other)
+    // El extremo semicircular derecho es un arco de radio 20 centrado en (100,20)
+    // (el borde recto solo cubre la franja central; los extremos son círculos).
+    expect(Math.hypot(result.x - 100, result.y - 20)).toBeCloseTo(20)
+    expect(result.x).toBeLessThan(120) // nunca llega a la esquina de la caja
+  })
+
+  it('circular state (initial), other to the right → lands on the circle, not the box edge', () => {
+    const circle = {
+      id: 's',
+      position: { x: 0, y: 0 },
+      type: 'state',
+      data: { label: 'start' },
+      measured: { width: 40, height: 40 },
+    } as unknown as Node
+    const other = makeNode(400, 60) // ligeramente abajo a la derecha
+    const result = getFloatingAnchor(circle, other)
+    // Debe quedar sobre el círculo de radio 20 centrado en (20,20).
+    expect(Math.hypot(result.x - 20, result.y - 20)).toBeCloseTo(20)
+  })
+
   it('nodes at same position → does not crash and returns a valid position', () => {
     const node = makeNode(0, 0)
     const other = makeNode(0, 0)
@@ -81,5 +112,53 @@ describe('getFloatingAnchor', () => {
     expect(() => getFloatingAnchor(node, other)).not.toThrow()
     const result = getFloatingAnchor(node, other)
     expect(Object.values(Position)).toContain(result.position)
+  })
+})
+
+describe('anchorPointOnShape', () => {
+  it('left-edge midpoint of a pill → its leftmost tip on the box edge', () => {
+    // Píldora 120x40 en (0,0): el centro del lado izquierdo SÍ toca la caja.
+    const pill = {
+      id: 'p',
+      position: { x: 0, y: 0 },
+      type: 'flow',
+      data: { nodeType: 'terminator' },
+      measured: { width: 120, height: 40 },
+    } as unknown as Node
+    const pt = anchorPointOnShape(pill, { x: 0, y: 0.5 })
+    expect(pt.x).toBeCloseTo(0)
+    expect(pt.y).toBeCloseTo(20)
+  })
+
+  it('left-edge anchor OFF the midpoint of a pill → hugs the rounded cap, not the box', () => {
+    // Reproduce la captura: el extremo fijo se desliza a y≈0.15 del lado izquierdo.
+    // El borde visible ahí está MUY adentro de la esquina de la caja (x≫0).
+    const pill = {
+      id: 'p',
+      position: { x: 0, y: 0 },
+      type: 'flow',
+      data: { nodeType: 'terminator' },
+      measured: { width: 120, height: 40 },
+    } as unknown as Node
+    const pt = anchorPointOnShape(pill, { x: 0, y: 0.15 })
+    // El extremo izquierdo es un semicírculo de radio 20 centrado en (20,20).
+    expect(Math.hypot(pt.x - 20, pt.y - 20)).toBeCloseTo(20)
+    expect(pt.x).toBeGreaterThan(0) // ya NO en el borde de la caja → no flota fuera
+  })
+
+  it('top-left box anchor of a diamond → lands on the slanted edge, not the empty corner', () => {
+    const diamond = makeDiamond(0, 0) // 128x128, centro (64,64)
+    const pt = anchorPointOnShape(diamond, { x: 0, y: 0 })
+    // Sobre el perímetro del rombo: |x-64|/64 + |y-64|/64 === 1
+    expect(Math.abs(pt.x - 64) / 64 + Math.abs(pt.y - 64) / 64).toBeCloseTo(1)
+    expect(pt.x).toBeGreaterThan(0) // no en la esquina vacía (0,0) de la caja
+    expect(pt.y).toBeGreaterThan(0)
+  })
+
+  it('rectangular node anchor → maps to the box edge (radius 4 ≈ flush)', () => {
+    const rect = makeNode(0, 0, 100, 40) // tabla/UML, rounded 4px
+    const pt = anchorPointOnShape(rect, { x: 1, y: 0.5 })
+    expect(pt.x).toBeCloseTo(100) // borde derecho
+    expect(pt.y).toBeCloseTo(20)
   })
 })
