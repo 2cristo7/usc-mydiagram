@@ -133,17 +133,17 @@ async def test_extract_edges_normal_retains_orphan():
 
 @pytest.mark.asyncio
 async def test_extract_edges_normal_retains_semantic_invalid():
-    # edge_type 'transition' es Pydantic-válido pero NO permitido en un ERD.
+    # edge_type 'flow' es Pydantic-válido (está en el enum) pero NO permitido en un ERD.
     queue = asyncio.Queue()
     state = _base_state(retry_count=0)
-    raw = '[{"id": "e1", "source": "user", "target": "order", "label": "x", "edge_type": "transition"}]'
+    raw = '[{"id": "e1", "source": "user", "target": "order", "label": "x", "edge_type": "flow"}]'
 
     with patch("nodes.extract_edges.stream_llm", return_value=_fake_stream(raw)):
         result = await make_extract_edges(queue)(state)
 
     assert result["edges"] == [], "no se confirma una semánticamente inválida"
     assert len(result["invalid_edges"]) == 1
-    assert "transition" in result["invalid_edges"][0]["reason"]
+    assert "flow" in result["invalid_edges"][0]["reason"]
     assert "no permitido" in result["invalid_edges"][0]["reason"]
     assert queue.empty(), "no se streamea lo semánticamente inválido"
 

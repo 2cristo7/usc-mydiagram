@@ -68,10 +68,12 @@ def test_add_node_invalid_type_rejected():
 
 
 def test_add_node_methods_folded_into_attributes():
-    ws = DiagramWorkspace(DiagramType.UML_CLASS, [], [])
-    res = ws.add_node(NodeType.CLASS, "Cuenta", attributes=["saldo"], methods=["ingresar()"])
+    # El parámetro `methods` se anexa a `attributes` independientemente del tipo
+    # de diagrama. Se usa flowchart/step para no depender de ningún tipo eliminado.
+    ws = DiagramWorkspace(DiagramType.FLOWCHART, [], [])
+    res = ws.add_node(NodeType.STEP, "Paso", attributes=["nota1"], methods=["accion()"])
     node = ws._node(res["id"])
-    assert node.attributes == ["saldo", "ingresar()"]
+    assert node.attributes == ["nota1", "accion()"]
 
 
 # --- update_node ---

@@ -75,31 +75,6 @@ Ejemplo:
 
 
 # ---------------------------------------------------------------------------
-# UML de clases
-# ---------------------------------------------------------------------------
-
-_UML_NODE_PROMPT = """Esto es un diagrama de clases UML. Cada nodo es una clase o interfaz.
-- node_type: siempre "class".
-- attributes: atributos Y métodos, cada uno un string con prefijo de visibilidad
-  "+" público, "-" privado, "#" protegido.
-  Atributos: "- saldo: float". Métodos: "+ ingresar(cantidad: float): void".
-Ejemplo:
-[{"id": "cuenta", "label": "Cuenta", "node_type": "class", "attributes": ["- saldo: float", "+ ingresar(cantidad: float): void", "+ retirar(cantidad: float): bool"]},
- {"id": "cuenta_ahorro", "label": "CuentaAhorro", "node_type": "class", "attributes": ["- tipo_interes: float"]}]"""
-
-_UML_EDGE_PROMPT = """Relaciones entre clases.
-- edge_type:
-  - "inherits": una clase hereda de otra (es-un).
-  - "implements": una clase implementa una interfaz.
-  - "association": una clase usa/contiene una referencia a otra (tiene-un).
-  - "depends_on": una dependencia transitoria (la usa en la firma de un método).
-- label: nombre de rol o multiplicidad si es relevante; puede ser corto.
-- En la herencia, source = subclase, target = superclase.
-Ejemplo:
-[{"id": "e1", "source": "cuenta_ahorro", "target": "cuenta", "label": "hereda", "edge_type": "inherits"}]"""
-
-
-# ---------------------------------------------------------------------------
 # Diagrama de secuencia
 # ---------------------------------------------------------------------------
 
@@ -208,29 +183,6 @@ Ejemplo:
 
 
 # ---------------------------------------------------------------------------
-# Máquina de estados
-# ---------------------------------------------------------------------------
-
-_STATE_MACHINE_NODE_PROMPT = """Esto es una máquina de estados. Cada nodo es un estado del sistema.
-- node_type: "state" para estados normales; "terminator" para el pseudo-estado inicial
-  y para los estados finales, si la descripción los tiene.
-- attributes: déjalo vacío ([]).
-Ejemplo para el ciclo de vida de un pedido:
-[{"id": "inicio", "label": "Inicio", "node_type": "terminator", "attributes": []},
- {"id": "pendiente", "label": "Pendiente", "node_type": "state", "attributes": []},
- {"id": "pagado", "label": "Pagado", "node_type": "state", "attributes": []},
- {"id": "enviado", "label": "Enviado", "node_type": "state", "attributes": []}]"""
-
-_STATE_MACHINE_EDGE_PROMPT = """Las aristas son transiciones entre estados.
-- edge_type: siempre "transition".
-- label: el evento/disparador que provoca la transición ("pago recibido", "enviar pedido").
-Ejemplo:
-[{"id": "e1", "source": "inicio", "target": "pendiente", "label": "", "edge_type": "transition"},
- {"id": "e2", "source": "pendiente", "target": "pagado", "label": "pago recibido", "edge_type": "transition"},
- {"id": "e3", "source": "pagado", "target": "enviado", "label": "enviar pedido", "edge_type": "transition"}]"""
-
-
-# ---------------------------------------------------------------------------
 # Mapa mental
 # ---------------------------------------------------------------------------
 
@@ -298,6 +250,60 @@ Ejemplo (fragmento de mapa sobre ML):
 
 
 # ---------------------------------------------------------------------------
+# Casos de uso (UML use case diagram)
+# ---------------------------------------------------------------------------
+
+_USE_CASE_NODE_PROMPT = """Esto es un diagrama de casos de uso UML. Usa ÚNICAMENTE estos tipos de nodo:
+- "actor": un participante externo del sistema (usuario humano, sistema externo…). Se representa
+  como un monigote. label: el nombre del actor ("Cliente", "Administrador", "Pasarela de Pago").
+  attributes: déjalo vacío ([]).
+- "use_case": una funcionalidad del sistema desde el punto de vista del actor. Se representa como
+  un óvalo. label: un verbo + objeto en infinitivo ("Iniciar sesión", "Realizar pedido",
+  "Consultar historial"). attributes: déjalo vacío ([]).
+- "system": la frontera del sistema (la caja rectangular que engloba los casos de uso). Incluye
+  UN nodo system cuando la descripción nombra el sistema o subsistema que se modela. label: el
+  nombre del sistema ("Tienda Online", "Sistema de Pedidos"). attributes: déjalo vacío ([]).
+  Es OPCIONAL: omítelo si la descripción no distingue fronteras de sistema.
+
+Regla de oro: un actor está FUERA del sistema; los casos de uso están DENTRO. No inventes
+casos de uso que no se desprendan de la descripción.
+
+Ejemplo para una tienda online básica:
+[{"id": "cliente", "label": "Cliente", "node_type": "actor", "attributes": []},
+ {"id": "admin", "label": "Administrador", "node_type": "actor", "attributes": []},
+ {"id": "sistema_tienda", "label": "Tienda Online", "node_type": "system", "attributes": []},
+ {"id": "iniciar_sesion", "label": "Iniciar sesión", "node_type": "use_case", "attributes": []},
+ {"id": "realizar_pedido", "label": "Realizar pedido", "node_type": "use_case", "attributes": []},
+ {"id": "gestionar_catalogo", "label": "Gestionar catálogo", "node_type": "use_case", "attributes": []},
+ {"id": "autenticar_usuario", "label": "Autenticar usuario", "node_type": "use_case", "attributes": []}]"""
+
+_USE_CASE_EDGE_PROMPT = """Las aristas son las relaciones entre actores y casos de uso.
+- edge_type:
+  - "association": línea sólida entre un actor y un caso de uso que le incumbe directamente.
+    source = actor, target = caso de uso (o al revés si el sistema inicia la interacción).
+  - "include": relación discontinua con estereotipo «include» entre dos casos de uso.
+    Indica que el caso de uso BASE siempre incluye el comportamiento del caso INCLUIDO.
+    source = caso de uso base, target = caso de uso incluido.
+    Úsala cuando un comportamiento es compartido y obligatorio (p. ej. "Realizar pedido"
+    siempre incluye "Autenticar usuario").
+  - "extend": relación discontinua con estereotipo «extend» entre dos casos de uso.
+    Indica que el caso de uso EXTENSOR añade comportamiento OPCIONAL al caso BASE.
+    source = caso de uso extensor, target = caso de uso base.
+    Úsala para flujos alternativos o excepcionales ("Aplicar descuento" extiende
+    "Realizar pedido").
+  - "inherits": generalización entre actores (triángulo hueco). source = actor
+    especializado, target = actor general. Úsala cuando un actor hereda el rol de otro.
+- label: para "include" y "extend" usa el estereotipo («include» / «extend»); para
+  "association" e "inherits" puedes dejarlo vacío o usar un verbo breve.
+
+Ejemplo:
+[{"id": "e1", "source": "cliente", "target": "iniciar_sesion", "label": "", "edge_type": "association"},
+ {"id": "e2", "source": "cliente", "target": "realizar_pedido", "label": "", "edge_type": "association"},
+ {"id": "e3", "source": "admin", "target": "gestionar_catalogo", "label": "", "edge_type": "association"},
+ {"id": "e4", "source": "realizar_pedido", "target": "autenticar_usuario", "label": "«include»", "edge_type": "include"}]"""
+
+
+# ---------------------------------------------------------------------------
 # Fallback genérico — para un DiagramType sin entrada propia
 # ---------------------------------------------------------------------------
 
@@ -323,23 +329,21 @@ _FALLBACK_EDGE_PROMPT = (
 # ---------------------------------------------------------------------------
 
 _NODE_PROMPTS: dict[DiagramType, str] = {
-    DiagramType.ERD:           _ERD_NODE_PROMPT,
-    DiagramType.UML_CLASS:     _UML_NODE_PROMPT,
-    DiagramType.SEQUENCE:      _SEQUENCE_NODE_PROMPT,
-    DiagramType.FLOWCHART:     _FLOWCHART_NODE_PROMPT,
-    DiagramType.ARCHITECTURE:  _ARCHITECTURE_NODE_PROMPT,
-    DiagramType.STATE_MACHINE: _STATE_MACHINE_NODE_PROMPT,
-    DiagramType.MINDMAP:       _MINDMAP_NODE_PROMPT,
+    DiagramType.ERD:          _ERD_NODE_PROMPT,
+    DiagramType.SEQUENCE:     _SEQUENCE_NODE_PROMPT,
+    DiagramType.FLOWCHART:    _FLOWCHART_NODE_PROMPT,
+    DiagramType.ARCHITECTURE: _ARCHITECTURE_NODE_PROMPT,
+    DiagramType.MINDMAP:      _MINDMAP_NODE_PROMPT,
+    DiagramType.USE_CASE:     _USE_CASE_NODE_PROMPT,
 }
 
 _EDGE_PROMPTS: dict[DiagramType, str] = {
-    DiagramType.ERD:           _ERD_EDGE_PROMPT,
-    DiagramType.UML_CLASS:     _UML_EDGE_PROMPT,
-    DiagramType.SEQUENCE:      _SEQUENCE_EDGE_PROMPT,
-    DiagramType.FLOWCHART:     _FLOWCHART_EDGE_PROMPT,
-    DiagramType.ARCHITECTURE:  _ARCHITECTURE_EDGE_PROMPT,
-    DiagramType.STATE_MACHINE: _STATE_MACHINE_EDGE_PROMPT,
-    DiagramType.MINDMAP:       _MINDMAP_EDGE_PROMPT,
+    DiagramType.ERD:          _ERD_EDGE_PROMPT,
+    DiagramType.SEQUENCE:     _SEQUENCE_EDGE_PROMPT,
+    DiagramType.FLOWCHART:    _FLOWCHART_EDGE_PROMPT,
+    DiagramType.ARCHITECTURE: _ARCHITECTURE_EDGE_PROMPT,
+    DiagramType.MINDMAP:      _MINDMAP_EDGE_PROMPT,
+    DiagramType.USE_CASE:     _USE_CASE_EDGE_PROMPT,
 }
 
 

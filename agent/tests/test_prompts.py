@@ -55,7 +55,7 @@ def _make_state(**overrides) -> DiagramState:
 # ---------------------------------------------------------------------------
 
 def test_every_diagram_type_has_specific_prompts():
-    """Los 7 tipos producen prompts no vacíos que mencionan su propio tipo."""
+    """Todos los tipos producen prompts no vacíos que mencionan su propio tipo."""
     for dt in DiagramType:
         node_p = get_node_prompt(dt)
         edge_p = get_edge_prompt(dt, ["a", "b"])
@@ -130,3 +130,13 @@ def test_branching_flowchart_produces_decision_with_two_paths():
 
     # Ninguna arista quedó huérfana (todos los nuevos enums validan).
     assert edges, "las aristas deben haberse extraído y validado"
+
+
+def test_use_case_prompt_names_key_types():
+    """El prompt de use_case menciona actor, use_case, system y los edge_types propios."""
+    node_p = get_node_prompt(DiagramType.USE_CASE)
+    edge_p = get_edge_prompt(DiagramType.USE_CASE, ["cliente", "iniciar_sesion"])
+    assert "actor" in node_p and "use_case" in node_p and "system" in node_p
+    assert "association" in edge_p
+    assert "include" in edge_p and "extend" in edge_p
+    assert "inherits" in edge_p

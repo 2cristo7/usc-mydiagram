@@ -102,7 +102,7 @@ def test_wellformed_flowchart_has_no_gaps():
     assert gaps == []
 
 
-@pytest.mark.parametrize("dt", [DiagramType.ERD, DiagramType.UML_CLASS, DiagramType.ARCHITECTURE])
+@pytest.mark.parametrize("dt", [DiagramType.ERD, DiagramType.ARCHITECTURE, DiagramType.USE_CASE])
 def test_permissive_types_have_no_rules(dt):
     # Tipos con elementos independientes legítimos → permisivos por diseño: un
     # nodo aislado no dispara nada.
@@ -135,26 +135,6 @@ def test_mindmap_wellformed_has_no_gaps():
     assert gaps == []
 
 
-# ---- state_machine ----
-
-def test_state_machine_without_initial_flags_edges():
-    gaps = structural.validate_structure(
-        DiagramType.STATE_MACHINE,
-        [_n("s1", NodeType.STATE), _n("s2", NodeType.STATE)],
-        [_e("1", "s1", "s2", EdgeType.TRANSITION), _e("2", "s2", "s1", EdgeType.TRANSITION)],
-    )
-    assert gaps and "inicial" in " ".join(g["reason"] for g in gaps)
-
-
-def test_state_machine_wellformed_has_no_gaps():
-    gaps = structural.validate_structure(
-        DiagramType.STATE_MACHINE,
-        [_n("inicio", NodeType.STATE), _n("fin", NodeType.STATE)],
-        [_e("1", "inicio", "fin", EdgeType.TRANSITION)],
-    )
-    assert gaps == []
-
-
 # ---- sequence ----
 
 def test_sequence_with_one_actor_flags_nodes():
@@ -168,6 +148,46 @@ def test_sequence_wellformed_has_no_gaps():
         DiagramType.SEQUENCE,
         [_n("a", NodeType.ACTOR), _n("b", NodeType.ACTOR)],
         [_e("1", "a", "b", EdgeType.SEQUENCE)],
+    )
+    assert gaps == []
+
+
+# ---- use_case — validación semántica ----
+
+def test_use_case_accepts_actor_use_case_system_nodes():
+    """Los node_types propios de use_case pasan la validación semántica."""
+    from schemas import node_type_allowed
+    for nt in (NodeType.ACTOR, NodeType.USE_CASE, NodeType.SYSTEM):
+        assert node_type_allowed(DiagramType.USE_CASE, nt), f"{nt} debe estar permitido en use_case"
+
+
+def test_use_case_rejects_foreign_node_types():
+    """node_types de otros diagramas se rechazan en use_case."""
+    from schemas import node_type_allowed
+    for nt in (NodeType.TABLE, NodeType.STEP, NodeType.TOPIC, NodeType.SERVICE):
+        assert not node_type_allowed(DiagramType.USE_CASE, nt), f"{nt} no debe estar permitido en use_case"
+
+
+def test_use_case_accepts_association_include_extend_inherits():
+    """Las cuatro edge_types del use_case son todas válidas."""
+    from schemas import edge_type_allowed
+    for et in (EdgeType.ASSOCIATION, EdgeType.INCLUDE, EdgeType.EXTEND, EdgeType.INHERITS):
+        assert edge_type_allowed(DiagramType.USE_CASE, et), f"{et} debe estar permitido en use_case"
+
+
+def test_use_case_rejects_foreign_edge_types():
+    """edge_types de otros diagramas se rechazan en use_case."""
+    from schemas import edge_type_allowed
+    for et in (EdgeType.FLOW, EdgeType.SEQUENCE, EdgeType.ONE_TO_MANY, EdgeType.CALLS):
+        assert not edge_type_allowed(DiagramType.USE_CASE, et), f"{et} no debe estar permitido en use_case"
+
+
+def test_use_case_is_structurally_permissive():
+    """use_case no tiene validador estructural: un actor sin casos de uso es legítimo."""
+    gaps = structural.validate_structure(
+        DiagramType.USE_CASE,
+        [_n("cliente", NodeType.ACTOR), _n("admin", NodeType.ACTOR)],
+        [],
     )
     assert gaps == []
 
