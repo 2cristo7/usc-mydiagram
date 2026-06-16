@@ -25,10 +25,13 @@ export function NodeContextMenu({ nodeId, position, onClose }: NodeContextMenuPr
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
-    document.addEventListener('mousedown', handleClickOutside)
+    // Captura: React Flow hace stopPropagation en el mousedown del nodo, así que
+    // un clic sobre el propio nodo no burbujea hasta document. Escuchando en fase
+    // de captura el cierre se dispara antes, también al clicar el nodo.
+    document.addEventListener('mousedown', handleClickOutside, true)
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('mousedown', handleClickOutside, true)
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [onClose])
