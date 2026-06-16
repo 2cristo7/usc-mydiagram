@@ -96,6 +96,15 @@ interface DiagramStore {
     // waypoints de las aristas para que DiagramToFlow (dagre/ELK/...) vuelva a
     // posicionar todo desde cero. Persiste el resultado.
     relayout: () => void;
+    // S10.3 — contador que se incrementa en cada relayout(). El canvas lo observa
+    // para activar una transición CSS temporal y que los nodos "vuelen" a sus
+    // nuevas posiciones en vez de saltar (snap). No persiste; es señal efímera.
+    relayoutTick: number;
+    // S10.x — Importar un .mdia/.json: NO sobreescribe la sesión viva, arranca
+    // una sesión limpia (canvas + chat vacíos, igual que newDiagram) y carga el
+    // diagrama importado. currentDiagramId queda null → el guardado posterior es
+    // un POST (fila NUEVA en BD), no un PATCH del diagrama que hubiera abierto.
+    importDiagram: (diagram: DiagramSchema) => void;
     // S7.5 — reconciliación del done: aplica el snapshot completo SIEMPRE, con
     // guarda de idempotencia del render (no reemplazar estado React idéntico).
     applyDiagram: (diagram: DiagramSchema) => void;
@@ -226,10 +235,12 @@ export const useStore = create<Store>()((set) => ({
                 nodes,
                 edges,
                 currentDiagram: { ...state.currentDiagram, nodes, edges },
+                relayoutTick: state.relayoutTick + 1,
             }
         })
         schedulePersist()
      },
+     relayoutTick: 0,
      clearDiagramContent: () => set((state) => {
         if (!state.currentDiagram) return {}
         return {
@@ -255,6 +266,20 @@ export const useStore = create<Store>()((set) => ({
         editRequestNodeId: null,
         uiState: 'idle',
         generationPhase: 'idle',
+     }),
+     importDiagram: (diagram) => set({
+        nodes: diagram.nodes,
+        edges: diagram.edges,
+        currentDiagram: diagram,
+        currentDiagramId: null,
+        lastGenerationPrompt: null,
+        lastGenerationType: null,
+        messages: [],
+        toolTrace: [],
+        pendingClarification: null,
+        editRequestNodeId: null,
+        uiState: 'ready',
+        generationPhase: 'done',
      }),
      applyDiagram: (diagram) => set((state) => {
         // El done SIEMPRE manda (reconciliación incondicional), pero si los
