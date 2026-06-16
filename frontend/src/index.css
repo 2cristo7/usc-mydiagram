@@ -37,6 +37,28 @@
   display: none;                  /* Chrome/Safari */
 }
 
+/* Barra de scroll brutalista: pulgar tinta con borde duro, sin flechas.
+   Combina con el resto de la UI (bordes gruesos, sin redondeos suaves). */
+.scrollbar-brutal {
+  scrollbar-width: thin;                                  /* Firefox */
+  scrollbar-color: var(--color-ink) transparent;
+}
+.scrollbar-brutal::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scrollbar-brutal::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-brutal::-webkit-scrollbar-thumb {
+  background: var(--color-ink);
+  border: 2px solid var(--color-bg);
+  border-radius: 0;
+}
+.scrollbar-brutal::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
 /* Entrada del título de sesión (selector → tipo → título-tipo). Se reproduce
    cada vez que cambia la `key` del nodo en DiagramTypeBar. */
 @keyframes titleSwap {

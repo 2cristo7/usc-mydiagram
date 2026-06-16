@@ -80,14 +80,16 @@ export function HistoryDrawer() {
           </p>
         ) : (
           <>
-            <input
-              type="search"
-              placeholder="Buscar por título..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="mx-4 mt-3 mb-2 block border-[3px] border-[var(--color-ink)] p-2 text-sm bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] text-[var(--color-ink)]"
-            />
-            <div className="flex-1 overflow-y-auto">
+            <div className="px-4 py-3 border-b-[3px] border-[var(--color-ink)]">
+              <input
+                type="search"
+                placeholder="Buscar por título..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="block w-full border-[3px] border-[var(--color-ink)] p-2 text-sm bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] text-[var(--color-ink)]"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto scrollbar-brutal">
               {loading && (
                 <p className="text-center text-sm text-[var(--color-ink)]/50 py-8">Cargando...</p>
               )}
