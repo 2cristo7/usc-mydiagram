@@ -5,6 +5,7 @@ import { useHistoryStore } from '../store/history';
 import { useStore } from '../store/index';
 import { useUiStore } from '../store/ui';
 import { NodePalette } from './NodePalette';
+import { FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView';
 
 export function EditToolbar() {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
@@ -68,8 +69,9 @@ export function EditToolbar() {
           disabled={!currentDiagram}
           onClick={() => {
             relayout();
-            // Tras reposicionar todo, encuadramos la vista al nuevo layout.
-            setTimeout(() => fitView({ padding: 0.1 }), 0);
+            // Tras reposicionar todo, encuadramos la vista al nuevo layout con
+            // las MISMAS opciones que el resto (holgura inferior + tope 1.0).
+            setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), 0);
           }}
           aria-label="Recalcular el layout automático del diagrama"
         />
@@ -77,7 +79,7 @@ export function EditToolbar() {
         <IconButton
           icon={<Maximize2 size={16} />}
           tooltip="Ajustar vista"
-          onClick={() => fitView({ padding: 0.1 })}
+          onClick={() => fitView(FIT_VIEW_OPTIONS_ANIMATED)}
         />
         <IconButton
           icon={<ZoomIn size={16} />}

@@ -48,11 +48,11 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
 
   return (
     // Centered in the gap between the left toolbar and the canvas right edge.
-    // Once a diagram exists the bottom-right minimap appears (221px footprint),
-    // so we reserve that space on the right and animate the prompt into place.
+    // Once a diagram exists the bottom-right minimap appears (~140px footprint at
+    // half size), so we reserve that space on the right and animate into place.
     <div
       className={`absolute bottom-6 left-0 z-20 flex justify-center px-6 transition-[right] duration-300 ease-out ${
-        currentDiagram ? 'right-[221px]' : 'right-0'
+        currentDiagram ? 'right-[140px]' : 'right-0'
       }`}
     >
       {/* -translate-x-[2px] offsets the 4px brutal drop-shadow so the box reads as centered */}

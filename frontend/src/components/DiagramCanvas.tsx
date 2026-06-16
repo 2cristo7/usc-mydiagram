@@ -35,7 +35,9 @@ import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
 import { persistCurrentDiagram } from '../lib/api'
 import { beginHistoryInteraction, endHistoryInteraction } from '../store/historyManager'
+import { beginDragCursor, endDragCursor } from '../ui/utils/dragCursor'
 import { GRID_SIZE } from '../ui/utils/grid'
+import { FIT_VIEW_OPTIONS, FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView'
 
 const nodeTypes = {
   umlClass: UmlClassNode,
@@ -58,6 +60,26 @@ const edgeTypes = {
   default: EditableEdge,
 }
 
+// Minimapa a mitad de tamaño (por defecto 200×150).
+const MINIMAP_SIZE = { width: 100, height: 75 }
+
+// Duración de la animación de "Recalcular layout" (ms). Debe coincidir con la
+// transición CSS de `.animate-layout .react-flow__node` en index.css.
+const LAYOUT_ANIM_MS = 400
+
+// Modelo de ratón estilo Miro:
+//  · Botón derecho (2) y rueda/central (1) arrastran el lienzo para navegar/pan
+//    sobre el fondo (el central duplica al derecho). El derecho navega siempre,
+//    también sobre nodos y aristas.
+//  · Botón izquierdo: sobre el vacío arrastra una caja de selección múltiple
+//    (selectionOnDrag, sin Shift); sobre un nodo lo arrastra/selecciona.
+//  · Clic simple izquierdo sobre un nodo/arista no abre nada (solo lo selecciona);
+//    el doble clic edita el texto in situ y el clic derecho abre el menú.
+const PAN_ON_DRAG: number[] = [1, 2]
+// Evita que el menú contextual nativo del navegador aparezca al hacer click derecho
+// (su rol pasa a ser la navegación).
+const suppressContextMenu = (e: React.MouseEvent) => e.preventDefault()
+
 export function DiagramCanvas() {
   const { currentDiagram, addNode, updateNodePosition } = useStore()
   const uiState = useStore((s) => s.uiState)
@@ -68,27 +90,37 @@ export function DiagramCanvas() {
   const canvasLocked = useUiStore((s) => s.canvasLocked)
   const gridEnabled = useUiStore((s) => s.gridEnabled)
   const [, setSelectedNode] = useState<DiagramNode | null>(null)
+  // Menús contextuales: se abren con click DERECHO (gesto tradicional de menú).
+  // El derecho solo navega cuando arrastra (panOnDrag); un click derecho sin
+  // movimiento dispara el context-menu y abre el panel de editar/eliminar. El
+  // clic izquierdo simple no abre menú (solo selecciona); el doble clic edita.
   const [edgeMenu, setEdgeMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
   const [nodeMenu, setNodeMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null)
+  const closeEdgeMenu = useCallback(() => setEdgeMenu(null), [])
+  const closeNodeMenu = useCallback(() => setNodeMenu(null), [])
 
-  const isConnecting = useRef(false)
-  const [, setConnectingTarget] = useState<string | null>(null)
-
-  const onEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
-    event.preventDefault()
+  const openEdgeMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
     setNodeMenu(null)
     setEdgeMenu({ edgeId: edge.id, x: event.clientX, y: event.clientY })
   }, [])
-
-  const closeEdgeMenu = useCallback(() => setEdgeMenu(null), [])
-
-  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+  const onEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
     event.preventDefault()
+    openEdgeMenu(event, edge)
+  }, [openEdgeMenu])
+
+  const openNodeMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id) ?? null
+    setSelectedNode(diagramNode)
     setEdgeMenu(null)
     setNodeMenu({ nodeId: node.id, x: event.clientX, y: event.clientY })
-  }, [])
+  }, [currentDiagram])
+  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault()
+    openNodeMenu(event, node)
+  }, [openNodeMenu])
 
-  const closeNodeMenu = useCallback(() => setNodeMenu(null), [])
+  const isConnecting = useRef(false)
+  const [, setConnectingTarget] = useState<string | null>(null)
 
   // Borrado de nodos (tecla Supr/Retroceso): React Flow quita el nodo de su estado
   // local, pero la verdad vive en el store (currentDiagram), que se re-siembra; hay
@@ -157,7 +189,7 @@ export function DiagramCanvas() {
   // el arrastre siga al ratón en vivo. Derivamos del store via DiagramToFlow y
   // re-sembramos el estado local cada vez que cambia currentDiagram (nueva
   // generación, edición desde IA, persistencia de posición tras soltar).
-  const { screenToFlowPosition, getNodes } = useReactFlow()
+  const { screenToFlowPosition, getNodes, fitView } = useReactFlow()
   const derived = useMemo(
     () => (currentDiagram ? DiagramToFlow(currentDiagram) : { nodes: [], edges: [] }),
     [currentDiagram],
@@ -168,6 +200,39 @@ export function DiagramCanvas() {
     setRfNodes(derived.nodes)
     setRfEdges(derived.edges)
   }, [derived, setRfNodes, setRfEdges])
+
+  // Re-encuadre al CARGAR un diagrama distinto (p. ej. seleccionarlo en el
+  // historial). El canvas interactivo ya está montado, y la prop `fitView` solo
+  // encuadra una vez al montar; cargar otro diagrama cambia los nodos pero no
+  // re-encuadra. Disparamos fitView imperativamente cuando cambia el id del
+  // diagrama vivo. El refinamiento NO cambia el id, así que no re-encuadra (no
+  // queremos mover la vista mientras el usuario edita).
+  const currentDiagramId = useStore((s) => s.currentDiagramId)
+  const lastFittedId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!currentDiagramId || currentDiagramId === lastFittedId.current) return
+    lastFittedId.current = currentDiagramId
+    // Pequeño retardo para que los nodos del nuevo diagrama estén sembrados y
+    // medidos antes de calcular el encuadre. Animado (duration): el diagrama
+    // aparece en la vista anterior y "vuela" suavemente al encuadre nuevo, en
+    // vez de dar un salto brusco (flash).
+    const t = setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), 80)
+    return () => clearTimeout(t)
+  }, [currentDiagramId, fitView])
+
+  // Animación del "Recalcular layout": al disparar relayout(), el store
+  // incrementa relayoutTick. Activamos una clase que pone una transición CSS en
+  // el transform de cada nodo, de modo que cuando setRfNodes aplica las nuevas
+  // posiciones los nodos "vuelan" hasta ellas en vez de saltar. La quitamos al
+  // acabar para no interferir con el arrastre normal.
+  const relayoutTick = useStore((s) => s.relayoutTick)
+  const [animateLayout, setAnimateLayout] = useState(false)
+  useEffect(() => {
+    if (relayoutTick === 0) return
+    setAnimateLayout(true)
+    const t = setTimeout(() => setAnimateLayout(false), LAYOUT_ANIM_MS + 50)
+    return () => clearTimeout(t)
+  }, [relayoutTick])
 
   // Refinamiento async ELK para diagramas de arquitectura.
   // El layout provisional síncrono (de useMemo) ya pintó algo; cuando ELK resuelve
@@ -203,7 +268,9 @@ export function DiagramCanvas() {
           nodes={stagingNodePositions(streamingNodes)}
           edges={stagingEdges(streamingEdges)}
           fitView
+          fitViewOptions={FIT_VIEW_OPTIONS}
           nodesDraggable={false}
+          panOnDrag={PAN_ON_DRAG}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onConnect={onConnect}
@@ -211,10 +278,9 @@ export function DiagramCanvas() {
           onConnectEnd={onConnectEnd}
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
-          onEdgeContextMenu={onEdgeContextMenu}
-          onPaneClick={closeEdgeMenu}
+          onContextMenu={suppressContextMenu}
           className="bg-[var(--color-bg)]"
-          proOptions={{ hideAttribution: false }}
+          proOptions={{ hideAttribution: true }}
         >
           <Background
             variant={BackgroundVariant.Dots}
@@ -243,7 +309,9 @@ export function DiagramCanvas() {
           nodes={finalNodes}
           edges={finalEdges}
           fitView
+          fitViewOptions={FIT_VIEW_OPTIONS}
           nodesDraggable={false}
+          panOnDrag={PAN_ON_DRAG}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onConnect={onConnect}
@@ -251,9 +319,9 @@ export function DiagramCanvas() {
           onConnectEnd={onConnectEnd}
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
-          onEdgeContextMenu={onEdgeContextMenu}
-          onPaneClick={closeEdgeMenu}
+          onContextMenu={suppressContextMenu}
           className="bg-[var(--color-bg)]"
+          proOptions={{ hideAttribution: true }}
         >
           <Background
             variant={BackgroundVariant.Dots}
@@ -263,9 +331,9 @@ export function DiagramCanvas() {
             style={{ opacity: 0.12 }}
           />
           <MiniMap
-            className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]"
+            className="border-[3px] border-[var(--color-ink)]"
             nodeColor="var(--color-accent)"
-            style={{ background: 'var(--color-surface)' }}
+            style={{ background: 'var(--color-surface)', ...MINIMAP_SIZE }}
           />
         </ReactFlow>
       </div>
@@ -352,10 +420,6 @@ export function DiagramCanvas() {
     addNode(diagramNode)
   }
 
-  function onNodeClick(_event: React.MouseEvent, node: Node) {
-    const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id) ?? null
-    setSelectedNode(diagramNode)
-  }
 
   // Persiste la posición tras soltar un nodo.
   // Para diagramas de secuencia: los actores solo se mueven en X (su Y se fija
@@ -366,25 +430,34 @@ export function DiagramCanvas() {
   // posición intermedia.
   const onNodeDragStart: OnNodeDrag<Node> = () => {
     beginHistoryInteraction()
+    // Bloquea el cursor en `grabbing` durante todo el arrastre: si el puntero
+    // adelanta al nodo y cae sobre el pane, su `cursor: default !important` haría
+    // parpadear el cursor entre agarre y normal (ver ui/utils/dragCursor.ts).
+    beginDragCursor()
   }
 
-  const onNodeDragStop: OnNodeDrag<Node> = (_event, node) => {
+  // React Flow dispara onNodeDragStop una sola vez al soltar, pero su tercer
+  // argumento trae TODOS los nodos arrastrados (en selección múltiple se mueven
+  // en bloque). Persistimos la posición de cada uno; si solo guardáramos `node`
+  // (el que está bajo el cursor) los demás volverían a su sitio al re-sembrar.
+  const onNodeDragStop: OnNodeDrag<Node> = (_event, node, nodes) => {
     const isSequence = currentDiagram?.diagram_type === 'sequence'
-    const diagramNode = currentDiagram?.nodes.find((n) => n.id === node.id)
-    if (!diagramNode) {
-      endHistoryInteraction()
-      return
-    }
+    const dragged = nodes && nodes.length > 0 ? nodes : [node]
 
-    const x = node.position.x
-    // En diagramas de secuencia los actores quedan siempre en y:0 (HEADER_H fija la
-    // cabecera). Fijamos y=0 aquí para neutralizar cualquier deriva vertical.
-    const y = isSequence && diagramNode.node_type === 'actor' ? 0 : node.position.y
+    dragged.forEach((n) => {
+      const diagramNode = currentDiagram?.nodes.find((d) => d.id === n.id)
+      if (!diagramNode) return
+      const x = n.position.x
+      // En diagramas de secuencia los actores quedan siempre en y:0 (HEADER_H fija
+      // la cabecera). Fijamos y=0 aquí para neutralizar cualquier deriva vertical.
+      const y = isSequence && diagramNode.node_type === 'actor' ? 0 : n.position.y
+      updateNodePosition(n.id, { x, y })
+    })
 
-    updateNodePosition(node.id, { x, y })
-    // Cierra el gesto: el cambio de posición ya se aplicó dentro de la ventana
+    // Cierra el gesto: los cambios de posición ya se aplicaron dentro de la ventana
     // suspendida, así que queda una única entrada de historial.
     endHistoryInteraction()
+    endDragCursor()
   }
 
   return (
@@ -396,9 +469,12 @@ export function DiagramCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
+        fitViewOptions={FIT_VIEW_OPTIONS}
         nodesDraggable={!canvasLocked}
         nodesConnectable={!canvasLocked}
         elementsSelectable={!canvasLocked}
+        panOnDrag={PAN_ON_DRAG}
+        selectionOnDrag={!canvasLocked}
         snapToGrid={gridEnabled}
         snapGrid={[GRID_SIZE, GRID_SIZE]}
         nodeTypes={nodeTypes}
@@ -413,14 +489,15 @@ export function DiagramCanvas() {
         onConnectEnd={onConnectEnd}
         onNodeMouseEnter={onNodeMouseEnter}
         onNodeMouseLeave={onNodeMouseLeave}
-        onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
+        onEdgeContextMenu={onEdgeContextMenu}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
-        onEdgeContextMenu={onEdgeContextMenu}
+        onContextMenu={suppressContextMenu}
         onPaneClick={() => { setSelectedNode(null); closeEdgeMenu(); closeNodeMenu() }}
         connectionMode={ConnectionMode.Loose}
-        className="bg-[var(--color-bg)]"
+        className={`bg-[var(--color-bg)]${animateLayout ? ' animate-layout' : ''}`}
+        proOptions={{ hideAttribution: true }}
       >
         <Background
           variant={gridEnabled ? BackgroundVariant.Lines : BackgroundVariant.Dots}
@@ -430,9 +507,9 @@ export function DiagramCanvas() {
           style={{ opacity: gridEnabled ? 0.18 : 0.12 }}
         />
         <MiniMap
-          className="border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)]"
+          className="border-[3px] border-[var(--color-ink)]"
           nodeColor="var(--color-accent)"
-          style={{ background: 'var(--color-surface)' }}
+          style={{ background: 'var(--color-surface)', ...MINIMAP_SIZE }}
         />
       </ReactFlow>
       {edgeMenu && (
