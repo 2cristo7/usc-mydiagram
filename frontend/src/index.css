@@ -107,6 +107,18 @@ p {
   to   { opacity: 1; }
 }
 
+/* ----------------------------------------------------------------------
+   Animación de "Recalcular layout": al pulsar el botón, el canvas añade la
+   clase .animate-layout durante ~400ms. Mientras dura, los nodos transicionan
+   su transform, de modo que al recibir las nuevas posiciones del layout
+   automático "vuelan" suavemente hasta ellas en vez de saltar. La clase se
+   retira al acabar para no interferir con el arrastre manual.
+   (Duración debe coincidir con LAYOUT_ANIM_MS en DiagramCanvas.tsx.)
+   ---------------------------------------------------------------------- */
+.animate-layout .react-flow__node {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
 /* Connection handles: hidden by default, visible on node hover */
 .react-flow__node .react-flow__handle {
   opacity: 0;
