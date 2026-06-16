@@ -259,14 +259,23 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 setUiState('error');
             });
 
-            socket.on('disconnect', () => {
+            socket.on('disconnect', (reason) => {
                 setConnectionState('disconnected');
+                // El cierre lo provocó el propio cliente (logout / cleanup del
+                // efecto al cambiar de identidad): no es un fallo, no hay nada que
+                // avisar ni que marcar como error.
+                if (reason === 'io client disconnect') return;
+                // Solo avisamos de "conexión perdida durante la generación" si
+                // realmente había una generación en curso; una caída en reposo no
+                // debe ensuciar el chat ni dejar el canvas en estado de error.
+                if (useStore.getState().generationPhase === 'idle') return;
                 addMessage({
                     id: crypto.randomUUID(),
                     text: 'Conexión perdida durante la generación. Inténtalo de nuevo.',
                     sender: 'system',
                     timestamp: new Date(),
                 });
+                setGenerationPhase('idle');
                 setUiState('error');
             });
 
