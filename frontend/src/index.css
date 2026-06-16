@@ -181,6 +181,15 @@ p {
   border-radius: 2px;
 }
 
+/* Los nodos de flujo (rect, píldora, rombo) dibujan su PROPIO outline de
+   selección sobre el elemento con la forma real (ver FlowNode), que sigue su
+   contorno. Anulamos aquí el outline rectangular global para no duplicarlo con
+   un box que no encaja (sobre todo el rombo). Selector más específico para
+   ganar al global sin !important. */
+.react-flow__node.react-flow__node-flow.selected {
+  outline: none;
+}
+
 /* Cursores estilo Miro.
    Fondo: cursor NORMAL en reposo y al arrastrar con el IZQUIERDO para seleccionar
    (RF marca el pane con .selection); solo al navegar con el botón DERECHO/central
