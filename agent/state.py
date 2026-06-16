@@ -91,3 +91,9 @@ class DiagramState(TypedDict):
     # por un validador local ya agotado.
     degradations: Annotated[list[Degradation], operator.add]
     title: Optional[str]
+    # S10.3 — Desambiguación de tipo en generación: cuando el usuario pide un
+    # diagrama UML/de comportamiento de forma genérica sin especificar secuencia
+    # vs casos de uso, classify emite un evento `type_clarification` y activa
+    # este flag. El grafo corta a END limpiamente (sin generar nodos ni emitir
+    # `error`/`done`). El frontend lee el evento y re-lanza con el tipo ya fijado.
+    needs_type_clarification: bool

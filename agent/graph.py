@@ -2,7 +2,7 @@ import asyncio
 from langgraph.graph import StateGraph, END
 from state import DiagramState
 from nodes.guard import guard
-from nodes.classify import classify
+from nodes.classify import make_classify
 from nodes.extract_nodes import make_extract_nodes
 from nodes.extract_edges import make_extract_edges
 from nodes.synthesize import synthesize
@@ -13,6 +13,14 @@ from nodes.validate_schema import validate_schema
 
 def route_after_guard(state: DiagramState) -> str:
     return "classify" if state["is_diagram_request"] else END
+
+def route_after_classify(state: DiagramState) -> str:
+    # S10.3 — Desambiguación de tipo: si classify detectó ambigüedad UML y emitió
+    # el evento `type_clarification`, cortamos a END sin generar nada. El evento ya
+    # emitido por la queue es la salida válida; outcome.py sabrá no emitir error/done.
+    if state.get("needs_type_clarification"):
+        return END
+    return "extract_nodes"
 
 def route_after_validate_nodes(state: DiagramState) -> str:
     # node_validation_errors no-vacío = validate_nodes decidió reintentar (hay nodos
@@ -74,6 +82,8 @@ def initial_generation_state(prompt: str, diagram_type=None) -> dict:
         "structural_gaps": [],
         "schema_retry_count": 0,
         "degradations": [],
+        # S10.3 — flag de desambiguación de tipo (default False: no hay pregunta pendiente)
+        "needs_type_clarification": False,
     }
 
 
@@ -81,8 +91,8 @@ def build_graph(queue: asyncio.Queue | None = None):
     builder = StateGraph(DiagramState)
     builder.add_node("guard", guard)
     builder.add_conditional_edges("guard", route_after_guard)
-    builder.add_node("classify", classify)
-    builder.add_edge("classify", "extract_nodes")
+    builder.add_node("classify", make_classify(queue))
+    builder.add_conditional_edges("classify", route_after_classify)
     builder.add_node("extract_nodes", make_extract_nodes(queue))
     builder.add_node("validate_nodes", validate_nodes)
     builder.add_edge("extract_nodes", "validate_nodes")

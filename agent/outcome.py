@@ -61,6 +61,14 @@ def classify_outcome(state: Optional[DiagramState], *, crashed: bool = False) ->
             "message": ERROR_MESSAGES["not_a_diagram"],
         }
 
+    # (b2) S10.3 — Desambiguación de tipo: classify emitió `type_clarification` por
+    # la queue y activó este flag. El evento ya fue enviado al cliente; el grafo cortó
+    # a END limpiamente. No emitimos `error` ni `done`: devolvemos None para que
+    # main.py omita el evento terminal (el stream ya está cerrado con el evento de
+    # clarificación como salida válida).
+    if state.get("needs_type_clarification"):
+        return None
+
     # (c) Fallo total: cero nodos válidos → no hay diagrama utilizable.
     diagram = state.get("diagram")
     nodes = diagram.nodes if diagram else []

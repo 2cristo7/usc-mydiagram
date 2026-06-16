@@ -91,7 +91,12 @@ async def generate_stream(req: GenerateRequest):
             print(f"[generate_stream] graph error: {e!r}")
             event = classify_outcome(None, crashed=True)
         try:
-            await queue.put(event)
+            # S10.3 — classify_outcome devuelve None cuando el grafo cortó por
+            # `type_clarification`: el evento ya fue emitido directamente por la
+            # queue desde classify.py, así que no añadimos ningún evento terminal
+            # adicional (ni done ni error).
+            if event is not None:
+                await queue.put(event)
         finally:
             await queue.put(_SENTINEL)
 
