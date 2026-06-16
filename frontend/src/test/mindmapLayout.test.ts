@@ -150,10 +150,21 @@ describe('mindmapLayout — profundidad variable', () => {
 })
 
 describe('mindmapLayout — tipos de aristas', () => {
-  it('las aristas association se marcan como mindmapBranch', () => {
+  it('todas las aristas usan el edge unificado (type default)', () => {
     const { edges } = mindmapLayout(makeSimpleMindmap())
     edges.forEach((e) => {
-      expect(e.type).toBe('mindmapBranch')
+      expect(e.type).toBe('default')
+    })
+  })
+
+  it('las ramas (association) llevan forma curva, color y grosor en data', () => {
+    const { edges } = mindmapLayout(makeSimpleMindmap())
+    edges.forEach((e) => {
+      const data = e.data as Record<string, unknown>
+      expect(data.shape).toBe('curved')
+      expect(data.strokeColor).toBeTruthy()
+      expect(typeof data.strokeWidth).toBe('number')
+      expect(data.targetArrow).toBe(false)
     })
   })
 })
@@ -251,9 +262,9 @@ describe('mindmapLayout — robustez ante nodos sueltos (regresión de colores)'
     expect(b1.data.branchColor).not.toBe(b2.data.branchColor) // color por rama distinto
   })
 
-  it('las aristas del árbol siguen siendo de tipo mindmapBranch', () => {
+  it('las aristas del árbol usan el edge unificado (type default)', () => {
     const { edges } = mindmapLayout(makeMindmapWithStrayNode())
-    expect(edges.every((e) => e.type === 'mindmapBranch')).toBe(true)
+    expect(edges.every((e) => e.type === 'default')).toBe(true)
   })
 
   it('el nodo suelto sale en estilo neutro (no como una rama real)', () => {

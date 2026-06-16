@@ -45,7 +45,7 @@ test('DiagramToFlow basic conversion', () => {
             target: '2',
             sourceHandle: null,
             targetHandle: null,
-            data: { label: 'Edge from Node 1 to Node 2' },
+            data: { label: 'Edge from Node 1 to Node 2', shape: 'elbow' },
             type: 'default',
         }
     ]);
@@ -159,7 +159,7 @@ test ('DiagramToFlow edges mapping', () => {
             target: '2',
             sourceHandle: null,
             targetHandle: null,
-            data: { label: 'Edge from Node 1 to Node 2' },
+            data: { label: 'Edge from Node 1 to Node 2', shape: 'elbow' },
             type: 'default',
         }
     ]);

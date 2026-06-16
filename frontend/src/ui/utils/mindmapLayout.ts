@@ -19,6 +19,13 @@ function radiusForLevel(level: number): number {
   return 180 + (level - 1) * 150
 }
 
+// Grosor de rama decreciente por nivel (gruesa junto a la raíz, fina en hojas).
+// Antes vivía en MindmapBranchEdge; ahora se hornea en data.strokeWidth para que
+// el render unificado (EditableEdge) lo aplique sin un componente propio.
+function branchStrokeWidth(level: number): number {
+  return Math.max(1.5, 5 - level * 0.9)
+}
+
 function buildDagreFallback(diagram: DiagramSchema): { nodes: Node[]; edges: Edge[] } {
   const graph = new dagre.graphlib.Graph()
   graph.setGraph({ rankdir: 'TB' })
@@ -42,7 +49,8 @@ function buildDagreFallback(diagram: DiagramSchema): { nodes: Node[]; edges: Edg
     id: e.id,
     source: e.source,
     target: e.target,
-    data: { label: e.label ?? '' },
+    data: { label: e.label ?? '', shape: 'curved', ...(e.data ?? {}) },
+    type: 'default',
   } as Edge))
 
   return { nodes, edges }
@@ -268,13 +276,27 @@ export function mindmapLayout(diagram: DiagramSchema): { nodes: Node[]; edges: E
     } as Node
   })
 
-  const edges: Edge[] = diagram.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    data: { label: e.label ?? '' },
-    type: e.edge_type === 'association' ? 'mindmapBranch' : undefined,
-  } as Edge))
+  // Un único modelo de edge (EditableEdge, type 'default'). Las ramas del árbol
+  // (association) llevan en data su forma curva, color de rama y grosor por nivel
+  // —antes propios de MindmapBranchEdge— y sin flecha. El resto de aristas son
+  // curvas normales con flecha y tinta.
+  const edges: Edge[] = diagram.edges.map((e) => {
+    const isBranch = e.edge_type === 'association'
+    const branchProps = isBranch
+      ? {
+          strokeColor: branchColors.get(e.target) ?? BRANCH_COLORS[0],
+          strokeWidth: branchStrokeWidth(levels.get(e.target) ?? 1),
+          targetArrow: false,
+        }
+      : {}
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      data: { label: e.label ?? '', shape: 'curved', ...branchProps, ...(e.data ?? {}) },
+      type: 'default',
+    } as Edge
+  })
 
   return { nodes, edges }
 }

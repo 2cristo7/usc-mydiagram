@@ -91,6 +91,11 @@ export const edgeVisualDataSchema = z.object({
     waypoints: z.array(z.object({ x: z.number(), y: z.number() })).optional(),
     shape: z.enum(['straight', 'elbow', 'curved']).optional(),
     strokeStyle: z.enum(['normal', 'dashed', 'dotted']).optional(),
+    // Color y grosor del trazo. Propiedades comunes a TODOS los edges; las usa
+    // p. ej. el mapa mental para ramas coloreadas y de grosor decreciente por
+    // nivel, sin necesitar un componente de edge propio.
+    strokeColor: z.string().optional(),
+    strokeWidth: z.number().optional(),
     sourceArrow: z.boolean().optional(),
     targetArrow: z.boolean().optional(),
     // Anclaje fijo del extremo sobre el perímetro del nodo, normalizado [0..1]

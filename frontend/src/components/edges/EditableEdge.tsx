@@ -30,6 +30,8 @@ export function EditableEdge({
   const labelT = edgeData.labelT ?? 0.5
   const shape = edgeData.shape ?? 'elbow'
   const strokeStyle = edgeData.strokeStyle ?? 'normal'
+  const strokeColor = edgeData.strokeColor ?? 'var(--color-ink)'
+  const strokeW = edgeData.strokeWidth ?? 2
   const arrowStart = edgeData.sourceArrow ?? false
   const arrowEnd = edgeData.targetArrow ?? true
 
@@ -145,8 +147,8 @@ export function EditableEdge({
         className="nopan"
         d={edgePath}
         fill="none"
-        stroke="var(--color-ink)"
-        strokeWidth={2}
+        stroke={strokeColor}
+        strokeWidth={strokeW}
         strokeDasharray={strokeDasharray}
         markerEnd={computedMarkerEnd}
         markerStart={computedMarkerStart}

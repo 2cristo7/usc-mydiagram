@@ -152,15 +152,18 @@ describe('architectureLayoutSync', () => {
     expect(attrs).toContain('tech: Node.js')
   })
 
-  test('las aristas llevan type "architecture"', () => {
+  test('las aristas usan el edge unificado (type default) en forma elbow', () => {
     const { edges } = architectureLayoutSync(DIAGRAM_3G)
-    edges.forEach((e) => expect(e.type).toBe('architecture'))
+    edges.forEach((e) => {
+      expect(e.type).toBe('default')
+      expect((e.data as { shape?: string }).shape).toBe('elbow')
+    })
   })
 
-  test('el tipo de edge va en data.edge_type', () => {
+  test('las dependencias (no "calls") salen con trazo discontinuo', () => {
     const { edges } = architectureLayoutSync(DIAGRAM_3G)
-    const e5 = edges.find((e) => e.id === 'e5')!
-    expect((e5.data as { edge_type?: string }).edge_type).toBe('depends_on')
+    const e5 = edges.find((e) => e.id === 'e5')! // depends_on
+    expect((e5.data as { strokeStyle?: string }).strokeStyle).toBe('dashed')
   })
 
   test('respeta node.position guardada del usuario para nodo hijo', () => {
@@ -220,7 +223,7 @@ describe('DiagramToFlow bifurca a architectureLayoutSync para architecture', () 
     }
     const { nodes, edges } = DiagramToFlow(d)
     expect(nodes.find((n) => n.id === 'gw')!.type).toBe('architecture')
-    expect(edges[0].type).toBe('architecture')
+    expect(edges[0].type).toBe('default')
   })
 
   test('positions son válidas (no NaN)', () => {

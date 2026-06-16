@@ -157,8 +157,8 @@ function isVisibleStroke(stroke: string): boolean {
  *
  * Forma GENERAL e independiente del tipo de arista: en lugar de mirar una clase
  * concreta (`.react-flow__edge-path`, que NINGÚN edge custom de este proyecto
- * usa —EditableEdge, ArchitectureEdge, MindmapBranchEdge, SequenceMessageEdge—,
- * dejando el fallback muerto), recorre TODOS los `<path>` dentro de cualquier
+ * usa —EditableEdge y SequenceMessageEdge—, dejando el fallback muerto),
+ * recorre TODOS los `<path>` dentro de cualquier
  * `.react-flow__edge` y se queda con los de trazo visible. Cualquier tipo de
  * arista nuevo que se añada en el futuro queda cubierto sin tocar esto. El `d`
  * está en coordenadas de flujo (el <svg> de aristas vive en el origen del

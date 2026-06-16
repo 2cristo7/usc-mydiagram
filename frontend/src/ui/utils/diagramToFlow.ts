@@ -5,6 +5,7 @@ import dagre from '@dagrejs/dagre';
 import { sequenceLayout } from './sequenceLayout';
 import { mindmapLayout } from './mindmapLayout';
 import { architectureLayoutSync } from './architectureLayout';
+import { defaultEdgeShape } from './edgeDefaults';
 
 const nodeTypeMap: Partial<Record<NodeType, string>> = {
     class: 'umlClass',
@@ -90,9 +91,11 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
             targetHandle: edge.targetHandle ?? null,
             // Mezclamos los datos visuales persistidos (waypoints/forma/flechas/
             // labelT) con la etiqueta del contrato. edge.data.label, si existe,
-            // gana sobre edge.label (es la edición inline más reciente).
-            data: { label: edge.label ?? '', ...(edge.data ?? {}) },
-            type: diagram.diagram_type === 'sequence' ? 'sequenceMessage' : 'default',
+            // gana sobre edge.label (es la edición inline más reciente). La forma
+            // por defecto del tipo de diagrama se aplica solo si el edge no trae
+            // una propia persistida (un único modelo de edge, EditableEdge).
+            data: { label: edge.label ?? '', shape: defaultEdgeShape(diagram.diagram_type), ...(edge.data ?? {}) },
+            type: 'default',
         } as Edge;
     });
 

@@ -154,8 +154,16 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
     target: edge.target,
     sourceHandle: edge.sourceHandle ?? null,
     targetHandle: edge.targetHandle ?? null,
-    data: { label: edge.label ?? '', ...(edge.data ?? {}), edge_type: edge.edge_type },
-    type: 'architecture',
+    // Un único modelo de edge (EditableEdge, type 'default'): elbow ortogonal, y
+    // las dependencias (todo lo que no sea 'calls') discontinuas. data.shape solo
+    // es default; si el usuario fijó otra forma, su data persistida la respeta.
+    data: {
+      label: edge.label ?? '',
+      shape: 'elbow' as const,
+      strokeStyle: (edge.edge_type ?? 'calls') === 'calls' ? ('normal' as const) : ('dashed' as const),
+      ...(edge.data ?? {}),
+    },
+    type: 'default',
   }))
 
   return { nodes: rfNodes, edges: rfEdges }
