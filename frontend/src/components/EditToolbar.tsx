@@ -1,10 +1,11 @@
-import { SquarePen, Plus, GitBranch, Undo2, Redo2, Maximize2, ZoomIn, ZoomOut, Lock, Unlock, Grid3x3, LayoutGrid } from 'lucide-react';
+import { SquarePen, Plus, Undo2, Redo2, Maximize2, ZoomIn, ZoomOut, Lock, Unlock, Grid3x3, LayoutGrid } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { IconButton } from '../ui/primitives/IconButton';
 import { useHistoryStore } from '../store/history';
 import { useStore } from '../store/index';
 import { useUiStore } from '../store/ui';
 import { NodePalette } from './NodePalette';
+import { AuthButton } from './AuthButton';
 import { FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView';
 
 export function EditToolbar() {
@@ -43,11 +44,6 @@ export function EditToolbar() {
           onClick={toggleNodePalette}
           aria-pressed={nodePaletteOpen}
           aria-label="Abrir paleta de nodos"
-        />
-        <IconButton
-          icon={<GitBranch size={16} />}
-          tooltip="Añadir relación"
-          disabled={!currentDiagram}
         />
         <div className="my-1 h-px w-8 bg-[var(--color-ink)]" />
         <IconButton
@@ -105,6 +101,10 @@ export function EditToolbar() {
           aria-pressed={canvasLocked}
           aria-label={canvasLocked ? 'Desbloquear lienzo' : 'Bloquear lienzo'}
         />
+        {/* Perfil al fondo de la barra: mt-auto lo empuja al pie */}
+        <div className="mt-auto pt-2">
+          <AuthButton />
+        </div>
       </div>
 
       {/* Paleta de nodos: se muestra como columna inline a la derecha del toolbar */}

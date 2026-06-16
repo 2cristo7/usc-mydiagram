@@ -119,24 +119,27 @@ p {
   transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-/* Connection handles: hidden by default, visible on node hover */
+/* Puntos de conexión: uno centrado en cada lado del nodo. Ocultos por defecto;
+   aparecen al seleccionar el nodo (1 clic) o al pasar el ratón por encima.
+   Estilo MIRO: punto hueco (relleno del lienzo, borde de acento) que se rellena
+   y crece al pasar el ratón sobre él. */
 .react-flow__node .react-flow__handle {
   opacity: 0;
-  width: 10px;
-  height: 10px;
-  background: var(--color-accent, #3b82f6);
-  border: 2px solid var(--color-surface, #fff);
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  width: 9px;
+  height: 9px;
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-accent, #3b82f6);
+  transition: opacity 0.15s ease, transform 0.12s ease, background 0.12s ease;
 }
 
-.react-flow__node:hover .react-flow__handle,
-.react-flow__node.selected .react-flow__handle {
+.react-flow__node.selected .react-flow__handle,
+.react-flow__node:hover .react-flow__handle {
   opacity: 1;
 }
 
 .react-flow__handle:hover {
-  transform: scale(1.4);
-  background: var(--color-accent, #2563eb);
+  transform: scale(1.5);
+  background: var(--color-accent, #3b82f6);
 }
 
 /* Snap highlight when dragging a new edge over a target node */

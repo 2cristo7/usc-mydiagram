@@ -29,7 +29,9 @@ import { StateNode } from './nodes/StateNode'
 import { MindmapNode } from './nodes/MindmapNode'
 import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
-import { SequenceMessageEdge, EditableEdge, EdgeMarkers, MindmapBranchEdge, ArchitectureEdge } from './edges'
+import { SequenceMessageEdge, EditableEdge, EdgeMarkers } from './edges'
+import { makeConnectionLine } from './edges/ConnectionLine'
+import { predictEdgeDefaults } from '../ui/utils/edgeDefaults'
 import { architectureLayoutElk } from '../ui/utils/architectureLayout'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
@@ -53,10 +55,12 @@ const nodeTypes = {
   activation: ActivationNode,
 }
 
+// Un único modelo de edge editable (EditableEdge) para todos los diagramas: las
+// variantes son solo de forma (recto/elbow/curvo) y de propiedades comunes
+// (color, grosor, trazo, flechas). El mensaje de secuencia es la única excepción
+// porque su geometría es posicional (altura cronológica), no una forma.
 const edgeTypes = {
   sequenceMessage: SequenceMessageEdge,
-  mindmapBranch: MindmapBranchEdge,
-  architecture: ArchitectureEdge,
   default: EditableEdge,
 }
 
@@ -171,6 +175,11 @@ export function DiagramCanvas() {
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target) return
+    // Como "solo hay un tipo de relación por diagrama", la arista nueva hereda
+    // forma/tipo/estilo de las que ya existen (o el default por tipo si está
+    // vacío), en vez de imponer siempre curva. Ver predictEdgeDefaults.
+    const { shape, edge_type, strokeStyle, sourceArrow, targetArrow } =
+      predictEdgeDefaults(useStore.getState().currentDiagram)
     addEdge({
       id: `e-${connection.source}-${connection.target}-${Date.now()}`,
       source: connection.source,
@@ -178,9 +187,8 @@ export function DiagramCanvas() {
       sourceHandle: connection.sourceHandle ?? undefined,
       targetHandle: connection.targetHandle ?? undefined,
       label: '',
-      // Tipo semántico por defecto para aristas creadas a mano (Miro-style).
-      edge_type: 'association',
-      data: { shape: 'curved', strokeStyle: 'normal', targetArrow: true },
+      edge_type,
+      data: { shape, strokeStyle, sourceArrow, targetArrow },
     } as DiagramEdge)
   }, [addEdge])
 
@@ -192,6 +200,12 @@ export function DiagramCanvas() {
   const { screenToFlowPosition, getNodes, fitView } = useReactFlow()
   const derived = useMemo(
     () => (currentDiagram ? DiagramToFlow(currentDiagram) : { nodes: [], edges: [] }),
+    [currentDiagram],
+  )
+  // Línea de previsualización del arrastre con la forma nativa del diagrama
+  // (la misma que tendrá la arista creada). Se recalcula al cambiar el diagrama.
+  const connectionLineComponent = useMemo(
+    () => makeConnectionLine(predictEdgeDefaults(currentDiagram).shape),
     [currentDiagram],
   )
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(derived.nodes)
@@ -496,6 +510,7 @@ export function DiagramCanvas() {
         onContextMenu={suppressContextMenu}
         onPaneClick={() => { setSelectedNode(null); closeEdgeMenu(); closeNodeMenu() }}
         connectionMode={ConnectionMode.Loose}
+        connectionLineComponent={connectionLineComponent}
         className={`bg-[var(--color-bg)]${animateLayout ? ' animate-layout' : ''}`}
         proOptions={{ hideAttribution: true }}
       >
