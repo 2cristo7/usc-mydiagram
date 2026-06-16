@@ -23,6 +23,21 @@ export interface DoneEvent {
   degraded?: boolean
 }
 
+// Evento emitido por el agente cuando el tipo de diagrama UML es ambiguo.
+// El gateway lo reenvía al frontend como `diagram:type_clarification`.
+// NO confundir con `clarification` (S7.4): ese lleva thread_id y reanuda
+// una ejecución pausada; este es una pregunta previa a la generación.
+export interface TypeClarificationOption {
+  label: string
+  value: string
+}
+
+export interface TypeClarificationItem {
+  _type: 'type_clarification'
+  question: string
+  options: TypeClarificationOption[]
+}
+
 export async function streamAgentToSocket(
   url: string,
   body: object,
@@ -111,6 +126,19 @@ export async function streamAgentToSocket(
                 options: item.options ?? [],
               })
               break
+            case 'type_clarification': {
+              // El agente detectó ambigüedad en el tipo de diagrama UML y pide
+              // al usuario que elija antes de generar. El frontend debe mostrar
+              // las opciones y re-lanzar con `message:regenerate` + diagram_type.
+              // NO lleva thread_id: no hay ejecución pausada que reanudar.
+              const tcItem = item as TypeClarificationItem
+              console.log(`⏸️ type_clarification → "${tcItem.question}" opciones: ${JSON.stringify(tcItem.options)}`)
+              socket.emit('diagram:type_clarification', {
+                question: tcItem.question,
+                options: tcItem.options,
+              })
+              break
+            }
             case 'error':
               // Propaga la categoría del fallo además del mensaje accionable.
               console.log(`❌ error         → [${item.category}] ${item.message}`)
