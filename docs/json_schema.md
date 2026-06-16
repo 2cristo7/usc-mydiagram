@@ -28,10 +28,10 @@ interface DiagramNode {
 }
 ```
 
-`attributes` usa prefijos de visibilidad para nodos UML: `+` público, `-` privado, `#` protegido.
-Ejemplos: `"+ nombre: string"`, `"- saldo: float"`, `"# id: int"`.
+`attributes` puede usarse para detalles adicionales del nodo (p. ej. campos de una entidad ERD).
+Ejemplos: `"id: int"`, `"nombre: varchar"`.
 
-Para nodos sin atributos semánticos (`actor`, `step`, `state`, `topic`) se pasa `[]`.
+Para nodos sin atributos semánticos (`actor`, `step`, `use_case`, `topic`) se pasa `[]`.
 
 ---
 
@@ -56,31 +56,29 @@ interface DiagramEdge {
 | `diagram_type`  | `node_type` válidos                  | `edge_type` válidos                                      |
 |-----------------|--------------------------------------|----------------------------------------------------------|
 | `erd`           | `table`                              | `one_to_one`, `one_to_many`, `many_to_many`              |
-| `uml_class`     | `class`                              | `inherits`, `implements`, `depends_on`, `association`    |
 | `sequence`      | `actor`, `class`                     | `calls`, `sequence`                                      |
 | `flowchart`     | `step`, `decision`, `terminator`     | `sequence`                                               |
 | `architecture`  | `service`, `database`, `queue`       | `depends_on`, `association`, `calls`                     |
-| `state_machine` | `state`                              | `transition`                                             |
 | `mindmap`       | `topic`                              | `association`                                            |
+| `use_case`      | `actor`, `use_case`                  | `association`, `includes`, `extends`                     |
 
-> **Estado de implementación**: `flowchart` (`decision`, `terminator`) está planificado para S5. El resto están implementados en S3–S4.
+> **Tipos retirados en S10.3**: `uml_class` y `state_machine` han sido eliminados del catálogo.
 
 ---
 
 ## Semántica de cada `edge_type`
 
-| `edge_type`    | Semántica                                              | Diagramas                    |
-|----------------|--------------------------------------------------------|------------------------------|
-| `one_to_one`   | Una entidad se relaciona con exactamente otra          | `erd`                        |
-| `one_to_many`  | Una entidad se relaciona con N                         | `erd`                        |
-| `many_to_many` | N entidades se relacionan con N                        | `erd`                        |
-| `inherits`     | Una clase extiende a otra (flecha triángulo hueco)     | `uml_class`                  |
-| `implements`   | Una clase implementa una interfaz (línea punteada)     | `uml_class`                  |
-| `depends_on`   | A usa a B sin asociación formal                        | `uml_class`, `architecture`  |
-| `association`  | Relación estructural genérica                          | `uml_class`, `architecture`, `mindmap` |
-| `calls`        | A invoca a B en tiempo de ejecución                    | `sequence`, `architecture`   |
-| `sequence`     | Paso siguiente en el flujo                             | `sequence`, `flowchart`      |
-| `transition`   | Cambio de estado (puede llevar guarda en `label`)      | `state_machine`              |
+| `edge_type`    | Semántica                                              | Diagramas                           |
+|----------------|--------------------------------------------------------|-------------------------------------|
+| `one_to_one`   | Una entidad se relaciona con exactamente otra          | `erd`                               |
+| `one_to_many`  | Una entidad se relaciona con N                         | `erd`                               |
+| `many_to_many` | N entidades se relacionan con N                        | `erd`                               |
+| `depends_on`   | A usa a B sin asociación formal                        | `architecture`                      |
+| `association`  | Relación estructural genérica                          | `architecture`, `mindmap`, `use_case` |
+| `calls`        | A invoca a B en tiempo de ejecución                    | `sequence`, `architecture`          |
+| `sequence`     | Paso siguiente en el flujo                             | `sequence`, `flowchart`             |
+| `includes`     | Caso de uso incluye comportamiento de otro (obligatorio) | `use_case`                        |
+| `extends`      | Caso de uso extiende a otro (opcional/condicional)     | `use_case`                          |
 
 ---
 
@@ -104,20 +102,25 @@ interface DiagramEdge {
 }
 ```
 
-### UML Class — sistema de pagos
+### Use Case — sistema de biblioteca
 
 ```json
 {
-  "title": "UML Class sistema de pagos",
-  "diagram_type": "uml_class",
+  "title": "Use Case sistema de biblioteca",
+  "diagram_type": "use_case",
   "nodes": [
-    { "id": "payment",      "label": "Payment",      "node_type": "class", "attributes": ["- id: string", "- amount: float", "+ process(): void"] },
-    { "id": "card_payment", "label": "CardPayment",  "node_type": "class", "attributes": ["- cardNumber: string", "+ validate(): bool"] },
-    { "id": "ipayable",     "label": "<<interface>>\nIPayable", "node_type": "class", "attributes": ["+ pay(): void"] }
+    { "id": "socio",      "label": "Socio",           "node_type": "actor",    "attributes": [] },
+    { "id": "buscar",     "label": "Buscar libro",     "node_type": "use_case", "attributes": [] },
+    { "id": "reservar",   "label": "Reservar libro",   "node_type": "use_case", "attributes": [] },
+    { "id": "renovar",    "label": "Renovar préstamo", "node_type": "use_case", "attributes": [] },
+    { "id": "autenticar", "label": "Autenticarse",     "node_type": "use_case", "attributes": [] }
   ],
   "edges": [
-    { "id": "e1", "source": "card_payment", "target": "payment",  "label": "",        "edge_type": "inherits" },
-    { "id": "e2", "source": "card_payment", "target": "ipayable", "label": "",        "edge_type": "implements" }
+    { "id": "e1", "source": "socio",    "target": "buscar",     "label": "",         "edge_type": "association" },
+    { "id": "e2", "source": "socio",    "target": "reservar",   "label": "",         "edge_type": "association" },
+    { "id": "e3", "source": "socio",    "target": "renovar",    "label": "",         "edge_type": "association" },
+    { "id": "e4", "source": "reservar", "target": "autenticar", "label": "<<includes>>", "edge_type": "includes" },
+    { "id": "e5", "source": "renovar",  "target": "autenticar", "label": "<<includes>>", "edge_type": "includes" }
   ]
 }
 ```
@@ -186,28 +189,6 @@ interface DiagramEdge {
     { "id": "e3", "source": "orders",   "target": "db_ord",   "label": "read/write",    "edge_type": "depends_on" },
     { "id": "e4", "source": "orders",   "target": "queue",    "label": "order.created", "edge_type": "calls" },
     { "id": "e5", "source": "payments", "target": "queue",    "label": "payment.done",  "edge_type": "calls" }
-  ]
-}
-```
-
-### State machine — ciclo de vida de un pedido
-
-```json
-{
-  "title": "State machine pedido",
-  "diagram_type": "state_machine",
-  "nodes": [
-    { "id": "pendiente",  "label": "Pendiente",   "node_type": "state", "attributes": [] },
-    { "id": "pagado",     "label": "Pagado",      "node_type": "state", "attributes": [] },
-    { "id": "enviado",    "label": "Enviado",     "node_type": "state", "attributes": [] },
-    { "id": "entregado",  "label": "Entregado",   "node_type": "state", "attributes": [] },
-    { "id": "cancelado",  "label": "Cancelado",   "node_type": "state", "attributes": [] }
-  ],
-  "edges": [
-    { "id": "e1", "source": "pendiente", "target": "pagado",    "label": "pago confirmado",  "edge_type": "transition" },
-    { "id": "e2", "source": "pendiente", "target": "cancelado", "label": "timeout 24h",      "edge_type": "transition" },
-    { "id": "e3", "source": "pagado",    "target": "enviado",   "label": "stock disponible", "edge_type": "transition" },
-    { "id": "e4", "source": "enviado",   "target": "entregado", "label": "confirmación",     "edge_type": "transition" }
   ]
 }
 ```
