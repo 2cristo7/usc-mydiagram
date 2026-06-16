@@ -180,3 +180,38 @@ p {
   outline-offset: 3px;
   border-radius: 2px;
 }
+
+/* Cursores estilo Miro.
+   Fondo: cursor NORMAL en reposo y al arrastrar con el IZQUIERDO para seleccionar
+   (RF marca el pane con .selection); solo al navegar con el botón DERECHO/central
+   (RF marca el pane con .dragging) aparece la mano cerrada (grabbing).
+   Nodo/arista: dedo al pasar por encima; al arrastrarlo con el izquierdo, mano
+   cerrada (agarrando), vía .dragging / :active.
+   Usamos !important para ganar al CSS base de React Flow sea cual sea el orden
+   de carga de las hojas. */
+.react-flow__pane,
+.react-flow__pane.draggable,
+.react-flow__pane.selection {
+  cursor: default !important;
+}
+.react-flow__pane.dragging {
+  cursor: grabbing !important;
+}
+.react-flow__node.draggable,
+.react-flow__node.selectable,
+.react-flow__edge.selectable,
+.react-flow__edge .react-flow__edge-path {
+  cursor: pointer !important;
+}
+.react-flow__node.dragging,
+.react-flow__node.draggable:active {
+  cursor: grabbing !important;
+}
+/* Bloqueo global durante un gesto de arrastre (ver ui/utils/dragCursor.ts).
+   Fuerza un único cursor en TODO el documento para que no parpadee al pasar el
+   puntero por encima de pane/nodos/aristas/handles, cada uno con su propio
+   `cursor: … !important`. El valor lo fija la variable --drag-cursor. */
+body.is-dragging,
+body.is-dragging * {
+  cursor: var(--drag-cursor, grabbing) !important;
+}
