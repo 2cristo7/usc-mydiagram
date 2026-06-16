@@ -1,4 +1,4 @@
-import { SquarePen, Plus, Undo2, Redo2, Maximize2, ZoomIn, ZoomOut, Lock, Unlock, Grid3x3, LayoutGrid } from 'lucide-react';
+import { SquarePen, SquarePlus, Undo2, Redo2, Maximize2, ZoomIn, ZoomOut, Lock, Unlock, Grid3x3, LayoutGrid } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { IconButton } from '../ui/primitives/IconButton';
 import { useHistoryStore } from '../store/history';
@@ -29,36 +29,22 @@ export function EditToolbar() {
     // El wrapper es flex-row para que la paleta se expanda a la derecha del toolbar.
     <div className="flex flex-row h-full">
       {/* Columna de botones */}
-      <div className="flex flex-col items-center border-r-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] py-2 gap-1" style={{ width: 64 }}>
+      <div className="flex flex-col items-center border-r-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] py-2 gap-2" style={{ width: 64 }}>
+        {/* Grupo 1 — acciones de diagrama: nuevo, añadir nodo, recalcular layout */}
         <IconButton
           icon={<SquarePen size={16} />}
           tooltip="Nuevo diagrama"
           onClick={handleNewDiagram}
           aria-label="Crear un diagrama nuevo"
         />
-        <div className="my-1 h-px w-8 bg-[var(--color-ink)]" />
         <IconButton
-          icon={<Plus size={16} />}
+          icon={<SquarePlus size={16} />}
           tooltip="Añadir nodo"
           disabled={!currentDiagram}
           onClick={toggleNodePalette}
           aria-pressed={nodePaletteOpen}
           aria-label="Abrir paleta de nodos"
         />
-        <div className="my-1 h-px w-8 bg-[var(--color-ink)]" />
-        <IconButton
-          icon={<Undo2 size={16} />}
-          tooltip="Deshacer"
-          disabled={!canUndo}
-          onClick={() => undo()}
-        />
-        <IconButton
-          icon={<Redo2 size={16} />}
-          tooltip="Rehacer"
-          disabled={!canRedo}
-          onClick={() => redo()}
-        />
-        <div className="my-1 h-px w-8 bg-[var(--color-ink)]" />
         <IconButton
           icon={<LayoutGrid size={16} />}
           tooltip="Recalcular layout"
@@ -72,6 +58,21 @@ export function EditToolbar() {
           aria-label="Recalcular el layout automático del diagrama"
         />
         <div className="my-1 h-px w-8 bg-[var(--color-ink)]" />
+        {/* Grupo 2 — historial: deshacer / rehacer */}
+        <IconButton
+          icon={<Undo2 size={16} />}
+          tooltip="Deshacer"
+          disabled={!canUndo}
+          onClick={() => undo()}
+        />
+        <IconButton
+          icon={<Redo2 size={16} />}
+          tooltip="Rehacer"
+          disabled={!canRedo}
+          onClick={() => redo()}
+        />
+        <div className="my-1 h-px w-8 bg-[var(--color-ink)]" />
+        {/* Grupo 3 — vista: ajustar, zoom, rejilla, bloqueo */}
         <IconButton
           icon={<Maximize2 size={16} />}
           tooltip="Ajustar vista"
