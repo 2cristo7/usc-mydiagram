@@ -26,8 +26,9 @@ function buildStraight(
     d += ` L ${pts[i].x} ${pts[i].y}`;
   }
 
-  // label at mid-length
-  const [lx, ly] = midOfPolyline(pts);
+  // Etiqueta en el medio del segmento más largo (no en un codo): queda centrada a
+  // lo largo de un tramo recto en vez de pisar un vértice.
+  const [lx, ly] = midOfLongestSegment(pts);
   return [d, lx, ly];
 }
 
@@ -71,7 +72,9 @@ function buildElbow(
   const clean = getElbowCorners(source, target, waypoints);
   const d = roundedPath(clean, ELBOW_RADIUS);
 
-  const [lx, ly] = midOfPolyline(clean);
+  // Etiqueta en el medio del segmento recto más largo: a lo largo del tramo, nunca
+  // sobre un codo (donde queda fea y tapa el giro).
+  const [lx, ly] = midOfLongestSegment(clean);
   return [d, lx, ly];
 }
 
@@ -185,28 +188,22 @@ function dist(a: Point, b: Point): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
-function midOfPolyline(pts: Point[]): [number, number] {
-  const lengths: number[] = [];
-  let total = 0;
+// Punto medio del segmento más largo de la polilínea. Para una arista en codo,
+// coloca la etiqueta centrada a lo largo del tramo recto dominante (estilo
+// dbdiagram/draw.io) en vez de en el punto a media longitud, que suele caer en una
+// esquina.
+function midOfLongestSegment(pts: Point[]): [number, number] {
+  if (pts.length < 2) return [pts[0]?.x ?? 0, pts[0]?.y ?? 0];
+  let best = 0;
+  let bestLen = -1;
   for (let i = 0; i < pts.length - 1; i++) {
     const l = dist(pts[i], pts[i + 1]);
-    lengths.push(l);
-    total += l;
-  }
-  const half = total / 2;
-  let acc = 0;
-  for (let i = 0; i < lengths.length; i++) {
-    if (acc + lengths[i] >= half) {
-      const t = (half - acc) / lengths[i];
-      return [
-        pts[i].x + t * (pts[i + 1].x - pts[i].x),
-        pts[i].y + t * (pts[i + 1].y - pts[i].y),
-      ];
+    if (l > bestLen) {
+      bestLen = l;
+      best = i;
     }
-    acc += lengths[i];
   }
-  const last = pts[pts.length - 1];
-  return [last.x, last.y];
+  return [(pts[best].x + pts[best + 1].x) / 2, (pts[best].y + pts[best + 1].y) / 2];
 }
 
 function bezierPoint(p0: Point, c1: Point, c2: Point, p1: Point, t: number): Point {

@@ -794,6 +794,10 @@ export function useEdgeEditing(args: {
 // salga rasante al borde.
 const ENDPOINT_STUB = 22
 
+// Desfase perpendicular (px de flujo) por debajo del cual una ruta por defecto se
+// endereza a línea recta en vez de dibujar una Z con un escaloncito diminuto.
+const STRAIGHTEN_TOL = 48
+
 // Esquinas ortogonales efectivas. Cada extremo cuyo lado se conoce abandona el
 // nodo PERPENDICULAR a ese lado, tanto en la ruta por defecto (sin waypoints, Z
 // por el centro) como con waypoints intermedios (stub perpendicular + L-bends).
@@ -810,6 +814,19 @@ function routeCorners(
     // lado conocido, L-bend horizontal-primero por defecto.
     const vertical = srcPos ? isVerticalSide(srcPos) : tgtPos ? isVerticalSide(tgtPos) : null
     if (vertical === null) return getElbowCorners(src, tgt, [])
+    // Si el desfase perpendicular es pequeño, la "Z" degeneraría en un escaloncito
+    // feo cerca de un extremo. Enderezamos a una línea recta moviendo ambos extremos
+    // a la coordenada común (el desplazamiento es < STRAIGHTEN_TOL/2, así que el
+    // extremo sigue sobre el lado del nodo). Se hace aquí, con coordenadas YA
+    // renderizadas (measured), por lo que es inmune al error del tamaño estimado.
+    if (vertical && Math.abs(src.x - tgt.x) < STRAIGHTEN_TOL) {
+      const x = (src.x + tgt.x) / 2
+      return [{ x, y: src.y }, { x, y: tgt.y }]
+    }
+    if (!vertical && Math.abs(src.y - tgt.y) < STRAIGHTEN_TOL) {
+      const y = (src.y + tgt.y) / 2
+      return [{ x: src.x, y }, { x: tgt.x, y }]
+    }
     const mid: Point[] = vertical
       ? [
           { x: src.x, y: (src.y + tgt.y) / 2 },
