@@ -43,12 +43,18 @@ function validate(payload: DiagramPayload): { ok: true } | { ok: false; error: s
 // Construye las columnas a partir del payload. title se rellena con fallback si
 // el agente devolvió null (decisión #2 de S9.1: la columna es NOT NULL y el
 // backend garantiza el valor, no la UI).
-function columns(payload: DiagramPayload) {
+//
+// `prompt` solo se incluye en el INSERT (withPrompt=true): es el prompt que
+// ORIGINA el diagrama y nunca debe editarse. Los PATCH posteriores (mover un
+// nodo, export, refinamiento) omiten la columna para preservar el valor
+// original; incluirla con `?? null` la machacaría y dejaría "Regenerar"
+// desactivado al recargar desde el historial.
+function columns(payload: DiagramPayload, withPrompt = true) {
   const d = payload.diagram!
   return {
     title: d.title?.trim() || TITLE_FALLBACK,
     diagram_type: d.diagram_type,
-    prompt: payload.prompt ?? null,
+    ...(withPrompt ? { prompt: payload.prompt ?? null } : {}),
     data: d,
     // El CHECK diagrams_messages_is_array exige un array: si no llega, log vacío.
     messages: Array.isArray(payload.messages) ? payload.messages : [],
@@ -65,7 +71,24 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
   const { data, error } = await supabase
     .from('diagrams')
     .select('id, title, diagram_type, created_at, updated_at')
+    .is('deleted_at', null)
     .order('updated_at', { ascending: false })
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  res.json(data)
+})
+
+// Papelera: los diagramas con borrado suave, ordenados por fecha de borrado.
+// Debe declararse antes que GET /:id o '/trash' casaría con el patrón /:id.
+router.get('/trash', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .select('id, title, diagram_type, created_at, updated_at, deleted_at')
+    .not('deleted_at', 'is', null)
+    .order('deleted_at', { ascending: false })
   if (error) {
     res.status(500).json({ error: error.message })
     return
@@ -125,7 +148,7 @@ router.patch('/:id', async (req: AuthedRequest, res: Response) => {
   const supabase = supabaseForUser(req.accessToken!)
   const { data, error } = await supabase
     .from('diagrams')
-    .update(columns(req.body))
+    .update(columns(req.body, false))
     .eq('id', req.params.id)
     .select('id, title, diagram_type, created_at, updated_at')
     .maybeSingle()
@@ -138,6 +161,87 @@ router.patch('/:id', async (req: AuthedRequest, res: Response) => {
     return
   }
   res.json(data)
+})
+
+// Restaurar: saca un diagrama de la papelera (deleted_at → null). El trigger de
+// updated_at lo refresca, así que vuelve arriba del historial al restaurar.
+router.post('/:id/restore', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .update({ deleted_at: null })
+    .eq('id', req.params.id)
+    .select('id')
+    .maybeSingle()
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  if (!data) {
+    res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  res.status(204).end()
+})
+
+// Borrado definitivo: DELETE físico de una fila ya en la papelera. La RLS impide
+// tocar una ajena (0 filas → 404).
+router.delete('/:id/permanent', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .delete()
+    .eq('id', req.params.id)
+    .select('id')
+    .maybeSingle()
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  if (!data) {
+    res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  res.status(204).end()
+})
+
+// Vaciar papelera: DELETE físico de todas las filas en papelera del usuario. El
+// filtro deleted_at not null evita borrar diagramas activos; la RLS lo acota al
+// usuario. Debe declararse antes que DELETE /:id ('/trash' casaría con /:id).
+router.delete('/trash', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { error } = await supabase
+    .from('diagrams')
+    .delete()
+    .not('deleted_at', 'is', null)
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  res.status(204).end()
+})
+
+// Borrado suave: mueve un diagrama a la papelera (deleted_at = now). La RLS
+// impide tocar uno ajeno; pedimos la fila de vuelta para distinguir "no existe /
+// no es tuyo" (0 filas → 404). El DELETE físico vive en /:id/permanent.
+router.delete('/:id', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagrams')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', req.params.id)
+    .is('deleted_at', null)
+    .select('id')
+    .maybeSingle()
+  if (error) {
+    res.status(500).json({ error: error.message })
+    return
+  }
+  if (!data) {
+    res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  res.status(204).end()
 })
 
 export default router

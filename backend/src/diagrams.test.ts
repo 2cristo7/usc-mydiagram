@@ -194,4 +194,12 @@ describe('PATCH /diagrams/:id (UPDATE)', () => {
     const res = await request(app).patch('/diagrams/abc').set(VALID).send({ diagram: { title: 'x' } })
     expect(res.status).toBe(400)
   })
+
+  it('el UPDATE nunca toca prompt: el original no se edita', async () => {
+    result = { data: { id: 'abc', title: 'Blog' }, error: null }
+    // Incluso si el cliente manda prompt en el PATCH, la columna se omite.
+    await request(app).patch('/diagrams/abc').set(VALID).send({ diagram: sampleDiagram, prompt: 'otro' })
+    const updated = calls.update[0][0] as Record<string, unknown>
+    expect('prompt' in updated).toBe(false)
+  })
 })
