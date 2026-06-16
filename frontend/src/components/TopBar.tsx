@@ -3,7 +3,6 @@ import { IconButton } from '../ui/primitives'
 import { useUiStore } from '../store/ui'
 import { DiagramTypeBar } from './DiagramTypeBar'
 import { ExportMenu } from './ExportMenu'
-import { AuthButton } from './AuthButton'
 
 interface TopBarProps {
   onRegenerate: () => void
@@ -25,7 +24,6 @@ export function TopBar({ onRegenerate }: TopBarProps) {
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <ExportMenu onRegenerate={onRegenerate} />
-        <AuthButton />
       </div>
     </div>
   )
