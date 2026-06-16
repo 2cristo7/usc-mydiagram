@@ -1,24 +1,27 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { DiagramSchema, NodeType } from '../../types'
 
-// Tamaños y espaciados del layout provisional síncrono
-const NODE_W = 160
-const NODE_H = 70
-const NODE_ROW_GAP = 20
-const GROUP_PADDING = 20
+// Tamaños y espaciados del layout provisional síncrono.
+// ArchIconNode: icono 72px + label ~40px → caja total 120×120px.
+// Se deja margen extra (NODE_ROW_GAP, GROUP_COL_GAP) para que las edge labels
+// no choquen con los nodos.
+const NODE_W = 120
+const NODE_H = 120
+const NODE_ROW_GAP = 40
+const GROUP_PADDING = 30
 const GROUP_HEADER_H = 36
-const GROUP_COL_GAP = 60
-const UNGROUPED_GAP = 40
+const GROUP_COL_GAP = 80
+const UNGROUPED_GAP = 60
 
 const ARCH_NODE_TYPE_MAP: Partial<Record<NodeType, string>> = {
-  person: 'c4',
-  system: 'c4',
-  container: 'c4',
-  component: 'c4',
-  gateway: 'architecture',
-  service: 'architecture',
-  database: 'architecture',
-  queue: 'architecture',
+  person: 'archIcon',
+  system: 'archIcon',
+  container: 'archIcon',
+  component: 'archIcon',
+  gateway: 'archIcon',
+  service: 'archIcon',
+  database: 'archIcon',
+  queue: 'archIcon',
 }
 
 function nodeRfType(nodeType: NodeType): string {

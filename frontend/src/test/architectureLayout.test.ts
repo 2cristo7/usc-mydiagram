@@ -191,24 +191,24 @@ describe('architectureLayoutSync', () => {
     expect(allAtOrigin).toBe(false)
   })
 
-  test('gateway mapea a type "architecture"', () => {
+  test('gateway mapea a type "archIcon"', () => {
     const d: DiagramSchema = {
       title: 't', diagram_type: 'architecture',
       nodes: [mkNode('gw', 'GW', 'gateway')],
       edges: [],
     }
     const { nodes } = architectureLayoutSync(d)
-    expect(nodes.find((n) => n.id === 'gw')!.type).toBe('architecture')
+    expect(nodes.find((n) => n.id === 'gw')!.type).toBe('archIcon')
   })
 
-  test('person mapea a type "c4"', () => {
+  test('person mapea a type "archIcon"', () => {
     const d: DiagramSchema = {
       title: 't', diagram_type: 'architecture',
       nodes: [mkNode('u', 'Usuario', 'person')],
       edges: [],
     }
     const { nodes } = architectureLayoutSync(d)
-    expect(nodes.find((n) => n.id === 'u')!.type).toBe('c4')
+    expect(nodes.find((n) => n.id === 'u')!.type).toBe('archIcon')
   })
 })
 
@@ -222,7 +222,7 @@ describe('DiagramToFlow bifurca a architectureLayoutSync para architecture', () 
       edges: [mkEdge('e1', 'gw', 'svc', 'REST', 'calls')],
     }
     const { nodes, edges } = DiagramToFlow(d)
-    expect(nodes.find((n) => n.id === 'gw')!.type).toBe('architecture')
+    expect(nodes.find((n) => n.id === 'gw')!.type).toBe('archIcon')
     expect(edges[0].type).toBe('default')
   })
 
