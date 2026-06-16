@@ -178,9 +178,9 @@ async function triggerPngExport(page: Page): Promise<Download> {
     const downloadPromise = page.waitForEvent('download', { timeout: 30_000 });
 
     // Abre el menú desplegable "Exportar".
-    // El trigger es el botón que contiene exactamente "Exportar" (sin "PNG" ni "JSON").
-    // Usamos :text() exacto para no coincidir con "Exportar PNG" u otros botones.
-    await page.locator('button', { hasText: 'Exportar' }).first().click();
+    // Tras el rediseño de la topbar el trigger es un botón icon-only sin texto;
+    // se localiza por su aria-label "Exportar diagrama".
+    await page.locator('button[aria-label="Exportar diagrama"]').click();
 
     // Los items del menú son <button> normales (no menuitem).
     // Espera a que el dropdown sea visible y haz click en "Exportar PNG".
@@ -218,7 +218,7 @@ test.describe('Export PNG — los 7 tipos de diagrama', () => {
         // En estado idle la app NO renderiza ReactFlow (sin diagrama). Esperamos
         // a que el botón "Exportar" esté visible: indica que React montó el TopBar
         // y la app está lista para recibir el diagrama inyectado.
-        await page.waitForSelector('button:has-text("Exportar")', { timeout: 20_000 });
+        await page.waitForSelector('button[aria-label="Exportar diagrama"]', { timeout: 20_000 });
     });
 
     for (const [diagramType, diagram] of Object.entries(DIAGRAMS) as [
@@ -249,7 +249,7 @@ test.describe('Export PNG — los 7 tipos de diagrama', () => {
 test.describe('Export PNG — validaciones específicas por tipo', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto('/');
-        await page.waitForSelector('button:has-text("Exportar")', { timeout: 20_000 });
+        await page.waitForSelector('button[aria-label="Exportar diagrama"]', { timeout: 20_000 });
     });
 
     test('sequence — el PNG es más alto que ancho (lifelines son verticales)', async ({ page }) => {
@@ -290,5 +290,54 @@ test.describe('Export PNG — validaciones específicas por tipo', () => {
         // Dagre coloca 3 tablas de un ERD en disposición horizontal
         // El ancho debería ser mayor que el alto
         expect(width, `erd PNG width (${width}) debería ser > height (${height})`).toBeGreaterThan(height * 0.5);
+    });
+
+    // ── Excepción para diagramas enormes ─────────────────────────────────────
+    // Un diagrama tan grande que a escala natural (1.0) superaría el tope de
+    // tamaño debe exportarse ESCALADO para caber ENTERO en la imagen, no
+    // recortado. MAX_IMAGE_DIM = 4096 (px de flujo) y PIXEL_RATIO = 2 ⇒ el lado
+    // mayor del PNG no puede superar 8192 px, y aun así debe contener todo.
+    test('diagrama enorme — se escala para caber entero, no se recorta', async ({ page }) => {
+        // Cadena larga de pasos (flowchart): dagre la apila en vertical y supera
+        // con holgura los 4096 px de alto, forzando la rama de escalado.
+        const N = 90;
+        const huge = {
+            title: 'Huge E2E',
+            diagram_type: 'flowchart' as const,
+            nodes: Array.from({ length: N }, (_, i) => ({
+                id: `n${i}`,
+                label: `Paso ${i} con texto algo largo para ensanchar`,
+                node_type: 'step',
+                attributes: [] as string[],
+            })),
+            edges: Array.from({ length: N - 1 }, (_, i) => ({
+                id: `e${i}`,
+                source: `n${i}`,
+                target: `n${i + 1}`,
+                label: '',
+                edge_type: 'flow',
+            })),
+        };
+
+        await injectDiagram(page, huge as unknown as (typeof DIAGRAMS)[keyof typeof DIAGRAMS]);
+
+        const download = await triggerPngExport(page);
+        const tmpPath = path.join('/tmp', `myd-e2e-huge-${Date.now()}.png`);
+        await download.saveAs(tmpPath);
+
+        const buf = fs.readFileSync(tmpPath);
+        expect(isPngBuffer(buf)).toBe(true);
+        expect(buf.length, 'PNG enorme demasiado pequeño (¿en blanco?)').toBeGreaterThan(1024);
+
+        const width = buf.readUInt32BE(16);
+        const height = buf.readUInt32BE(20);
+        console.log(`[e2e] huge PNG dimensions: ${width}x${height}`);
+
+        // El tope: ningún lado supera MAX_IMAGE_DIM (4096) * PIXEL_RATIO (2).
+        const MAX_PX = 4096 * 2;
+        expect(width, `width (${width}) > tope`).toBeLessThanOrEqual(MAX_PX);
+        expect(height, `height (${height}) > tope`).toBeLessThanOrEqual(MAX_PX);
+        // Y debe haber alcanzado el tope (el diagrama era realmente enorme).
+        expect(Math.max(width, height)).toBeGreaterThan(MAX_PX * 0.9);
     });
 });

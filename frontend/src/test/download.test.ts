@@ -1,5 +1,5 @@
 import { test, expect, describe, vi } from 'vitest';
-import { diagramFilename, getRenderedNodeBounds, getRenderedEdges } from '../ui/utils/download';
+import { diagramFilename, getRenderedNodeBounds, getRenderedEdges, unionRects } from '../ui/utils/download';
 
 // S8.3 — pieza pura del export (PNG y JSON comparten el nombre de fichero). El
 // render del PNG (canvas + html-to-image) no es testeable en jsdom —no rasteriza—,
@@ -77,20 +77,27 @@ function makeNode(x: number, y: number, w: number, h: number): HTMLElement {
     return el;
 }
 
-// Crea un path SVG que simula .react-flow__edge-path con d y stroke inline.
-// getComputedStyle en jsdom no procesa CSS en línea, así que se simula el
-// atributo de estilo directamente en el elemento (inline style).
-function makeEdgePath(d: string, stroke = '#b1b1b7', strokeWidth = '1'): SVGPathElement {
+// Crea la estructura DOM de una arista de React Flow —`<svg><g class="react-flow__edge">
+// <path/></g></svg>`— y la cuelga de `vp`. getRenderedEdges ya no mira una clase
+// concreta del path (es independiente del tipo de arista): recorre los `<path>`
+// dentro de cualquier `.react-flow__edge`. getComputedStyle en jsdom no procesa
+// CSS en línea pero sí la propiedad inline de style, así que se escribe directa.
+function appendEdge(
+    vp: HTMLElement,
+    d: string,
+    opts: { stroke?: string; strokeWidth?: string; dash?: string } = {},
+): SVGPathElement {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'react-flow__edge');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path') as SVGPathElement;
-    path.setAttribute('class', 'react-flow__edge-path');
-    path.setAttribute('d', d);
-    // jsdom no evalúa computed style desde atributos SVG presentacionales,
-    // pero sí lee la propiedad inline de style; escribimos directamente en
-    // el CSSStyleDeclaration para que getComputedStyle lo devuelva.
-    path.style.stroke = stroke;
-    path.style.strokeWidth = strokeWidth;
-    svg.appendChild(path);
+    if (d) path.setAttribute('d', d);
+    path.style.stroke = opts.stroke ?? '#b1b1b7';
+    path.style.strokeWidth = opts.strokeWidth ?? '1';
+    if (opts.dash) path.style.strokeDasharray = opts.dash;
+    g.appendChild(path);
+    svg.appendChild(g);
+    vp.appendChild(svg);
     return path;
 }
 
@@ -109,6 +116,20 @@ describe('getRenderedNodeBounds', () => {
         el.style.transform = 'translate3d(-50px, -20px, 0px)';
         vp.appendChild(el);
         expect(getRenderedNodeBounds(vp)).toEqual({ x: -50, y: -20, width: 100, height: 40 });
+    });
+
+    test('parsea coordenadas en notación científica (no excluye el nodo)', () => {
+        // React Flow emite a veces `translate(-330px, 4.04e-14px)` (un 0 con
+        // error de coma flotante). El regex debe casarlo; si no, el nodo del
+        // extremo quedaría fuera de los bounds y el PNG lo recortaría.
+        const vp = document.createElement('div');
+        const left = makeNode(0, 0, 88, 28);
+        left.style.transform = 'translate(-330px, 4.04133e-14px)';
+        vp.appendChild(left);
+        vp.appendChild(makeNode(-277, 0, 89, 28)); // antes era el "más a la izquierda"
+        // minX debe ser -330 (el nodo en notación científica), no -277.
+        const b = getRenderedNodeBounds(vp)!;
+        expect(b.x).toBe(-330);
     });
 
     test('devuelve null si no hay nodos', () => {
@@ -245,96 +266,106 @@ describe('getRenderedNodeBounds', () => {
     });
 });
 
+describe('unionRects', () => {
+    test('une dos rectángulos disjuntos', () => {
+        expect(
+            unionRects({ x: 0, y: 0, width: 100, height: 50 }, { x: 200, y: 100, width: 80, height: 40 }),
+        ).toEqual({ x: 0, y: 0, width: 280, height: 140 });
+    });
+
+    test('rectángulo de aristas que sobresale por la izquierda y abajo amplía los bounds', () => {
+        // Nodos en [0,0..200,200]; una arista se curva a x=-60 y baja a y=260.
+        const nodes = { x: 0, y: 0, width: 200, height: 200 };
+        const edges = { x: -60, y: 50, width: 100, height: 210 }; // llega a x=40, y=260
+        expect(unionRects(nodes, edges)).toEqual({ x: -60, y: 0, width: 260, height: 260 });
+    });
+
+    test('un rectángulo contenido en el otro no cambia los bounds', () => {
+        const outer = { x: 0, y: 0, width: 300, height: 300 };
+        expect(unionRects(outer, { x: 50, y: 50, width: 100, height: 100 })).toEqual(outer);
+    });
+
+    test('null en cualquier lado devuelve el otro; ambos null → null', () => {
+        const r = { x: 1, y: 2, width: 3, height: 4 };
+        expect(unionRects(r, null)).toEqual(r);
+        expect(unionRects(null, r)).toEqual(r);
+        expect(unionRects(null, null)).toBeNull();
+    });
+});
+
 describe('getRenderedEdges', () => {
     test('devuelve array vacío si no hay paths', () => {
         const vp = document.createElement('div');
         expect(getRenderedEdges(vp)).toEqual([]);
     });
 
-    test('extrae un edge con d, stroke y strokeWidth', () => {
+    test('extrae un edge con d, stroke, strokeWidth y dash vacío', () => {
         const vp = document.createElement('div');
-        const path = makeEdgePath('M 0 0 L 100 100', '#ff0000', '2');
-        vp.appendChild(path.parentElement!);
+        appendEdge(vp, 'M 0 0 L 100 100', { stroke: '#ff0000', strokeWidth: '2' });
         const edges = getRenderedEdges(vp);
         expect(edges).toHaveLength(1);
         expect(edges[0].d).toBe('M 0 0 L 100 100');
         expect(edges[0].stroke).toBe('rgb(255, 0, 0)');
         expect(edges[0].strokeWidth).toBe(2);
+        expect(edges[0].dash).toEqual([]);
     });
 
-    test('usa fallback #b1b1b7 cuando getComputedStyle devuelve "none" (mock)', () => {
-        // jsdom normaliza stroke:none a rgba(0,0,0,0) en computed style, que no
-        // activa el fallback. Para verificar la lógica del fallback mockeamos
-        // getComputedStyle para devolver exactamente 'none', que es lo que hace
-        // un navegador real ante un path SVG sin stroke explícito en algunas
-        // situaciones, o ante stroke="none" en el atributo de presentación.
+    test('parsea el patrón de guiones (strokeDasharray)', () => {
+        const vp = document.createElement('div');
+        appendEdge(vp, 'M 0 0 L 100 0', { stroke: '#000', dash: '8 4' });
+        const edges = getRenderedEdges(vp);
+        expect(edges).toHaveLength(1);
+        expect(edges[0].dash).toEqual([8, 4]);
+    });
+
+    test('descarta los paths de trazo invisible (área de click transparente)', () => {
+        // Cada arista de React Flow añade un path ancho y transparente para
+        // facilitar el click. Tiene `d` válido pero no pinta nada: no debe salir.
         const vp = document.createElement('div');
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path') as SVGPathElement;
-        path.setAttribute('class', 'react-flow__edge-path');
-        path.setAttribute('d', 'M 10 20 L 30 40');
-        svg.appendChild(path);
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('class', 'react-flow__edge');
+        const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path') as SVGPathElement;
+        hit.setAttribute('d', 'M 0 0 L 100 0');
+        hit.style.stroke = 'transparent';
+        hit.style.strokeWidth = '20';
+        const visible = document.createElementNS('http://www.w3.org/2000/svg', 'path') as SVGPathElement;
+        visible.setAttribute('d', 'M 0 0 L 100 0');
+        visible.style.stroke = '#111111';
+        visible.style.strokeWidth = '2';
+        g.append(hit, visible);
+        svg.appendChild(g);
         vp.appendChild(svg);
+        const edges = getRenderedEdges(vp);
+        expect(edges).toHaveLength(1); // solo el visible
+        expect(edges[0].stroke).toBe('rgb(17, 17, 17)');
+    });
 
+    test('descarta stroke "none" (mock de getComputedStyle)', () => {
+        const vp = document.createElement('div');
+        const path = appendEdge(vp, 'M 10 20 L 30 40');
         const origGetComputedStyle = window.getComputedStyle;
         vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) => {
             const cs = origGetComputedStyle(el, pseudo);
-            if (el === path) {
-                return { ...cs, stroke: 'none', strokeWidth: '' } as CSSStyleDeclaration;
-            }
+            if (el === path) return { ...cs, stroke: 'none', strokeWidth: '', strokeDasharray: 'none' } as CSSStyleDeclaration;
             return cs;
         });
-
-        const edges = getRenderedEdges(vp);
-        expect(edges).toHaveLength(1);
-        expect(edges[0].stroke).toBe('#b1b1b7');
-        expect(edges[0].strokeWidth).toBe(1); // fallback para strokeWidth vacío
-
+        expect(getRenderedEdges(vp)).toEqual([]);
         vi.restoreAllMocks();
-    });
-
-    test('stroke no asignado en jsdom devuelve el valor computado de jsdom (rgba transparente)', () => {
-        // Nota: En jsdom, getComputedStyle de un SVGPathElement sin stroke asignado
-        // devuelve 'rgba(0, 0, 0, 0)' (negro transparente), que es truthy y distinto
-        // de 'none', por lo que getRenderedEdges devuelve ese valor directamente.
-        // En un navegador real con stroke:none devolvería 'none' → fallback #b1b1b7.
-        // Este test documenta el comportamiento de jsdom para evitar regresiones.
-        const vp = document.createElement('div');
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path') as SVGPathElement;
-        path.setAttribute('class', 'react-flow__edge-path');
-        path.setAttribute('d', 'M 10 20 L 30 40');
-        svg.appendChild(path);
-        vp.appendChild(svg);
-        const edges = getRenderedEdges(vp);
-        expect(edges).toHaveLength(1);
-        // El stroke devuelto es el valor computado de jsdom (rgba transparente), no ''
-        expect(edges[0].stroke).not.toBe('');
-        expect(edges[0].strokeWidth).toBe(1); // fallback porque strokeWidth computado es ''
     });
 
     test('filtra paths sin atributo d (d vacío)', () => {
         const vp = document.createElement('div');
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path') as SVGPathElement;
-        path.setAttribute('class', 'react-flow__edge-path');
-        // Sin atributo d: debe filtrarse
-        svg.appendChild(path);
-        vp.appendChild(svg);
+        appendEdge(vp, '', { stroke: '#111' });
         expect(getRenderedEdges(vp)).toEqual([]);
     });
 
-    // ── Aristas por tipo de diagrama ──────────────────────────────────────────
+    // ── Aristas por tipo de diagrama (selector general .react-flow__edge path) ──
 
     test('erd — 2 aristas (one_to_many, many_to_many) se extraen correctamente', () => {
         const vp = document.createElement('div');
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        const p1 = makeEdgePath('M 180 60 C 220 60, 250 60, 250 60', '#555555', '1.5');
-        const p2 = makeEdgePath('M 430 60 C 470 60, 500 60, 500 60', '#555555', '1.5');
-        svg.appendChild(p1.parentElement!.firstChild as Node);
-        svg.appendChild(p2.parentElement!.firstChild as Node);
-        vp.appendChild(p1.parentElement!);
-        vp.appendChild(p2.parentElement!);
+        appendEdge(vp, 'M 180 60 C 220 60, 250 60, 250 60', { stroke: '#555555', strokeWidth: '1.5' });
+        appendEdge(vp, 'M 430 60 C 470 60, 500 60, 500 60', { stroke: '#555555', strokeWidth: '1.5' });
         const edges = getRenderedEdges(vp);
         expect(edges).toHaveLength(2);
         expect(edges[0].d).toContain('M 180');
@@ -343,48 +374,28 @@ describe('getRenderedEdges', () => {
 
     test('sequence — múltiples mensajes (aristas secuencia) extraídos', () => {
         const vp = document.createElement('div');
-        const paths = [
-            'M 139 150 L 389 150',
-            'M 389 200 L 139 200',
-            'M 139 260 L 389 260',
-        ];
-        for (const d of paths) {
-            const p = makeEdgePath(d, '#333333', '1');
-            vp.appendChild(p.parentElement!);
-        }
+        const paths = ['M 139 150 L 389 150', 'M 389 200 L 139 200', 'M 139 260 L 389 260'];
+        for (const d of paths) appendEdge(vp, d, { stroke: '#333333' });
         const edges = getRenderedEdges(vp);
         expect(edges).toHaveLength(3);
-        edges.forEach((e, i) => {
-            expect(e.d).toBe(paths[i]);
-        });
+        edges.forEach((e, i) => expect(e.d).toBe(paths[i]));
     });
 
     test('state_machine — transitions con strokeWidth personalizado', () => {
         const vp = document.createElement('div');
-        const p = makeEdgePath('M 120 30 C 200 30, 200 30, 200 30', '#7c3aed', '2.5');
-        vp.appendChild(p.parentElement!);
-        const edges = getRenderedEdges(vp);
-        expect(edges[0].strokeWidth).toBe(2.5);
+        appendEdge(vp, 'M 120 30 C 200 30, 200 30, 200 30', { stroke: '#7c3aed', strokeWidth: '2.5' });
+        expect(getRenderedEdges(vp)[0].strokeWidth).toBe(2.5);
     });
 
     test('architecture — depends_on edges con colores distintos', () => {
         const vp = document.createElement('div');
-        const colors = ['#0ea5e9', '#10b981', '#f59e0b'];
-        for (const c of colors) {
-            const p = makeEdgePath(`M 0 0 L 100 0`, c, '1');
-            vp.appendChild(p.parentElement!);
-        }
-        const edges = getRenderedEdges(vp);
-        expect(edges).toHaveLength(3);
+        for (const c of ['#0ea5e9', '#10b981', '#f59e0b']) appendEdge(vp, 'M 0 0 L 100 0', { stroke: c });
+        expect(getRenderedEdges(vp)).toHaveLength(3);
     });
 
     test('mindmap — 4 aristas de rama (flow) se extraen todas', () => {
         const vp = document.createElement('div');
-        for (let i = 0; i < 4; i++) {
-            const p = makeEdgePath(`M ${280 + i * 10} 230 L ${i * 100} 210`, '#b1b1b7', '1');
-            vp.appendChild(p.parentElement!);
-        }
-        const edges = getRenderedEdges(vp);
-        expect(edges).toHaveLength(4);
+        for (let i = 0; i < 4; i++) appendEdge(vp, `M ${280 + i * 10} 230 L ${i * 100} 210`, { stroke: '#b1b1b7' });
+        expect(getRenderedEdges(vp)).toHaveLength(4);
     });
 });

@@ -28,7 +28,14 @@ export interface Rect {
     height: number;
 }
 
-const TRANSLATE_RE = /translate(?:3d)?\(\s*([-\d.]+)px,\s*([-\d.]+)px/;
+// Captura las dos primeras coordenadas de `translate(...)` / `translate3d(...)`.
+// El número admite signo, decimales y NOTACIÓN CIENTÍFICA: React Flow emite a
+// veces valores como `translate(-330px, 4.04e-14px)` (un 0 con error de coma
+// flotante). Un `[-\d.]+` ingenuo NO casa el `e-14`, falla el match entero y el
+// nodo queda fuera de los bounds → el PNG lo recorta (era el bug del nodo del
+// extremo recortado). El patrón de float completo lo evita.
+const FLOAT = String.raw`[-+]?[\d.]+(?:e[-+]?\d+)?`;
+const TRANSLATE_RE = new RegExp(`translate(?:3d)?\\(\\s*(${FLOAT})px,\\s*(${FLOAT})px`, 'i');
 
 /**
  * Calcula el rectángulo que envuelve TODOS los nodos a partir del DOM ya
@@ -61,34 +68,118 @@ export function getRenderedNodeBounds(viewportEl: HTMLElement): Rect | null {
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+/**
+ * Une dos rectángulos (cualquiera de los dos puede ser `null`). Si ambos son
+ * `null`, devuelve `null`. Pieza pura, testeable sin DOM.
+ */
+export function unionRects(a: Rect | null, b: Rect | null): Rect | null {
+    if (!a) return b;
+    if (!b) return a;
+    const minX = Math.min(a.x, b.x);
+    const minY = Math.min(a.y, b.y);
+    const maxX = Math.max(a.x + a.width, b.x + b.width);
+    const maxY = Math.max(a.y + a.height, b.y + b.height);
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * Bounds de las aristas renderizadas, en coordenadas de flujo, a partir del
+ * `getBBox()` de cada `<path>` de arista.
+ *
+ * Por qué hace falta: las aristas de este proyecto se curvan (mindmap) o se
+ * enrutan a los HANDLES laterales de los nodos (p. ej. las relaciones de un ERD
+ * con las tablas apiladas en vertical), saliéndose del rectángulo que cubren los
+ * nodos. Si el encuadre del PNG solo mira los nodos (`getRenderedNodeBounds`),
+ * esas aristas caen fuera del recorte y desaparecen de la imagen. Uniendo estos
+ * bounds con los de los nodos, el encuadre cubre el diagrama ENTERO.
+ *
+ * `getBBox()` devuelve la caja del path en el sistema de coordenadas de su
+ * `<svg>`, que en React Flow está en el origen del viewport sin `viewBox` → son
+ * coordenadas de flujo, las mismas que el `translate` de los nodos. Se filtran
+ * los paths de área de click (transparentes, anchos) por tener bbox válida pero
+ * no aportar nada distinto al trazo visible (su bbox coincide con la del visible).
+ *
+ * Nota: `getBBox` no existe en jsdom (solo navegador), así que esta función no se
+ * cubre en los tests unitarios; sí lo está `unionRects`, la parte pura.
+ */
+export function getRenderedEdgeBounds(viewportEl: HTMLElement): Rect | null {
+    const paths = viewportEl.querySelectorAll<SVGPathElement>('.react-flow__edge path');
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    paths.forEach((p) => {
+        let box: DOMRect;
+        try {
+            box = p.getBBox();
+        } catch {
+            return; // jsdom u otros entornos sin layout SVG
+        }
+        if (box.width === 0 && box.height === 0) return;
+        minX = Math.min(minX, box.x);
+        minY = Math.min(minY, box.y);
+        maxX = Math.max(maxX, box.x + box.width);
+        maxY = Math.max(maxY, box.y + box.height);
+    });
+    if (!isFinite(minX)) return null;
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 export interface EdgeStroke {
     /** Comando `d` del path, en coordenadas de flujo. */
     d: string;
     stroke: string;
     strokeWidth: number;
+    /** Patrón de guiones (`dashed`/`dotted`), ya parseado a números; `[]` si es continuo. */
+    dash: number[];
 }
 
 /**
- * Lee las aristas renderizadas del DOM: el `d` de cada `.react-flow__edge-path`
- * (en coordenadas de flujo, porque su <svg> está en el origen del viewport sin
- * viewBox) y su trazo computado.
+ * ¿El trazo computado es visible? Descarta `none` y cualquier color totalmente
+ * transparente (`rgba(...,0)` / `transparent`). Así se filtran los paths de
+ * ÁREA DE CLICK que cada arista añade (un trazo ancho y transparente para
+ * facilitar la selección): tienen `d` válido pero no pintan nada, y dibujarlos
+ * en el canvas sería ruido.
+ */
+function isVisibleStroke(stroke: string): boolean {
+    if (!stroke || stroke === 'none' || stroke === 'transparent') return false;
+    // Solo `rgba(...)` lleva alpha (4º componente). Ojo: NO usar el "último número
+    // antes de )" como alpha, porque en `rgb(255, 0, 0)` ese sería el azul (0) y
+    // descartaría el rojo por error. `rgb(...)` (3 componentes) es siempre opaco.
+    const m = stroke.match(/rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)/);
+    if (m && parseFloat(m[1]) === 0) return false;
+    return true;
+}
+
+/**
+ * Lee las aristas renderizadas del DOM para dibujarlas NATIVAMENTE en el canvas:
+ * Safari no rasteriza el <svg> anidado en el <foreignObject> de html-to-image,
+ * así que las aristas (svg) desaparecerían aunque los nodos (HTML) salgan. Un
+ * path nativo en canvas no pasa por foreignObject y se pinta en cualquier
+ * navegador.
  *
- * Se extraen para dibujarlas NATIVAMENTE en un canvas: Safari no rasteriza el
- * <svg> anidado dentro del <foreignObject> que usa html-to-image, así que las
- * aristas (svg) desaparecen aunque los nodos (HTML) sí salgan. Un path nativo en
- * canvas no pasa por foreignObject y se pinta en cualquier navegador.
+ * Forma GENERAL e independiente del tipo de arista: en lugar de mirar una clase
+ * concreta (`.react-flow__edge-path`, que NINGÚN edge custom de este proyecto
+ * usa —EditableEdge, ArchitectureEdge, MindmapBranchEdge, SequenceMessageEdge—,
+ * dejando el fallback muerto), recorre TODOS los `<path>` dentro de cualquier
+ * `.react-flow__edge` y se queda con los de trazo visible. Cualquier tipo de
+ * arista nuevo que se añada en el futuro queda cubierto sin tocar esto. El `d`
+ * está en coordenadas de flujo (el <svg> de aristas vive en el origen del
+ * viewport sin viewBox), las mismas que el resto del export.
  */
 export function getRenderedEdges(viewportEl: HTMLElement): EdgeStroke[] {
-    return Array.from(viewportEl.querySelectorAll<SVGPathElement>('.react-flow__edge-path'))
+    return Array.from(viewportEl.querySelectorAll<SVGPathElement>('.react-flow__edge path'))
         .map((path) => {
             const cs = getComputedStyle(path);
+            const dasharray = cs.strokeDasharray;
             return {
                 d: path.getAttribute('d') ?? '',
-                stroke: cs.stroke && cs.stroke !== 'none' ? cs.stroke : '#b1b1b7',
+                stroke: cs.stroke,
                 strokeWidth: parseFloat(cs.strokeWidth) || 1,
+                dash:
+                    dasharray && dasharray !== 'none'
+                        ? dasharray.split(/[\s,]+/).map(parseFloat).filter((n) => !isNaN(n))
+                        : [],
             };
         })
-        .filter((e) => e.d);
+        .filter((e) => e.d && isVisibleStroke(e.stroke));
 }
 
 /** Carga un data/object URL como `HTMLImageElement` ya decodificado. */
