@@ -12,9 +12,38 @@ import {
   useReactFlow,
   ConnectionMode,
 } from '@xyflow/react'
-import { FileQuestion, AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Trash2 } from 'lucide-react'
+
+function DiagramQuestionIcon({ size = 48, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* nodo superior */}
+      <rect x="2" y="3" width="7" height="5" rx="1" />
+      {/* nodo inferior */}
+      <rect x="2" y="16" width="7" height="5" rx="1" />
+      {/* conector del diagrama */}
+      <path d="M5.5 8v8" />
+      {/* interrogación */}
+      <path d="M14 10.5a2.5 2.5 0 1 1 3.6 2.24c-.9.45-1.6 1.1-1.6 2.26" />
+      <path d="M16 18.5h.01" />
+    </svg>
+  )
+}
 import { useStore } from '../store/index'
 import { useUiStore } from '../store/ui'
+import { useHistoryStore } from '../store/history'
+import { getDiagram, restoreDiagram } from '../lib/api'
 import { DiagramToFlow } from '../ui/utils/diagramToFlow'
 import { stagingNodePositions, stagingEdges } from '../ui/utils/stagingLayout'
 
@@ -88,6 +117,7 @@ export function DiagramCanvas() {
   const { currentDiagram, addNode, updateNodePosition } = useStore()
   const uiState = useStore((s) => s.uiState)
   const generationPhase = useStore((s) => s.generationPhase)
+  const trashedDiagram = useStore((s) => s.trashedDiagram)
   const streamingNodes = useStore((s) => s.nodes)
   const streamingEdges = useStore((s) => s.edges)
   const addEdge = useStore((s) => s.addEdge)
@@ -191,6 +221,28 @@ export function DiagramCanvas() {
       data: { shape, strokeStyle, sourceArrow, targetArrow },
     } as DiagramEdge)
   }, [addEdge])
+
+  // Restaurar el diagrama que quedó "en la papelera" al borrarlo abierto: lo saca
+  // de la papelera en BD y lo recarga al canvas. setCurrentDiagram limpia el aviso.
+  const restoreTrashed = useCallback(async () => {
+    const info = useStore.getState().trashedDiagram
+    if (!info) return
+    try {
+      await restoreDiagram(info.id)
+      const row = await getDiagram(info.id)
+      const s = useStore.getState()
+      s.setCurrentDiagram(row.data)
+      s.setCurrentDiagramId(row.id)
+      s.setLastGenerationPrompt(row.prompt ?? null)
+      s.setMessages(
+        (row.messages ?? []).map((m) => ({ ...m, timestamp: new Date(m.timestamp) })),
+      )
+      useHistoryStore.getState().reset()
+      s.setUiState('ready')
+    } catch (e) {
+      console.error('[DiagramCanvas] error restaurando diagrama de la papelera:', e)
+    }
+  }, [])
 
   // ── Estado controlado del canvas interactivo ───────────────────────────────
   // React Flow v12 exige nodos/aristas controlados (con onNodesChange) para que
@@ -359,6 +411,21 @@ export function DiagramCanvas() {
   // interactivo completo (drag, drop, propiedades).
 
   if (!currentDiagram) {
+    if (trashedDiagram) {
+      return (
+        <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
+          <button
+            onClick={restoreTrashed}
+            className="max-w-sm border-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-brutal)] text-center hover:bg-[var(--color-accent)]/10 active:translate-x-[2px] active:translate-y-[2px]"
+          >
+            <Trash2 size={32} className="mx-auto mb-2 text-[var(--color-ink)]/60" />
+            <p className="text-sm font-semibold text-[var(--color-ink)]">
+              Diagrama en la papelera, clica aquí para restaurarlo
+            </p>
+          </button>
+        </div>
+      )
+    }
     if (uiState === 'generating') {
       return (
         <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
@@ -389,7 +456,7 @@ export function DiagramCanvas() {
     return (
       <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
         <div className="flex flex-col items-center gap-3 text-center">
-          <FileQuestion size={48} className="text-[var(--color-ink)]/30" />
+          <DiagramQuestionIcon size={48} className="text-[var(--color-ink)]/30" />
           <p className="text-sm font-semibold text-[var(--color-ink)]/60">
             Describe un diagrama en el chat para empezar
           </p>
