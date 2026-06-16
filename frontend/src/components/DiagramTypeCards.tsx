@@ -41,7 +41,7 @@ export function DiagramTypeCards() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       {/* Desvanecido + flecha izquierda (siempre montados; se animan con `visible`) */}
       <EdgeFade side="left" visible={canLeft} />
       <Arrow side="left" visible={canLeft} onClick={() => scrollByCards(-1)} />
@@ -49,7 +49,7 @@ export function DiagramTypeCards() {
       <div
         ref={scrollRef}
         onScroll={updateArrows}
-        className="no-scrollbar flex gap-2 overflow-x-auto scroll-smooth py-1"
+        className="no-scrollbar flex h-full items-center gap-2 overflow-x-auto scroll-smooth"
       >
         {options.map((opt) => {
           const key = opt.value ?? 'auto'
@@ -61,7 +61,7 @@ export function DiagramTypeCards() {
               aria-pressed={isSelected}
               title={opt.label}
               className={`
-                group relative h-14 w-[136px] shrink-0 overflow-hidden
+                group relative h-12 w-[136px] shrink-0 overflow-hidden
                 border-[3px] border-[var(--color-ink)] rounded-[var(--radius)]
                 transition-all duration-100 cursor-pointer select-none
                 ${
@@ -133,7 +133,7 @@ function Arrow({ side, visible, onClick }: { side: 'left' | 'right'; visible: bo
       aria-label={isLeft ? 'Desplazar a la izquierda' : 'Desplazar a la derecha'}
       className={`
         absolute top-1/2 z-20 -translate-y-1/2 ${isLeft ? 'left-0.5' : 'right-0.5'}
-        flex h-8 w-8 items-center justify-center
+        flex h-9 w-9 items-center justify-center
         border-[3px] border-[var(--color-ink)] rounded-full bg-[var(--color-surface)]
         shadow-[var(--shadow-brutal)] cursor-pointer
         transition-[opacity,transform] duration-200
