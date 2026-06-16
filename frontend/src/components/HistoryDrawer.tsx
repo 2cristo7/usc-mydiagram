@@ -107,10 +107,15 @@ export function HistoryDrawer() {
                     onClick={() => loadDiagram(item.id)}
                     className="w-full text-left px-4 py-3 border-b border-[var(--color-ink)]/20 hover:bg-[var(--color-accent)]/10 active:bg-[var(--color-accent)]/20"
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="flex-1 truncate text-sm font-semibold text-[var(--color-ink)]">
-                        {item.title}
-                      </span>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <span className="block text-sm font-semibold text-[var(--color-ink)] break-words">
+                          {item.title}
+                        </span>
+                        <span className="mt-1 block text-xs text-[var(--color-ink)]/50">
+                          {new Date(item.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
                       <Badge
                         color={BADGE_COLORS[item.diagram_type] ?? 'var(--color-accent)'}
                         className="shrink-0 text-white"
@@ -118,9 +123,6 @@ export function HistoryDrawer() {
                         {item.diagram_type}
                       </Badge>
                     </div>
-                    <span className="text-xs text-[var(--color-ink)]/50">
-                      {new Date(item.created_at).toLocaleDateString()}
-                    </span>
                   </button>
                 ))}
             </div>
