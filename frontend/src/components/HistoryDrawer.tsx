@@ -33,6 +33,8 @@ export function HistoryDrawer() {
   const { drawerOpen, setDrawerOpen } = useUiStore()
   const user = useAuthStore((s) => s.user)
   const { setCurrentDiagram, setCurrentDiagramId, setLastGenerationPrompt, setUiState, setMessages } = useStore()
+  const markCurrentTrashed = useStore((s) => s.markCurrentTrashed)
+  const newDiagram = useStore((s) => s.newDiagram)
   const currentDiagramId = useStore((s) => s.currentDiagramId)
 
   const [items, setItems] = useState<DiagramMeta[]>([])
@@ -127,9 +129,13 @@ export function HistoryDrawer() {
     setItems((list) => list.filter((it) => it.id !== id))
     try {
       await deleteDiagram(id)
-      // Si borramos el diagrama abierto, limpiamos su id cacheado para que el
-      // próximo guardado sea un INSERT y no un PATCH a una fila inexistente.
-      if (currentDiagramId === id) setCurrentDiagramId(null)
+      // Si borramos el diagrama ABIERTO, lo quitamos del canvas y dejamos el aviso
+      // "en la papelera, clica para restaurar" (markCurrentTrashed además limpia el
+      // id cacheado, así que un guardado posterior sería un INSERT, no un PATCH a
+      // una fila ya borrada).
+      if (currentDiagramId === id) {
+        markCurrentTrashed({ id, title: victim?.title ?? 'Diagrama' })
+      }
       if (victim) {
         setTrashItems((list) => [
           { ...victim, deleted_at: new Date().toISOString() },
@@ -149,7 +155,13 @@ export function HistoryDrawer() {
     setTrashItems((list) => list.filter((it) => it.id !== id))
     try {
       await restoreDiagram(id)
-      if (victim) setItems((list) => [{ ...victim, deleted_at: null }, ...list])
+      // Si el restaurado es el que estaba en el limbo "en la papelera", lo cargamos
+      // de vuelta al canvas (loadDiagram limpia el aviso vía setCurrentDiagram).
+      if (useStore.getState().trashedDiagram?.id === id) {
+        await loadDiagram(id)
+      } else if (victim) {
+        setItems((list) => [{ ...victim, deleted_at: null }, ...list])
+      }
     } catch (e) {
       console.error('[HistoryDrawer] error restaurando diagrama:', e)
       setTrashItems(prev)
@@ -162,6 +174,9 @@ export function HistoryDrawer() {
     setTrashItems((list) => list.filter((it) => it.id !== id))
     try {
       await deleteDiagramPermanent(id)
+      // Si el borrado en firme es el que estaba en el limbo, se acabó la opción de
+      // restaurar: arrancamos un diagrama nuevo en blanco.
+      if (useStore.getState().trashedDiagram?.id === id) newDiagram()
     } catch (e) {
       console.error('[HistoryDrawer] error borrando definitivamente:', e)
       setTrashItems(prev)
@@ -174,6 +189,9 @@ export function HistoryDrawer() {
     setTrashItems([])
     try {
       await emptyTrash()
+      // El diagrama en el limbo vivía en la papelera: al vaciarla desaparece, así
+      // que no hay nada que restaurar → diagrama nuevo en blanco.
+      if (useStore.getState().trashedDiagram) newDiagram()
     } catch (e) {
       console.error('[HistoryDrawer] error vaciando papelera:', e)
       setTrashItems(prev)
@@ -311,7 +329,7 @@ export function HistoryDrawer() {
                           {item.title}
                         </span>
                         <span className="mt-1 block text-xs text-[var(--color-ink)]/50">
-                          {new Date(item.created_at).toLocaleDateString()}
+                          {new Date(item.updated_at).toLocaleDateString()}
                         </span>
                       </div>
                       <Badge
