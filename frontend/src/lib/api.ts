@@ -16,6 +16,8 @@ export interface DiagramMeta {
   diagram_type: string
   created_at: string
   updated_at: string
+  // Solo presente en las filas de la papelera (GET /diagrams/trash).
+  deleted_at?: string | null
 }
 
 // Mensaje tal como vuelve de la BD: el timestamp viaja serializado (string ISO),
@@ -100,4 +102,45 @@ export async function getDiagram(id: string): Promise<DiagramRow> {
   const res = await fetch(`${API_URL}/diagrams/${id}`, { headers })
   if (!res.ok) throw new Error(`No se pudo cargar el diagrama (HTTP ${res.status})`)
   return res.json()
+}
+
+// Borrado suave: mueve el diagrama a la papelera.
+export async function deleteDiagram(id: string): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/diagrams/${id}`, { method: 'DELETE', headers })
+  if (!res.ok) throw new Error(`No se pudo eliminar el diagrama (HTTP ${res.status})`)
+}
+
+// Diagramas en la papelera (borrado suave), más recientes primero.
+export async function listTrash(): Promise<DiagramMeta[]> {
+  const headers = authHeaders()
+  if (!headers) return []
+  const res = await fetch(`${API_URL}/diagrams/trash`, { headers })
+  if (!res.ok) throw new Error(`No se pudo cargar la papelera (HTTP ${res.status})`)
+  return res.json()
+}
+
+// Saca un diagrama de la papelera y lo devuelve al historial.
+export async function restoreDiagram(id: string): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/diagrams/${id}/restore`, { method: 'POST', headers })
+  if (!res.ok) throw new Error(`No se pudo restaurar el diagrama (HTTP ${res.status})`)
+}
+
+// Borrado definitivo (físico) de un diagrama ya en la papelera.
+export async function deleteDiagramPermanent(id: string): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/diagrams/${id}/permanent`, { method: 'DELETE', headers })
+  if (!res.ok) throw new Error(`No se pudo eliminar definitivamente (HTTP ${res.status})`)
+}
+
+// Vacía la papelera: borrado físico de todos los diagramas en ella.
+export async function emptyTrash(): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/diagrams/trash`, { method: 'DELETE', headers })
+  if (!res.ok) throw new Error(`No se pudo vaciar la papelera (HTTP ${res.status})`)
 }
