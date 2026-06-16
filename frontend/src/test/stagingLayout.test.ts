@@ -68,9 +68,9 @@ describe('stagingNodePositions', () => {
         expect(result[0].type).toBe('table')
     })
 
-    test('nodo de tipo class → tipo React Flow umlClass', () => {
-        const result = stagingNodePositions([makeNode('x', 'X', 'class')])
-        expect(result[0].type).toBe('umlClass')
+    test('nodo de tipo use_case → tipo React Flow useCase', () => {
+        const result = stagingNodePositions([makeNode('x', 'X', 'use_case')])
+        expect(result[0].type).toBe('useCase')
     })
 
     test('nodo de tipo actor → tipo React Flow sequenceActor', () => {
@@ -78,9 +78,9 @@ describe('stagingNodePositions', () => {
         expect(result[0].type).toBe('sequenceActor')
     })
 
-    test('nodo de tipo state → tipo React Flow state', () => {
-        const result = stagingNodePositions([makeNode('x', 'X', 'state')])
-        expect(result[0].type).toBe('state')
+    test('nodo de tipo system → tipo React Flow archIcon', () => {
+        const result = stagingNodePositions([makeNode('x', 'X', 'system')])
+        expect(result[0].type).toBe('archIcon')
     })
 })
 

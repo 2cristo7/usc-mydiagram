@@ -20,9 +20,6 @@ export const DIAGRAM_NODE_TYPES: Record<DiagramType, NodeTypeInfo[]> = {
   erd: [
     { type: 'table', label: 'Tabla', symbol: '▦' },
   ],
-  uml_class: [
-    { type: 'class', label: 'Clase', symbol: '⬡' },
-  ],
   sequence: [
     { type: 'actor', label: 'Actor', symbol: '◎' },
   ],
@@ -41,12 +38,13 @@ export const DIAGRAM_NODE_TYPES: Record<DiagramType, NodeTypeInfo[]> = {
     { type: 'container', label: 'Contenedor',  symbol: '▢' },
     { type: 'component', label: 'Componente',  symbol: '◧' },
   ],
-  state_machine: [
-    { type: 'state',      label: 'Estado',    symbol: '◯' },
-    { type: 'terminator', label: 'Inicio/Fin', symbol: '⬤' },
-  ],
   mindmap: [
     { type: 'topic', label: 'Tema', symbol: '●' },
+  ],
+  use_case: [
+    { type: 'actor',    label: 'Actor',          symbol: '◯' },
+    { type: 'use_case', label: 'Caso de uso',    symbol: '⬭' },
+    { type: 'system',   label: 'Subsistema',     symbol: '▭' },
   ],
 };
 

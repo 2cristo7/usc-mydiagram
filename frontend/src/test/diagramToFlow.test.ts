@@ -1,3 +1,8 @@
+/**
+ * Tests básicos del pipeline DiagramSchema → React Flow.
+ * Actualizado en S10.3: tipos eliminados (uml_class, state_machine, class, state)
+ * sustituidos por use_case y tipos vigentes del nuevo contrato.
+ */
 import { expect, test, vi } from 'vitest'
 import type { DiagramType, NodeType, EdgeType } from '../types'
 import type { DiagramSchema } from '../types'
@@ -13,7 +18,7 @@ test('DiagramToFlow basic conversion', () => {
         title: 'Test Diagram',
         diagram_type: 'erd' as DiagramType,
         nodes: [
-            { id: '1', label: 'Node 1', node_type: 'class' as NodeType, attributes: [] },
+            { id: '1', label: 'Node 1', node_type: 'table' as NodeType, attributes: [] },
             { id: '2', label: 'Node 2', node_type: 'person' as NodeType, attributes: [] },
         ],
         edges: [
@@ -27,34 +32,29 @@ test('DiagramToFlow basic conversion', () => {
         {
             id: '1',
             position: expect.any(Object),
-            data: { label: 'Node 1', nodeType: 'class', attributes: [] },
-            type: 'umlClass'
+            data: { label: 'Node 1', nodeType: 'table', attributes: [] },
+            type: 'table'
         },
         {
             id: '2',
             position: expect.any(Object),
             data: { label: 'Node 2', nodeType: 'person', attributes: [] },
-            type: 'c4'
+            type: 'archIcon'
         }
     ]);
 
-    expect(edges).toEqual([
-        {
-            id: 'e1-2',
-            source: '1',
-            target: '2',
-            sourceHandle: null,
-            targetHandle: null,
-            data: { label: 'Edge from Node 1 to Node 2', shape: 'elbow' },
-            type: 'default',
-        }
-    ]);
+    // La arista 'association' recibe defaults visuales: strokeStyle, targetArrow, sourceArrow.
+    expect(edges[0].id).toBe('e1-2')
+    expect(edges[0].source).toBe('1')
+    expect(edges[0].target).toBe('2')
+    expect((edges[0].data as Record<string, unknown>)?.label).toBe('Edge from Node 1 to Node 2')
+    expect((edges[0].data as Record<string, unknown>)?.shape).toBe('elbow')
 });
 
 test ('DiagramToFlow with empty diagram', () => {
     const diagram = {
         title: 'Empty Diagram',
-        diagram_type: 'uml_class' as DiagramType,
+        diagram_type: 'erd' as DiagramType,
         nodes: [],
         edges: []
     };
@@ -89,13 +89,13 @@ test('DiagramToFlow with unknown node type', () => {
     expect(edges).toEqual([]);
 });
 
-test ('DiagramToFlow with node register', () => {
+test ('DiagramToFlow with node register — table maps to table', () => {
     const diagram = {
         title: 'Node Register Diagram',
         diagram_type: 'erd' as DiagramType,
         nodes: [
-            { id: '1', label: 'Node 1', node_type: 'class' as NodeType, attributes: [] },
-            { id: '2', label: 'Node 2', node_type: 'class' as NodeType, attributes: [] },
+            { id: '1', label: 'Node 1', node_type: 'table' as NodeType, attributes: [] },
+            { id: '2', label: 'Node 2', node_type: 'table' as NodeType, attributes: [] },
         ],
         edges: []
     };
@@ -106,14 +106,14 @@ test ('DiagramToFlow with node register', () => {
         {
             id: '1',
             position: expect.any(Object),
-            data: { label: 'Node 1', nodeType: 'class', attributes: [] },
-            type: 'umlClass'
+            data: { label: 'Node 1', nodeType: 'table', attributes: [] },
+            type: 'table'
         },
         {
             id: '2',
             position: expect.any(Object),
-            data: { label: 'Node 2', nodeType: 'class', attributes: [] },
-            type: 'umlClass'
+            data: { label: 'Node 2', nodeType: 'table', attributes: [] },
+            type: 'table'
         }
     ]);
 });
@@ -137,13 +137,13 @@ test.skip('DiagramToFlow sequence diagram layout', () => {
     expect(nodes[0].position.x).toBeLessThan(nodes[1].position.x);
 });
 
-test ('DiagramToFlow edges mapping', () => {
+test ('DiagramToFlow edges mapping — source/target/label preservados', () => {
     const diagram = {
         title: 'Edge Mapping Diagram',
         diagram_type: 'erd' as DiagramType,
         nodes: [
-            { id: '1', label: 'Node 1', node_type: 'class' as NodeType, attributes: [] },
-            { id: '2', label: 'Node 2', node_type: 'class' as NodeType, attributes: [] },
+            { id: '1', label: 'Node 1', node_type: 'table' as NodeType, attributes: [] },
+            { id: '2', label: 'Node 2', node_type: 'table' as NodeType, attributes: [] },
         ],
         edges: [
             { id: 'e1-2', source: '1', target: '2', label: 'Edge from Node 1 to Node 2', edge_type: 'association' as EdgeType }
@@ -152,17 +152,11 @@ test ('DiagramToFlow edges mapping', () => {
 
     const { edges } = DiagramToFlow(diagram);
 
-    expect(edges).toEqual([
-        {
-            id: 'e1-2',
-            source: '1',
-            target: '2',
-            sourceHandle: null,
-            targetHandle: null,
-            data: { label: 'Edge from Node 1 to Node 2', shape: 'elbow' },
-            type: 'default',
-        }
-    ]);
+    expect(edges).toHaveLength(1)
+    expect(edges[0].id).toBe('e1-2')
+    expect(edges[0].source).toBe('1')
+    expect(edges[0].target).toBe('2')
+    expect((edges[0].data as Record<string, unknown>)?.label).toBe('Edge from Node 1 to Node 2')
 });
 
 test('table node maps to type table', () => {
@@ -180,19 +174,19 @@ test('table node maps to type table', () => {
     expect(nodes[0].type).toBe('table');
 });
 
-test('state node maps to type state', () => {
+test('use_case node maps to type useCase', () => {
     const diagram: DiagramSchema = {
-        title: 'State Machine',
-        diagram_type: 'state_machine' as DiagramType,
+        title: 'Casos de uso',
+        diagram_type: 'use_case' as DiagramType,
         nodes: [
-            { id: '1', label: 'Idle', node_type: 'state' as NodeType, attributes: [] }
+            { id: '1', label: 'Login', node_type: 'use_case' as NodeType, attributes: [] }
         ],
         edges: []
     };
 
     const { nodes } = DiagramToFlow(diagram);
 
-    expect(nodes[0].type).toBe('state');
+    expect(nodes[0].type).toBe('useCase');
 });
 
 test('topic node maps to type mindmap', () => {

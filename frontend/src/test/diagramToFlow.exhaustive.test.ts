@@ -96,28 +96,48 @@ describe('ERD', () => {
 })
 
 // ---------------------------------------------------------------------------
-// UML_CLASS — node_types: class | edge_types: inherits, implements, association, depends_on
+// USE_CASE — node_types: actor, use_case, system | edge_types: association, include, extend, inherits
 // ---------------------------------------------------------------------------
-describe('UML Class', () => {
+describe('Use Case', () => {
   const diagram: DiagramSchema = {
-    title: 'Clases',
-    diagram_type: 'uml_class',
+    title: 'Tienda online',
+    diagram_type: 'use_case',
     nodes: [
-      makeNode('animal', 'Animal', 'class'),
-      makeNode('perro', 'Perro', 'class'),
-      makeNode('corredor', 'ICorredor', 'class'),
+      makeNode('cliente', 'Cliente', 'actor'),
+      makeNode('admin', 'Administrador', 'actor'),
+      makeNode('sys', 'Tienda', 'system'),
+      makeNode('uc1', 'Comprar producto', 'use_case'),
+      makeNode('uc2', 'Autenticarse', 'use_case'),
+      makeNode('uc3', 'Gestionar catálogo', 'use_case'),
     ],
     edges: [
-      makeEdge('e1', 'perro', 'animal', 'extends', 'inherits'),
-      makeEdge('e2', 'perro', 'corredor', 'implements', 'implements'),
-      makeEdge('e3', 'animal', 'corredor', 'usa', 'association'),
-      makeEdge('e4', 'perro', 'corredor', 'depende', 'depends_on'),
+      makeEdge('e1', 'cliente', 'uc1', '', 'association'),
+      makeEdge('e2', 'admin', 'uc3', '', 'association'),
+      makeEdge('e3', 'uc1', 'uc2', '', 'include'),
+      makeEdge('e4', 'uc1', 'uc3', '', 'extend'),
+      makeEdge('e5', 'cliente', 'admin', '', 'inherits'),
     ],
   }
 
-  test('class → RF type "umlClass"', () => {
+  test('actor → RF type "useCaseActor" (override use_case)', () => {
     const { nodes } = DiagramToFlow(diagram)
-    nodes.forEach((n) => expect(n.type).toBe('umlClass'))
+    const actors = nodes.filter((n) => n.data.nodeType === 'actor')
+    expect(actors).toHaveLength(2)
+    actors.forEach((n) => expect(n.type).toBe('useCaseActor'))
+  })
+
+  test('use_case → RF type "useCase"', () => {
+    const { nodes } = DiagramToFlow(diagram)
+    const ucs = nodes.filter((n) => n.data.nodeType === 'use_case')
+    expect(ucs).toHaveLength(3)
+    ucs.forEach((n) => expect(n.type).toBe('useCase'))
+  })
+
+  test('system → RF type "useCaseSystem" (override use_case)', () => {
+    const { nodes } = DiagramToFlow(diagram)
+    const systems = nodes.filter((n) => n.data.nodeType === 'system')
+    expect(systems).toHaveLength(1)
+    systems.forEach((n) => expect(n.type).toBe('useCaseSystem'))
   })
 
   test('todos los nodos tienen position numérica válida', () => {
@@ -125,17 +145,28 @@ describe('UML Class', () => {
     expect(validPositions(nodes)).toBe(true)
   })
 
-  test('se generan las 4 aristas con label preservado', () => {
+  test('se generan las 5 aristas con source/target preservados', () => {
     const { edges } = DiagramToFlow(diagram)
-    expect(edges).toHaveLength(4)
-    expect(edges.find((e) => e.id === 'e1')!.data?.label).toBe('extends')
-    expect(edges.find((e) => e.id === 'e2')!.data?.label).toBe('implements')
-    expect(edges.find((e) => e.id === 'e3')!.data?.label).toBe('usa')
-    expect(edges.find((e) => e.id === 'e4')!.data?.label).toBe('depende')
+    expect(edges).toHaveLength(5)
+    const e3 = edges.find((e) => e.id === 'e3')!
+    expect(e3.source).toBe('uc1')
+    expect(e3.target).toBe('uc2')
+  })
+
+  test('arista include lleva strokeStyle dashed por defecto', () => {
+    const { edges } = DiagramToFlow(diagram)
+    const include = edges.find((e) => e.id === 'e3')!
+    expect((include.data as Record<string, unknown>)?.strokeStyle).toBe('dashed')
+  })
+
+  test('arista inherits lleva markerEndId "arrowHollow" por defecto', () => {
+    const { edges } = DiagramToFlow(diagram)
+    const inherits = edges.find((e) => e.id === 'e5')!
+    expect((inherits.data as Record<string, unknown>)?.markerEndId).toBe('arrowHollow')
   })
 
   test('arista huérfana rechazada', () => {
-    const roto = { ...diagram, edges: [makeEdge('ex', 'perro', 'nulo', 'x', 'inherits')] }
+    const roto = { ...diagram, edges: [makeEdge('ex', 'cliente', 'nulo', '', 'association')] }
     expect(diagramImportSchema.safeParse(roto).success).toBe(false)
   })
 })
@@ -248,44 +279,44 @@ describe('Architecture', () => {
     ],
   }
 
-  test('gateway → RF type "architecture"', () => {
+  test('gateway → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'gw')!.type).toBe('architecture')
+    expect(nodes.find((n) => n.id === 'gw')!.type).toBe('archIcon')
   })
 
-  test('service → RF type "architecture"', () => {
+  test('service → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'svc')!.type).toBe('architecture')
+    expect(nodes.find((n) => n.id === 'svc')!.type).toBe('archIcon')
   })
 
-  test('database → RF type "architecture"', () => {
+  test('database → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'db')!.type).toBe('architecture')
+    expect(nodes.find((n) => n.id === 'db')!.type).toBe('archIcon')
   })
 
-  test('queue → RF type "architecture"', () => {
+  test('queue → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'q')!.type).toBe('architecture')
+    expect(nodes.find((n) => n.id === 'q')!.type).toBe('archIcon')
   })
 
-  test('person → RF type "c4" (arquitectura C4 mixta)', () => {
+  test('person → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'usr')!.type).toBe('c4')
+    expect(nodes.find((n) => n.id === 'usr')!.type).toBe('archIcon')
   })
 
-  test('system → RF type "c4"', () => {
+  test('system → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'sys')!.type).toBe('c4')
+    expect(nodes.find((n) => n.id === 'sys')!.type).toBe('archIcon')
   })
 
-  test('container → RF type "c4"', () => {
+  test('container → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'ctr')!.type).toBe('c4')
+    expect(nodes.find((n) => n.id === 'ctr')!.type).toBe('archIcon')
   })
 
-  test('component → RF type "c4"', () => {
+  test('component → RF type "archIcon"', () => {
     const { nodes } = DiagramToFlow(diagram)
-    expect(nodes.find((n) => n.id === 'cmp')!.type).toBe('c4')
+    expect(nodes.find((n) => n.id === 'cmp')!.type).toBe('archIcon')
   })
 
   test('todos los nodos tienen position numérica válida', () => {
@@ -307,77 +338,7 @@ describe('Architecture', () => {
 })
 
 // ---------------------------------------------------------------------------
-// STATE_MACHINE — node_types: state, terminator | edge_types: transition
-// BUG CORREGIDO (S10): terminator en state_machine debe mapear a 'state', no 'flow'
-// ---------------------------------------------------------------------------
-describe('State Machine', () => {
-  const diagram: DiagramSchema = {
-    title: 'Semáforo',
-    diagram_type: 'state_machine',
-    nodes: [
-      makeNode('init', '●', 'terminator'),   // nodo inicial (pseudo-estado)
-      makeNode('rojo', 'Rojo', 'state'),
-      makeNode('verde', 'Verde', 'state'),
-      makeNode('amarillo', 'Amarillo', 'state'),
-      makeNode('end', '◉', 'terminator'),    // nodo final (pseudo-estado)
-    ],
-    edges: [
-      makeEdge('e1', 'init', 'rojo', 'start', 'transition'),
-      makeEdge('e2', 'rojo', 'verde', '30s', 'transition'),
-      makeEdge('e3', 'verde', 'amarillo', '25s', 'transition'),
-      makeEdge('e4', 'amarillo', 'rojo', '5s', 'transition'),
-      makeEdge('e5', 'verde', 'end', 'apagado', 'transition'),
-    ],
-  }
-
-  test('state → RF type "state"', () => {
-    const { nodes } = DiagramToFlow(diagram)
-    const states = nodes.filter((n) => n.data.nodeType === 'state')
-    expect(states).toHaveLength(3)
-    states.forEach((n) => expect(n.type).toBe('state'))
-  })
-
-  test('terminator en state_machine → RF type "state" (no "flow")', () => {
-    // BUG CORREGIDO: antes del fix, terminator mapeaba a 'flow' globalmente,
-    // lo que hacía que se renderizara FlowNode en un diagrama de estados.
-    const { nodes } = DiagramToFlow(diagram)
-    const terminators = nodes.filter((n) => n.data.nodeType === 'terminator')
-    expect(terminators).toHaveLength(2)
-    terminators.forEach((n) => {
-      expect(n.type).toBe('state')
-      expect(n.type).not.toBe('flow')
-    })
-  })
-
-  test('terminator en flowchart SÍ mapea a "flow" (no se rompe el override)', () => {
-    const flowDiagram: DiagramSchema = {
-      title: 'Flujo',
-      diagram_type: 'flowchart',
-      nodes: [makeNode('inicio', 'Inicio', 'terminator')],
-      edges: [],
-    }
-    const { nodes } = DiagramToFlow(flowDiagram)
-    expect(nodes[0].type).toBe('flow')
-  })
-
-  test('todos los nodos tienen position numérica válida', () => {
-    const { nodes } = DiagramToFlow(diagram)
-    expect(validPositions(nodes)).toBe(true)
-  })
-
-  test('se generan 5 transiciones con label preservado', () => {
-    const { edges } = DiagramToFlow(diagram)
-    expect(edges).toHaveLength(5)
-    expect(edges.find((e) => e.id === 'e2')!.data?.label).toBe('30s')
-    expect(edges.find((e) => e.id === 'e3')!.data?.label).toBe('25s')
-    expect(edges.find((e) => e.id === 'e4')!.data?.label).toBe('5s')
-  })
-
-  test('arista huérfana rechazada', () => {
-    const roto = { ...diagram, edges: [makeEdge('ex', 'rojo', 'nulo', '', 'transition')] }
-    expect(diagramImportSchema.safeParse(roto).success).toBe(false)
-  })
-})
+// (State Machine eliminado en S10.3: reemplazado por Use Case arriba)
 
 // ---------------------------------------------------------------------------
 // MINDMAP — node_types: topic | edge_types: association
@@ -435,9 +396,9 @@ describe('Posiciones dagre — cobertura transversal', () => {
       edges: [makeEdge('e1', 'a', 'b', '', 'one_to_many'), makeEdge('e2', 'b', 'c', '', 'one_to_one')],
     },
     {
-      diagram_type: 'uml_class',
-      nodes: [makeNode('x', 'X', 'class'), makeNode('y', 'Y', 'class')],
-      edges: [makeEdge('e1', 'x', 'y', '', 'inherits')],
+      diagram_type: 'use_case',
+      nodes: [makeNode('a', 'Actor', 'actor'), makeNode('uc', 'Login', 'use_case'), makeNode('sys', 'Sistema', 'system')],
+      edges: [makeEdge('e1', 'a', 'uc', '', 'association')],
     },
     {
       diagram_type: 'flowchart',
@@ -448,11 +409,6 @@ describe('Posiciones dagre — cobertura transversal', () => {
       diagram_type: 'architecture',
       nodes: [makeNode('gw', 'GW', 'gateway'), makeNode('svc', 'Svc', 'service'), makeNode('db', 'DB', 'database')],
       edges: [makeEdge('e1', 'gw', 'svc', '', 'calls'), makeEdge('e2', 'svc', 'db', '', 'depends_on')],
-    },
-    {
-      diagram_type: 'state_machine',
-      nodes: [makeNode('a', 'A', 'state'), makeNode('b', 'B', 'state'), makeNode('c', 'C', 'state')],
-      edges: [makeEdge('e1', 'a', 'b', '', 'transition'), makeEdge('e2', 'b', 'c', '', 'transition')],
     },
     {
       diagram_type: 'mindmap',

@@ -8,6 +8,11 @@
  *
  * `markerUnits="userSpaceOnUse"` mantiene el tamaño de la flecha constante en
  * coordenadas de flujo (no escala con el grosor del trazo).
+ *
+ * Marcadores disponibles:
+ *  - #arrow          → flecha abierta (markerEnd genérico y para include/extend)
+ *  - #arrowReverse   → idéntica para markerStart
+ *  - #arrowHollow    → triángulo hueco UML (generalización / herencia de actores)
  */
 export function EdgeMarkers() {
   return (
@@ -40,6 +45,24 @@ export function EdgeMarkers() {
           markerUnits="userSpaceOnUse"
         >
           <path d="M1,1 L9,5 L1,9" fill="none" stroke="var(--color-ink)" strokeWidth={1.5} />
+        </marker>
+        {/* Triángulo hueco UML (generalización de actores — inherits).
+            Relleno blanco para que el fondo del diagrama no se «filtre» por dentro. */}
+        <marker
+          id="arrowHollow"
+          markerWidth={14}
+          markerHeight={14}
+          refX={11}
+          refY={7}
+          orient="auto-start-reverse"
+          markerUnits="userSpaceOnUse"
+        >
+          <polygon
+            points="1,1 13,7 1,13"
+            fill="var(--color-surface)"
+            stroke="var(--color-ink)"
+            strokeWidth={1.5}
+          />
         </marker>
       </defs>
     </svg>

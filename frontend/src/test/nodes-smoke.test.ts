@@ -4,15 +4,16 @@ import { createElement } from 'react'
 import { ReactFlowProvider, Position } from '@xyflow/react'
 import {
   TableNode,
-  UmlClassNode,
   C4Node,
   ArchitectureNode,
   FlowNode,
-  StateNode,
   MindmapNode,
   SequenceActorNode,
   LifelineNode,
   ActivationNode,
+  UseCaseNode,
+  UseCaseActorNode,
+  UseCaseSystemNode,
 } from '../components/nodes'
 import { SequenceMessageEdge } from '../components/edges'
 
@@ -43,12 +44,12 @@ describe('Nodes smoke', () => {
     )
   })
 
-  it('StateNode renders without crashing', () => {
+  it('UseCaseNode renders without crashing', () => {
     render(
       withProvider(
-        createElement(StateNode, {
+        createElement(UseCaseNode, {
           ...baseProps,
-          data: { label: 'Idle' },
+          data: { label: 'Iniciar sesión' },
         } as any)
       )
     )
@@ -115,23 +116,23 @@ describe('Nodes smoke', () => {
   // Smoke tests para nodos no cubiertos anteriormente
   // -------------------------------------------------------------------------
 
-  it('UmlClassNode renders without crashing — sin métodos', () => {
+  it('UseCaseActorNode renders without crashing', () => {
     render(
       withProvider(
-        createElement(UmlClassNode, {
+        createElement(UseCaseActorNode, {
           ...baseProps,
-          data: { label: 'Animal', attributes: ['- nombre: String', '+ getNombre(): String'] },
+          data: { label: 'Cliente' },
         } as any)
       )
     )
   })
 
-  it('UmlClassNode renders without crashing — con stereotype', () => {
+  it('UseCaseSystemNode renders without crashing', () => {
     render(
       withProvider(
-        createElement(UmlClassNode, {
+        createElement(UseCaseSystemNode, {
           ...baseProps,
-          data: { label: 'IAnimal', stereotype: 'interface', attributes: [] },
+          data: { label: 'Sistema bancario' },
         } as any)
       )
     )

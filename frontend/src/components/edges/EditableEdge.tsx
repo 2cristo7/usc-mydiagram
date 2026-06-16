@@ -34,6 +34,8 @@ export function EditableEdge({
   const strokeW = edgeData.strokeWidth ?? 2
   const arrowStart = edgeData.sourceArrow ?? false
   const arrowEnd = edgeData.targetArrow ?? true
+  const markerEndId = edgeData.markerEndId
+  const markerStartId = edgeData.markerStartId
 
   const updateEdge = useStore((s) => s.updateEdge)
   const gridEnabled = useUiStore((s) => s.gridEnabled)
@@ -96,8 +98,14 @@ export function EditableEdge({
     strokeStyle === 'dotted' ? '2 4' :
     undefined
 
-  const computedMarkerStart = arrowStart ? 'url(#arrowReverse)' : undefined
-  const computedMarkerEnd = arrowEnd ? 'url(#arrow)' : undefined
+  // markerEndId/markerStartId tienen prioridad sobre arrowEnd/arrowStart: permiten
+  // usar markers SVG específicos (p. ej. triángulo hueco para herencia UML).
+  const computedMarkerStart = markerStartId
+    ? `url(#${markerStartId})`
+    : arrowStart ? 'url(#arrowReverse)' : undefined
+  const computedMarkerEnd = markerEndId
+    ? `url(#${markerEndId})`
+    : arrowEnd ? 'url(#arrow)' : undefined
 
   const pathRef = useRef<SVGPathElement>(null)
   const [labelPos, setLabelPos] = useState({ x: labelX, y: labelY })

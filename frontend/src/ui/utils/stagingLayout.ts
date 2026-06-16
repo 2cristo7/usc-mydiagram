@@ -37,13 +37,13 @@ export function stagingNodePositions(
         draggable: false,
         // Guardamos el tipo real para que se renderice con el componente correcto.
         type: node.node_type === 'table' ? 'table'
-            : node.node_type === 'class' ? 'umlClass'
             : node.node_type === 'actor' ? 'sequenceActor'
             : node.node_type === 'step' || node.node_type === 'decision' || node.node_type === 'terminator' ? 'flow'
-            : node.node_type === 'person' || node.node_type === 'system' || node.node_type === 'container' || node.node_type === 'component' ? 'c4'
-            : node.node_type === 'gateway' || node.node_type === 'service' || node.node_type === 'database' || node.node_type === 'queue' ? 'architecture'
-            : node.node_type === 'state' ? 'state'
+            : node.node_type === 'person' || node.node_type === 'container' || node.node_type === 'component'
+              || node.node_type === 'gateway' || node.node_type === 'service' || node.node_type === 'database'
+              || node.node_type === 'queue' || node.node_type === 'system' ? 'archIcon'
             : node.node_type === 'topic' ? 'mindmap'
+            : node.node_type === 'use_case' ? 'useCase'
             : 'default',
     }));
 }

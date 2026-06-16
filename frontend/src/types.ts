@@ -19,6 +19,19 @@ export interface Clarification {
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+// S10.3 — elección de tipo de diagrama cuando el backend detecta ambigüedad UML
+// y emite `diagram:type_clarification`. Camino independiente del flujo refine
+// (`agent:clarification` / thread_id), que NO se debe tocar.
+export interface TypeChoiceOption {
+    label: string;
+    value: string; // diagram_type válido: p. ej. "sequence" o "use_case"
+}
+
+export interface PendingTypeChoice {
+    question: string;
+    options: TypeChoiceOption[];
+}
+
 // S7.5 — streaming visual de tool calls: el agente emite agent:tool_call cuando
 // decide invocar una tool (antes de que corra) y agent:tool_result al terminar,
 // con el delta declarado por el servidor (node/edge completos para add/update;
@@ -56,17 +69,19 @@ export interface ToolTraceEntry {
 // validador se desincronicen). Los tipos puramente de UI (arriba) siguen siendo
 // `type`/`interface`: no cruzan el borde del import.
 export const diagramTypeSchema = z.enum([
-    'erd', 'uml_class', 'sequence', 'flowchart', 'architecture', 'state_machine', 'mindmap',
+    'erd', 'sequence', 'flowchart', 'architecture', 'mindmap', 'use_case',
 ]);
 
 export const nodeTypeSchema = z.enum([
-    'table', 'class', 'actor', 'step', 'service', 'database', 'queue', 'gateway',
-    'state', 'topic', 'decision', 'terminator', 'person', 'system', 'container', 'component',
+    'table', 'actor', 'step', 'service', 'database', 'queue', 'gateway',
+    'topic', 'decision', 'terminator', 'person', 'system', 'container', 'component',
+    'use_case',
 ]);
 
 export const edgeTypeSchema = z.enum([
-    'one_to_many', 'many_to_many', 'one_to_one', 'inherits', 'implements', 'calls',
-    'sequence', 'transition', 'depends_on', 'association', 'flow', 'conditional',
+    'one_to_many', 'many_to_many', 'one_to_one', 'inherits', 'calls',
+    'sequence', 'depends_on', 'association', 'flow', 'conditional',
+    'include', 'extend',
 ]);
 
 export const diagramNodeSchema = z.object({
@@ -103,6 +118,11 @@ export const edgeVisualDataSchema = z.object({
     // automático (el usuario deslizó el extremo por el borde, estilo MIRO).
     sourceAnchor: z.object({ x: z.number(), y: z.number() }).optional(),
     targetAnchor: z.object({ x: z.number(), y: z.number() }).optional(),
+    // Id de marker SVG personalizado (sin el prefijo url(#)). Cuando está presente,
+    // override a sourceArrow/targetArrow con el marker concreto (p. ej. 'arrowHollow'
+    // para la generalización UML de actores en casos de uso).
+    markerEndId: z.string().optional(),
+    markerStartId: z.string().optional(),
 });
 
 export const diagramEdgeSchema = z.object({
@@ -148,12 +168,11 @@ export type DiagramType = z.infer<typeof diagramTypeSchema>;
 // ausencia (null en el store / campo ausente en el mensaje), no como opción aquí.
 export const DIAGRAM_TYPE_OPTIONS: { value: DiagramType; label: string }[] = [
     { value: 'erd', label: 'Entidad-Relación' },
-    { value: 'uml_class', label: 'Clases UML' },
     { value: 'sequence', label: 'Secuencia' },
     { value: 'flowchart', label: 'Diagrama de flujo' },
     { value: 'architecture', label: 'Arquitectura' },
-    { value: 'state_machine', label: 'Máquina de estados' },
     { value: 'mindmap', label: 'Mapa mental' },
+    { value: 'use_case', label: 'Casos de uso' },
 ];
 
 export type NodeType = z.infer<typeof nodeTypeSchema>;
@@ -180,8 +199,12 @@ export interface EdgeVisualData {
   waypoints?: { x: number; y: number }[]
   shape?: 'straight' | 'elbow' | 'curved'
   strokeStyle?: 'normal' | 'dashed' | 'dotted'
+  strokeColor?: string
+  strokeWidth?: number
   sourceArrow?: boolean
   targetArrow?: boolean
   sourceAnchor?: { x: number; y: number }
   targetAnchor?: { x: number; y: number }
+  markerEndId?: string
+  markerStartId?: string
 }

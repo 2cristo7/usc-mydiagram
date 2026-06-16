@@ -49,6 +49,7 @@ import { stagingNodePositions, stagingEdges } from '../ui/utils/stagingLayout'
 
 import { C4Node } from './nodes/C4Node'
 import { ArchitectureNode } from './nodes/ArchitectureNode'
+import { ArchIconNode } from './nodes/ArchIconNode'
 import { ArchitectureGroupNode } from './nodes/ArchitectureGroupNode'
 import { SequenceActorNode } from './nodes/SequenceActorNode'
 import { FlowNode } from './nodes/FlowNode'
@@ -74,6 +75,7 @@ import { FIT_VIEW_OPTIONS, FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView
 const nodeTypes = {
   c4: C4Node,
   architecture: ArchitectureNode,
+  archIcon: ArchIconNode,
   architectureGroup: ArchitectureGroupNode,
   sequenceActor: SequenceActorNode,
   flow: FlowNode,
@@ -283,7 +285,7 @@ export function DiagramCanvas() {
   // el arrastre siga al ratón en vivo. Derivamos del store via DiagramToFlow y
   // re-sembramos el estado local cada vez que cambia currentDiagram (nueva
   // generación, edición desde IA, persistencia de posición tras soltar).
-  const { screenToFlowPosition, getNodes, fitView } = useReactFlow()
+  const { screenToFlowPosition, getNodes, getInternalNode, fitView } = useReactFlow()
   const derived = useMemo(
     () => (currentDiagram ? DiagramToFlow(currentDiagram) : { nodes: [], edges: [] }),
     [currentDiagram],
@@ -305,9 +307,10 @@ export function DiagramCanvas() {
   // calcula anclajes/waypoints con tamaños ESTIMADOS de los nodos; al renderizar, el
   // tamaño real difiere y los anclajes "alineados" caen desfasados → escaloncitos.
   // Una vez React Flow mide los nodos, recalculamos el ruteo con sus cajas reales y
-  // reconstruimos las aristas. Solo para diagramas que enrutan con dagre (no
-  // sequence/mindmap/architecture, que tienen su propio layout). La firma de
-  // geometría evita recomputar salvo que cambie posición o tamaño de algún nodo.
+  // reconstruimos las aristas. Aplica a dagre, casos de uso y arquitectura (todos
+  // enrutan con computeDistributedAnchors); se excluyen sequence (mensajes
+  // posicionales) y mindmap (layout radial propio). La firma de geometría evita
+  // recomputar salvo que cambie posición o tamaño de algún nodo.
   const nodeGeomSig = useMemo(
     () =>
       rfNodes
@@ -323,22 +326,30 @@ export function DiagramCanvas() {
   useEffect(() => {
     if (!currentDiagram) return
     const dt = currentDiagram.diagram_type
-    if (dt === 'sequence' || dt === 'mindmap' || dt === 'architecture' || dt === 'use_case') return
+    if (dt === 'sequence' || dt === 'mindmap') return
 
+    // Tipos de nodo que son contenedores (cajas que envuelven a otros): no deben
+    // actuar como obstáculos del ruteo, y sus hijos viven anidados (posición
+    // relativa al padre), así que usamos la posición ABSOLUTA del nodo interno.
+    const CONTAINER_TYPES = new Set(['useCaseSystem', 'architectureGroup'])
+    const containerIds = new Set<string>()
     const boxes = new Map<string, Box>()
     for (const n of rfNodes) {
       const w = n.measured?.width
       const h = n.measured?.height
       if (!w || !h) return // aún no medidos: esperamos al siguiente cambio de firma
-      boxes.set(n.id, { cx: n.position.x + w / 2, cy: n.position.y + h / 2, w, h })
+      // Posición absoluta (correcta también para hijos de un grupo de arquitectura).
+      const abs = getInternalNode(n.id)?.internals.positionAbsolute ?? n.position
+      boxes.set(n.id, { cx: abs.x + w / 2, cy: abs.y + h / 2, w, h })
+      if (n.type && CONTAINER_TYPES.has(n.type)) containerIds.add(n.id)
     }
     if (boxes.size === 0) return
 
-    const anchors = computeDistributedAnchors(currentDiagram, boxes)
+    const anchors = computeDistributedAnchors(currentDiagram, boxes, containerIds)
     setRfEdges(buildFlowEdges(currentDiagram, anchors))
     // nodeGeomSig resume la geometría de rfNodes; depender de él evita re-render en bucle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeGeomSig, currentDiagram, setRfEdges])
+  }, [nodeGeomSig, currentDiagram, setRfEdges, getInternalNode])
 
   // Re-encuadre al CARGAR un diagrama distinto (p. ej. seleccionarlo en el
   // historial). El canvas interactivo ya está montado, y la prop `fitView` solo
