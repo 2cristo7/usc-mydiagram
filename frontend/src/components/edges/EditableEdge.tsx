@@ -57,6 +57,7 @@ export function EditableEdge({
     srcPt,
     tgtPt,
     waypoints,
+    corners,
     editingLayer,
     handleEdgePointerDown,
     handlePathDoubleClick,
@@ -74,7 +75,19 @@ export function EditableEdge({
     segmentEditing: shape === 'elbow',
   })
 
-  const [edgePath, labelX, labelY] = getWaypointPath(srcPt, tgtPt, waypoints, shape)
+  // En 'elbow' renderizamos desde las MISMAS esquinas que usan las píldoras
+  // (ruteo direccional con codo perpendicular en los extremos), de modo que los
+  // handles caen siempre exactamente sobre la línea. Curva/recta no tienen modelo
+  // de segmentos: trazan directamente entre extremos y waypoints.
+  const [edgePath, labelX, labelY] =
+    shape === 'elbow'
+      ? getWaypointPath(
+          corners[0] ?? srcPt,
+          corners[corners.length - 1] ?? tgtPt,
+          corners.slice(1, -1),
+          'elbow'
+        )
+      : getWaypointPath(srcPt, tgtPt, waypoints, shape)
 
   const strokeDasharray =
     strokeStyle === 'dashed' ? '8 4' :

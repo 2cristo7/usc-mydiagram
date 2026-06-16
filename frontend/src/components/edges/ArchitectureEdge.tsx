@@ -1,4 +1,4 @@
-import { EdgeLabelRenderer, getSmoothStepPath, Position, type EdgeProps } from '@xyflow/react'
+import { EdgeLabelRenderer, Position, type EdgeProps } from '@xyflow/react'
 import { useUiStore } from '../../store/ui'
 import { snapValue } from '../../ui/utils/grid'
 import { getWaypointPath } from '../../ui/utils/getWaypointPath'
@@ -46,13 +46,12 @@ export function ArchitectureEdge({
   const defaultTgtPt = snapAlongBorder(targetX, targetY, targetPosition, gridEnabled)
 
   // El hook sustituye el extremo por defecto si el usuario fijó un anclaje
-  // deslizándolo por el borde, y aporta la capa de handles de edición.
+  // deslizándolo por el borde, aporta la capa de handles de edición y calcula las
+  // esquinas ortogonales efectivas (respetando la dirección de salida del nodo).
   const {
     srcPt,
     tgtPt,
-    waypoints,
-    srcPositionOverride,
-    tgtPositionOverride,
+    corners,
     editingLayer,
     handleEdgePointerDown,
   } = useEdgeEditing({
@@ -65,25 +64,21 @@ export function ArchitectureEdge({
     defaultTgtPt,
     hasLabel: label !== '',
     labelT: edgeData.labelT,
+    segmentEditing: true,
+    sourcePosition,
+    targetPosition,
   })
 
-  const srcPosition = srcPositionOverride ?? sourcePosition
-  const tgtPosition = tgtPositionOverride ?? targetPosition
-
-  // Sin waypoints, mantenemos el smoothstep ortogonal de siempre (look MIRO ya
-  // redondeado). Si el usuario inserta puntos de quiebre, enrutamos por ellos con
-  // el elbow redondeado, que sí soporta waypoints intermedios.
-  const [edgePath, labelX, labelY] = waypoints.length
-    ? getWaypointPath(srcPt, tgtPt, waypoints, 'elbow')
-    : getSmoothStepPath({
-        sourceX: srcPt.x,
-        sourceY: srcPt.y,
-        sourcePosition: srcPosition,
-        targetX: tgtPt.x,
-        targetY: tgtPt.y,
-        targetPosition: tgtPosition,
-        borderRadius: 8,
-      })
+  // Renderizamos desde las MISMAS esquinas que usan las píldoras (elbow
+  // redondeado), de modo que los handles caen siempre exactamente sobre la línea,
+  // tanto en la ruta por defecto (por el centro, perpendicular al borde) como con
+  // waypoints intermedios.
+  const [edgePath, labelX, labelY] = getWaypointPath(
+    corners[0] ?? srcPt,
+    corners[corners.length - 1] ?? tgtPt,
+    corners.slice(1, -1),
+    'elbow'
+  )
 
   const strokeDasharray = isCalls ? undefined : '8 4'
   const markerEnd = isCalls ? 'url(#arrow)' : 'url(#arrowDashed)'

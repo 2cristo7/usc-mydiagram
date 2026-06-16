@@ -9,6 +9,7 @@ import {
 import { useStore } from '../../store'
 import { useUiStore } from '../../store/ui'
 import { beginHistoryInteraction, endHistoryInteraction } from '../../store/historyManager'
+import { beginDragCursor, endDragCursor } from '../../ui/utils/dragCursor'
 import { getFloatingAnchor } from '../../ui/utils/getFloatingAnchor'
 import { getAnchorPoint, projectToNodePerimeter, anchorToPosition } from '../../ui/utils/getNodeAnchor'
 import { getElbowCorners } from '../../ui/utils/getWaypointPath'
@@ -24,6 +25,12 @@ const DRAG_THRESHOLD = 4
 // Distancia (px de flujo) a la que el extremo "flasha" y se pega al punto medio
 // de un lado del nodo.
 const MIDPOINT_SNAP = 12
+// Radio (px de PANTALLA) dentro del cual un tramo arrastrado se pega a la
+// coordenada de otro vértice/extremo de la misma arista para quedar alineado.
+// Evita los "escaloncitos" cuando no hay grid: dos tramos casi colineales se
+// enderezan. Se mide en pantalla (se divide por el zoom) para sentirse igual a
+// cualquier escala.
+const ALIGN_SNAP_PX = 7
 
 // Lógica de edición compartida por EditableEdge y ArchitectureEdge: calcula los
 // extremos efectivos (anclaje fijo deslizado sobre el borde con prioridad sobre
@@ -50,8 +57,13 @@ export function useEdgeEditing(args: {
   hasLabel?: boolean
   labelT?: number
   // Edición por segmentos (píldoras + doble clic). Solo aristas ortogonales con
-  // ruta elbow real (EditableEdge shape 'elbow').
+  // ruta elbow real (EditableEdge shape 'elbow', ArchitectureEdge).
   segmentEditing?: boolean
+  // Dirección de salida/entrada del nodo (solo ArchitectureEdge). Permite que la
+  // ruta por defecto SIN waypoints salga perpendicular al borde (ruta por el
+  // centro estilo smoothstep) en vez del codo en L horizontal-primero.
+  sourcePosition?: Position
+  targetPosition?: Position
 }) {
   const { id, source, target, data, selected, defaultSrcPt, defaultTgtPt, hasLabel, labelT, segmentEditing } = args
   const waypoints = data.waypoints ?? []
@@ -78,6 +90,16 @@ export function useEdgeEditing(args: {
   const srcPositionOverride: Position | undefined = sourceAnchor ? anchorToPosition(sourceAnchor) : undefined
   const tgtPositionOverride: Position | undefined = targetAnchor ? anchorToPosition(targetAnchor) : undefined
 
+  // Lado efectivo de salida/entrada. Prioridad: anclaje fijo del usuario > lado
+  // por props (ArchitectureEdge, vía ELK) > lado derivado del propio extremo
+  // (EditableEdge: el punto borde-borde flotante se proyecta al lado más cercano).
+  // Con un lado conocido el extremo abandona el nodo perpendicular (codo/stub),
+  // tanto en la ruta por defecto como con waypoints intermedios.
+  const effectiveSrcPos =
+    srcPositionOverride ?? args.sourcePosition ?? sideOfPoint(sourceNode, srcPt)
+  const effectiveTgtPos =
+    tgtPositionOverride ?? args.targetPosition ?? sideOfPoint(targetNode, tgtPt)
+
   // Refs para que los listeners window-level lean estado actual sin recrearse.
   const sourceRef = useRef(source)
   sourceRef.current = source
@@ -99,6 +121,18 @@ export function useEdgeEditing(args: {
   srcPtRef.current = srcPt
   const tgtPtRef = useRef(tgtPt)
   tgtPtRef.current = tgtPt
+  const srcPosRef = useRef(effectiveSrcPos)
+  srcPosRef.current = effectiveSrcPos
+  const tgtPosRef = useRef(effectiveTgtPos)
+  tgtPosRef.current = effectiveTgtPos
+
+  // Esquinas ortogonales efectivas (vértices renderizados). Respeta la dirección
+  // de salida en la ruta por defecto. Es la fuente de verdad para píldoras y
+  // arrastre de segmentos. cornersFromRefs() es la versión que leen los listeners.
+  const computeCorners = (s: Point, t: Point, wps: Point[]): Point[] =>
+    routeCorners(s, t, wps, srcPosRef.current, tgtPosRef.current)
+  const cornersFromRefs = (): Point[] =>
+    computeCorners(srcPtRef.current, tgtPtRef.current, waypointsRef.current)
 
   const [isDragging, setIsDragging] = useState(false)
   const [anchorDragging, setAnchorDragging] = useState<'source' | 'target' | null>(null)
@@ -110,36 +144,62 @@ export function useEdgeEditing(args: {
   // Edición por SEGMENTOS (aristas ortogonales)
   // ---------------------------------------------------------------------------
 
-  // Arrastre de un segmento: lo mueve perpendicular a su orientación. La primera
-  // vez que se supera el umbral materializa la ruta (insertando un stub si el
-  // tramo toca un nodo) y a partir de ahí desliza las dos esquinas del tramo.
+  // Arrastre de un segmento. Dos modos:
+  //  - 'bend' (píldora del medio): mueve el tramo perpendicular a su orientación.
+  //    Los centrales deslizan sus dos esquinas; los pegados a un nodo doblan desde
+  //    el centro (planSegmentDrag) manteniendo fijo el punto de unión.
+  //  - 'slide' (punto de unión, solo tramos pegados a un nodo): traslada el tramo
+  //    ENTERO deslizando el anclaje por el borde del nodo, sin partirlo ni doblar.
+  // La primera vez que se supera el umbral materializa la ruta y a partir de ahí
+  // arrastra.
   const beginSegmentDrag = useCallback(
     (segIndex: number, startClientX: number, startClientY: number) => {
       let inserted = false
       let idxA = -1
       let idxB = -1
       let axis: Axis = 'y'
-      const snapAxis = (v: number) => (gridEnabledRef.current ? snapValue(v) : v)
+      // Array de trabajo del gesto. NO leemos waypointsRef en cada move: ese ref
+      // solo se refresca al re-renderizar, así que un pointermove que llega antes
+      // del render leería los waypoints viejos (vacíos en una arista recién
+      // doblada) y sobrescribiría el store → la arista vuelve a recta ("no dobla").
+      let wps: Point[] = []
+      // Coordenadas (en el eje que se mueve) de los demás vértices/extremos de la
+      // arista: a ellas se pega el tramo para alinearse. Se rellena al materializar
+      // el gesto (cuando ya se conoce `axis`).
+      let alignTargets: number[] = []
+      const snapAxis = (v: number) => {
+        const g = gridEnabledRef.current ? snapValue(v) : v
+        if (!alignTargets.length) return g
+        return snapToAlignment(g, alignTargets, ALIGN_SNAP_PX / (storeApi.getState().transform[2] || 1))
+      }
 
       const onMove = (ev: PointerEvent) => {
         const flowPos = screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
         if (!inserted) {
           if (Math.hypot(ev.clientX - startClientX, ev.clientY - startClientY) < DRAG_THRESHOLD) return
-          const corners = getElbowCorners(srcPtRef.current, tgtPtRef.current, waypointsRef.current)
-          if (segIndex >= corners.length - 1) return
+          const corners = cornersFromRefs()
+          const L = corners.length
+          if (segIndex >= L - 1) return
           axis = segPerpAxis(corners[segIndex], corners[segIndex + 1])
+          // Vértices contra los que alinear: todos menos los dos extremos del
+          // propio tramo (alinear con uno mismo no aporta nada).
+          alignTargets = corners
+            .filter((_, i) => i !== segIndex && i !== segIndex + 1)
+            .map((p) => p[axis])
+          inserted = true
+          setIsDragging(true)
+          beginDragCursor()
+          beginHistoryInteraction()
           const val = snapAxis(axis === 'x' ? flowPos.x : flowPos.y)
           const plan = planSegmentDrag(corners, segIndex, axis, val)
           idxA = plan.idxA
           idxB = plan.idxB
-          inserted = true
-          setIsDragging(true)
-          beginHistoryInteraction()
-          updateEdge(id, { data: { ...dataRef.current, waypoints: plan.waypoints } } as never)
+          wps = plan.waypoints
+          updateEdge(id, { data: { ...dataRef.current, waypoints: wps } } as never)
           return
         }
         const val = snapAxis(axis === 'x' ? flowPos.x : flowPos.y)
-        const wps = waypointsRef.current.map((p) => ({ ...p }))
+        wps = wps.map((p) => ({ ...p }))
         if (wps[idxA]) wps[idxA][axis] = val
         if (wps[idxB]) wps[idxB][axis] = val
         updateEdge(id, { data: { ...dataRef.current, waypoints: wps } } as never)
@@ -149,12 +209,13 @@ export function useEdgeEditing(args: {
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
         setIsDragging(false)
+        endDragCursor()
         if (!inserted) return
         // Normaliza: re-deriva las esquinas para colapsar stubs degenerados y
         // vértices colineales acumulados durante el arrastre.
-        const corners = getElbowCorners(srcPtRef.current, tgtPtRef.current, waypointsRef.current)
+        const corners = computeCorners(srcPtRef.current, tgtPtRef.current, wps)
         const interior = corners.slice(1, -1)
-        if (interior.length !== waypointsRef.current.length) {
+        if (interior.length !== wps.length) {
           updateEdge(id, { data: { ...dataRef.current, waypoints: interior } } as never)
         }
         endHistoryInteraction()
@@ -199,6 +260,7 @@ export function useEdgeEditing(args: {
     (index: number) => {
       draggingIndexRef.current = index
       setIsDragging(true)
+      beginDragCursor()
 
       const onMove = (e: PointerEvent) => {
         const idx = draggingIndexRef.current
@@ -213,6 +275,7 @@ export function useEdgeEditing(args: {
       const onUp = () => {
         draggingIndexRef.current = null
         setIsDragging(false)
+        endDragCursor()
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
         endHistoryInteraction()
@@ -271,7 +334,7 @@ export function useEdgeEditing(args: {
       const startFlow = screenToFlowPosition(startClient)
 
       if (segmentEditing) {
-        const corners = getElbowCorners(srcPtRef.current, tgtPtRef.current, waypointsRef.current)
+        const corners = cornersFromRefs()
         const segIndex = nearestSegmentIndex(corners, startFlow)
         beginSegmentDrag(segIndex, startClient.x, startClient.y)
         return
@@ -288,6 +351,7 @@ export function useEdgeEditing(args: {
           inserted = true
           draggingIndexRef.current = insertIndex
           setIsDragging(true)
+          beginDragCursor()
           const newWaypoints = [...waypointsRef.current]
           newWaypoints.splice(insertIndex, 0, gridEnabledRef.current ? snapPoint(flowPos) : flowPos)
           beginHistoryInteraction()
@@ -304,6 +368,7 @@ export function useEdgeEditing(args: {
       const onUp = () => {
         draggingIndexRef.current = null
         setIsDragging(false)
+        endDragCursor()
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
         endHistoryInteraction()
@@ -337,14 +402,16 @@ export function useEdgeEditing(args: {
         const onUp = () => {
           window.removeEventListener('pointermove', onMove)
           window.removeEventListener('pointerup', onUp)
+          endDragCursor()
           endHistoryInteraction()
         }
+        beginDragCursor()
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
         return
       }
 
-      const corners = getElbowCorners(srcPtRef.current, tgtPtRef.current, waypointsRef.current)
+      const corners = cornersFromRefs()
       const labelPt = pointAtPolylineT(corners, labelTRef.current)
       const seg = nearestSegmentIndex(corners, labelPt)
       const a = corners[seg]
@@ -360,22 +427,31 @@ export function useEdgeEditing(args: {
         let idxA = -1
         let idxB = -1
         let started = false
-        const snapAxis = (v: number) => (gridEnabledRef.current ? snapValue(v) : v)
+        let wps: Point[] = [] // array de trabajo del gesto (evita la race con el ref)
+        const alignTargets = cornersFromRefs()
+          .filter((_, i) => i !== segIndex && i !== segIndex + 1)
+          .map((p) => p[axis])
+        const snapAxis = (v: number) => {
+          const g = gridEnabledRef.current ? snapValue(v) : v
+          if (!alignTargets.length) return g
+          return snapToAlignment(g, alignTargets, ALIGN_SNAP_PX / (storeApi.getState().transform[2] || 1))
+        }
         return (flowPos: Point) => {
           const val = snapAxis(axis === 'x' ? flowPos.x : flowPos.y)
           if (!started) {
-            const cs = getElbowCorners(srcPtRef.current, tgtPtRef.current, waypointsRef.current)
+            const cs = cornersFromRefs()
             if (segIndex >= cs.length - 1) return
             const plan = planSegmentDrag(cs, segIndex, axis, val)
             idxA = plan.idxA
             idxB = plan.idxB
+            wps = plan.waypoints
             started = true
             setIsDragging(true)
             beginHistoryInteraction()
-            updateEdge(id, { data: { ...dataRef.current, waypoints: plan.waypoints } } as never)
+            updateEdge(id, { data: { ...dataRef.current, waypoints: wps } } as never)
             return
           }
-          const wps = waypointsRef.current.map((p) => ({ ...p }))
+          wps = wps.map((p) => ({ ...p }))
           if (wps[idxA]) wps[idxA][axis] = val
           if (wps[idxB]) wps[idxB][axis] = val
           updateEdge(id, { data: { ...dataRef.current, waypoints: wps } } as never)
@@ -405,9 +481,11 @@ export function useEdgeEditing(args: {
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
         setIsDragging(false)
+        endDragCursor()
         endHistoryInteraction()
       }
 
+      beginDragCursor()
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
@@ -424,6 +502,7 @@ export function useEdgeEditing(args: {
     (e: React.PointerEvent, which: 'source' | 'target') => {
       e.stopPropagation()
       setAnchorDragging(which)
+      beginDragCursor()
       const anchorKey = which === 'source' ? 'sourceAnchor' : 'targetAnchor'
       const ownIdRef = which === 'source' ? sourceRef : targetRef
       const fixedIdRef = which === 'source' ? targetRef : sourceRef
@@ -465,8 +544,23 @@ export function useEdgeEditing(args: {
           const flash = Math.hypot(here.x - midAbs.x, here.y - midAbs.y) <= MIDPOINT_SNAP
           if (flash) norm = mid
           setAnchorFlash(flash)
+          // En aristas ortogonales con codos, arrastra la esquina contigua junto al
+          // anclaje para que el tramo pegado al nodo se traslade RECTO en vez de
+          // escalonarse. El eje que se ajusta es el de salida (perpendicular al
+          // lado): Top/Bottom → x; Left/Right → y.
+          const patch: Record<string, unknown> = { ...dataRef.current, [anchorKey]: norm }
+          const wpsNow = dataRef.current.waypoints ?? []
+          if (segmentEditing && wpsNow.length) {
+            const anchorAbs = getAnchorPoint(ownNode as never, norm)
+            const side = anchorToPosition(norm)
+            const exitAxis: Axis = side === Position.Top || side === Position.Bottom ? 'x' : 'y'
+            const cornerIdx = which === 'source' ? 0 : wpsNow.length - 1
+            const wps = wpsNow.map((p) => ({ ...p }))
+            if (wps[cornerIdx]) wps[cornerIdx][exitAxis] = anchorAbs[exitAxis]
+            patch.waypoints = wps
+          }
           beginHistoryInteraction()
-          updateEdge(id, { data: { ...dataRef.current, [anchorKey]: norm } } as never)
+          updateEdge(id, { data: patch } as never)
         }
         setAnchorSnappedPt(null)
         setAnchorCursor(null)
@@ -500,6 +594,7 @@ export function useEdgeEditing(args: {
         setAnchorCursor(null)
         setAnchorSnappedPt(null)
         setAnchorFlash(false)
+        endDragCursor()
         endHistoryInteraction()
       }
 
@@ -525,16 +620,23 @@ export function useEdgeEditing(args: {
   // Geometría para pintar handles
   // ---------------------------------------------------------------------------
 
-  const corners = segmentEditing ? getElbowCorners(srcPt, tgtPt, waypoints) : []
-  // Píldora en el centro de cada segmento ortogonal.
+  const corners = segmentEditing ? computeCorners(srcPt, tgtPt, waypoints) : []
+  // Handle en el centro de cada tramo ortogonal. Los tramos centrales llevan una
+  // píldora; los pegados a un nodo (con el otro extremo libre) llevan un círculo
+  // que divide el tramo desde el centro. El tramo único entre dos nodos es píldora.
+  const segCount = corners.length - 1
   const segmentPills = corners.slice(0, -1).map((a, i) => {
     const b = corners[i + 1]
     const vertical = Math.abs(a.x - b.x) < Math.abs(a.y - b.y)
+    const isFirst = i === 0
+    const isLast = i === segCount - 1
+    const nodeAdjacent = (isFirst || isLast) && !(isFirst && isLast)
     return {
       x: (a.x + b.x) / 2,
       y: (a.y + b.y) / 2,
       vertical, // segmento vertical → se mueve en horizontal
       segIndex: i,
+      nodeAdjacent,
     }
   })
 
@@ -578,7 +680,9 @@ export function useEdgeEditing(args: {
       <EdgeLabelRenderer>
         {segmentEditing ? (
           <>
-            {/* Píldoras de segmento — arrastrar para mover el tramo perpendicular */}
+            {/* Handle en el centro de cada tramo: círculo en los pegados a un nodo
+                (divide desde el centro), píldora en el resto. No se pintan puntos
+                en las esquinas: se enderezan arrastrando el tramo. */}
             {segmentPills.map((sp) => (
               <div
                 key={`seg-${sp.segIndex}`}
@@ -590,27 +694,14 @@ export function useEdgeEditing(args: {
                 }}
                 onPointerDown={(e) => handleSegmentPointerDown(e, sp.segIndex)}
               >
-                <div
-                  className="edge-handle__pill"
-                  style={{ width: sp.vertical ? 8 : 18, height: sp.vertical ? 18 : 8 }}
-                />
-              </div>
-            ))}
-            {/* Esquinas creadas por el usuario (waypoints) — doble clic para
-                borrar. Las esquinas auto-generadas por el ruteo (codos
-                intrínsecos a nodos desalineados) no se pueden borrar. */}
-            {waypoints.map((wp, i) => (
-              <div
-                key={`corner-${i}`}
-                className="nopan nodrag edge-handle"
-                style={{
-                  position: 'absolute',
-                  transform: `translate(-50%, -50%) translate(${wp.x}px,${wp.y}px)`,
-                  cursor: 'pointer',
-                }}
-                onDoubleClick={(e) => handleWaypointDoubleClick(e, i)}
-              >
-                <div className="edge-handle__dot" style={{ width: 9, height: 9 }} />
+                {sp.nodeAdjacent ? (
+                  <div className="edge-handle__circle" style={{ width: 11, height: 11 }} />
+                ) : (
+                  <div
+                    className="edge-handle__pill"
+                    style={{ width: sp.vertical ? 8 : 18, height: sp.vertical ? 18 : 8 }}
+                  />
+                )}
               </div>
             ))}
           </>
@@ -688,6 +779,7 @@ export function useEdgeEditing(args: {
     srcPt,
     tgtPt,
     waypoints,
+    corners,
     srcPositionOverride,
     tgtPositionOverride,
     editingLayer,
@@ -697,9 +789,93 @@ export function useEdgeEditing(args: {
   }
 }
 
+// Longitud del codo perpendicular con que un extremo anclado a un lado abandona
+// el nodo (px de flujo). Es el "stub" estilo draw.io para que la línea nunca
+// salga rasante al borde.
+const ENDPOINT_STUB = 22
+
+// Esquinas ortogonales efectivas. Cada extremo cuyo lado se conoce abandona el
+// nodo PERPENDICULAR a ese lado, tanto en la ruta por defecto (sin waypoints, Z
+// por el centro) como con waypoints intermedios (stub perpendicular + L-bends).
+// Es la fuente de verdad compartida por las píldoras y por el trazado renderizado.
+function routeCorners(
+  src: Point,
+  tgt: Point,
+  waypoints: Point[],
+  srcPos?: Position,
+  tgtPos?: Position
+): Point[] {
+  if (waypoints.length === 0) {
+    // Orientación del Z: la marca el lado conocido (origen con prioridad). Sin
+    // lado conocido, L-bend horizontal-primero por defecto.
+    const vertical = srcPos ? isVerticalSide(srcPos) : tgtPos ? isVerticalSide(tgtPos) : null
+    if (vertical === null) return getElbowCorners(src, tgt, [])
+    const mid: Point[] = vertical
+      ? [
+          { x: src.x, y: (src.y + tgt.y) / 2 },
+          { x: tgt.x, y: (src.y + tgt.y) / 2 },
+        ]
+      : [
+          { x: (src.x + tgt.x) / 2, y: src.y },
+          { x: (src.x + tgt.x) / 2, y: tgt.y },
+        ]
+    // getElbowCorners limpia colineales/duplicados (p. ej. nodos alineados).
+    return getElbowCorners(src, tgt, mid)
+  }
+  // Con waypoints: inserta un stub perpendicular en cada extremo anclado para que
+  // el tramo pegado al nodo salga en codo. El stub es colineal con el extremo en
+  // su eje perpendicular, así getElbowCorners lo colapsa cuando es redundante (no
+  // acumula esquinas al re-rutear sobre waypoints ya normalizados).
+  const mids = [...waypoints]
+  if (srcPos) mids.unshift(stubPoint(src, srcPos))
+  if (tgtPos) mids.push(stubPoint(tgt, tgtPos))
+  return getElbowCorners(src, tgt, mids)
+}
+
+// True si el lado es arriba/abajo (la arista lo cruza en vertical).
+function isVerticalSide(pos: Position): boolean {
+  return pos === Position.Top || pos === Position.Bottom
+}
+
+// Punto desplazado ENDPOINT_STUB hacia fuera del lado `pos` desde `pt`.
+function stubPoint(pt: Point, pos: Position): Point {
+  switch (pos) {
+    case Position.Top:
+      return { x: pt.x, y: pt.y - ENDPOINT_STUB }
+    case Position.Bottom:
+      return { x: pt.x, y: pt.y + ENDPOINT_STUB }
+    case Position.Left:
+      return { x: pt.x - ENDPOINT_STUB, y: pt.y }
+    default:
+      return { x: pt.x + ENDPOINT_STUB, y: pt.y }
+  }
+}
+
+// Lado del perímetro en el que cae un punto absoluto (proyectado al borde más
+// cercano del nodo). Deriva la dirección de salida de un extremo flotante.
+function sideOfPoint(node: ReturnType<typeof useInternalNode>, pt: Point): Position | undefined {
+  return node ? anchorToPosition(projectToNodePerimeter(node as never, pt)) : undefined
+}
+
 // ---------------------------------------------------------------------------
 // Helpers de segmentos ortogonales
 // ---------------------------------------------------------------------------
+
+// Pega `val` a la coordenada más cercana de `targets` si cae dentro de
+// `threshold` (px de flujo). Mantiene rectos los tramos casi colineales sin
+// necesidad de grid.
+function snapToAlignment(val: number, targets: number[], threshold: number): number {
+  let best = val
+  let bestD = threshold
+  for (const c of targets) {
+    const d = Math.abs(c - val)
+    if (d < bestD) {
+      bestD = d
+      best = c
+    }
+  }
+  return best
+}
 
 // Eje que hay que modificar para mover un segmento PERPENDICULAR a su
 // orientación: un tramo horizontal (misma y) se mueve cambiando la y; uno
@@ -711,8 +887,10 @@ function segPerpAxis(a: Point, b: Point): Axis {
 // Calcula los waypoints resultantes de mover el segmento `segIndex` al valor
 // `newVal` en el eje `axis`, devolviendo además los índices (en el array de
 // waypoints = esquinas interiores) de las dos esquinas que hay que seguir
-// moviendo. Los tramos pegados a un nodo insertan un stub para no despegar el
-// extremo (decisión: "insertar codo").
+// moviendo. Un tramo pegado a un nodo PERO con su otro extremo libre dobla
+// desde el CENTRO del segmento: la mitad pegada al nodo se queda fija (el codo
+// nace en el centro, no en el nodo). El tramo único entre dos nodos se grapa con
+// un stub a cada lado.
 function planSegmentDrag(
   corners: Point[],
   segIndex: number,
@@ -722,6 +900,7 @@ function planSegmentDrag(
   const L = corners.length
   const isFirst = segIndex === 0
   const isLast = segIndex === L - 2
+  const other: Axis = axis === 'x' ? 'y' : 'x'
   const interior = corners.slice(1, L - 1).map((p) => ({ ...p }))
   const set = (p: Point): Point => ({ ...p, [axis]: newVal })
 
@@ -730,14 +909,25 @@ function planSegmentDrag(
     return { waypoints: [set(corners[0]), set(corners[L - 1])], idxA: 0, idxB: 1 }
   }
   if (isFirst) {
-    const stub = set(corners[0]) // pegado al lado del nodo origen
-    const moved = set(corners[1])
-    return { waypoints: [stub, moved, ...interior.slice(1)], idxA: 0, idxB: 1 }
+    // Codo desde el centro: la mitad nodo→centro (P1) se mantiene en su valor
+    // original; solo se mueve la mitad libre (P2 + esquina C).
+    const node = corners[0]
+    const free = corners[1]
+    const centerAlong = (node[other] + free[other]) / 2
+    const P1 = { ...node, [other]: centerAlong } // centro, valor perp original (fijo)
+    const P2 = { ...P1, [axis]: newVal } // centro, ya desplazado
+    const movedFree = set(free)
+    return { waypoints: [P1, P2, movedFree, ...interior.slice(1)], idxA: 1, idxB: 2 }
   }
   if (isLast) {
-    const stub = set(corners[L - 1]) // pegado al lado del nodo destino
-    const moved = set(corners[L - 2])
-    return { waypoints: [...interior.slice(0, -1), moved, stub], idxA: interior.length - 1, idxB: interior.length }
+    const node = corners[L - 1]
+    const free = corners[L - 2]
+    const centerAlong = (node[other] + free[other]) / 2
+    const P1 = { ...node, [other]: centerAlong } // centro, valor perp original (fijo)
+    const P2 = { ...P1, [axis]: newVal }
+    const movedFree = set(free)
+    const li = interior.length - 1
+    return { waypoints: [...interior.slice(0, -1), movedFree, P2, P1], idxA: li, idxB: li + 1 }
   }
   // Segmento interior: mueve sus dos esquinas.
   const iA = segIndex - 1

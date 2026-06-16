@@ -142,6 +142,18 @@ p {
   transform: scale(1.25);
 }
 
+/* Handle de segmento pegado a un nodo: círculo (dobla desde el centro). */
+.edge-handle__circle {
+  background: var(--color-surface);
+  border: 2px solid var(--color-ink);
+  border-radius: 50%;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.edge-handle:hover .edge-handle__circle {
+  background: var(--color-accent);
+  transform: scale(1.2);
+}
+
 .edge-handle__endpoint {
   background: var(--color-surface);
   border: 2px solid var(--color-accent-2);
