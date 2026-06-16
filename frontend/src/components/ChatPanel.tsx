@@ -1,11 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { ChatMessage } from './ChatMessage'
 import { ToolTray } from './ToolTray'
+import { TypeChoiceButtons } from './TypeChoiceButtons'
 import type { ConnectionState } from '../types'
 import { useStore } from '../store/index'
 
 interface ChatPanelProps {
   connectionState: ConnectionState
+  /** Callback de useWebSocket para re-lanzar la generación con el tipo elegido */
+  onChooseDiagramType: (diagramTypeValue: string) => void
 }
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
@@ -32,7 +35,7 @@ function Spinner() {
   )
 }
 
-export function ChatPanel({ connectionState }: ChatPanelProps) {
+export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelProps) {
   const { messages, uiState } = useStore()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -74,6 +77,9 @@ export function ChatPanel({ connectionState }: ChatPanelProps) {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* TypeChoiceButtons — visible solo al recibir diagram:type_clarification */}
+      <TypeChoiceButtons onChoose={onChooseDiagramType} />
 
       {/* ToolTray */}
       <ToolTray />

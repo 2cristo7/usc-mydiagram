@@ -44,7 +44,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         addNode, addEdge, addMessage, setUiState, setPendingClarification,
         updateNode, removeNode, removeEdge, applyDiagram,
         traceToolCall, traceToolResult, clearToolTrace,
-        setGenerationPhase, clearDiagramContent,
+        setGenerationPhase, clearDiagramContent, setPendingTypeChoice,
     } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
@@ -248,6 +248,25 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 setUiState('awaiting_clarification');
             });
 
+            // S10.3 — el backend detectó ambigüedad UML y pide al usuario que elija
+            // el tipo de diagrama. Camino NUEVO, separado del flujo agent:clarification
+            // (thread_id/resume). Se guarda la pregunta+opciones en pendingTypeChoice;
+            // la respuesta va por `message:regenerate` (ver chooseDiagramType).
+            socket.on('diagram:type_clarification', (data) => {
+                const question: string = data?.question ?? '¿Qué tipo de diagrama UML quieres generar?';
+                const options: { label: string; value: string }[] = Array.isArray(data?.options)
+                    ? data.options
+                    : [];
+                addMessage({
+                    id: crypto.randomUUID(),
+                    text: question,
+                    sender: 'system',
+                    timestamp: new Date(),
+                });
+                setPendingTypeChoice({ question, options });
+                setUiState('awaiting_clarification');
+            });
+
             socket.on('diagram:error', (data) => {
                 addMessage({
                     id: crypto.randomUUID(),
@@ -407,6 +426,44 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         setUiState('generating');
     };
 
-    return {connectionState, sendMessage, sendClarificationAnswer, regenerate };
+    // S10.3 — el usuario eligió un tipo de diagrama tras `diagram:type_clarification`.
+    // Re-lanza la generación con el prompt ORIGINAL (último mensaje de usuario) y el
+    // tipo elegido, sin añadir un mensaje de usuario duplicado. Limpia la elección
+    // pendiente y reactiva el estado de generación.
+    const chooseDiagramType = (diagramTypeValue: string) => {
+        const { messages, setPendingTypeChoice, setSelectedDiagramType,
+                setUiState, setLastGenerationType, setLastGenerationPrompt,
+                setCurrentDiagramId } = useStore.getState();
+
+        // Recuperar el último mensaje del usuario como prompt original
+        const originalPrompt = [...messages].reverse().find((m) => m.sender === 'user')?.text;
+        if (!originalPrompt) return;
+
+        // Actualizar tipo seleccionado en la UI para coherencia visual
+        // (el valor viene como string; el store acepta DiagramType)
+        setSelectedDiagramType(diagramTypeValue as import('../types').DiagramType);
+        setLastGenerationType(diagramTypeValue as import('../types').DiagramType);
+        setLastGenerationPrompt(originalPrompt);
+        setCurrentDiagramId(null);
+
+        // Limpiar la elección pendiente antes de emitir para que los botones
+        // desaparezcan inmediatamente y no se pueda pulsar dos veces.
+        setPendingTypeChoice(null);
+        clearToolTrace();
+        lastPromptRef.current = originalPrompt;
+        isRefiningRef.current = false;
+
+        // Limpiar el canvas: la nueva generación arranca desde staging.
+        clearDiagramContent();
+        setUiState('generating');
+        setGenerationPhase('staging');
+
+        socketRef.current?.emit('message:regenerate', {
+            prompt: originalPrompt,
+            diagram_type: diagramTypeValue,
+        });
+    };
+
+    return {connectionState, sendMessage, sendClarificationAnswer, regenerate, chooseDiagramType };
 }
 

@@ -12,7 +12,7 @@ import { FloatingPrompt } from "./components/FloatingPrompt";
 function App() {
   useAuth();
   useUndoRedoShortcuts();
-  const { connectionState, sendMessage, sendClarificationAnswer, regenerate } = useWebSocket();
+  const { connectionState, sendMessage, sendClarificationAnswer, regenerate, chooseDiagramType } = useWebSocket();
 
   return (
     <ReactFlowProvider>
@@ -36,7 +36,7 @@ function App() {
         </div>
 
         {/* Row 2, Col 3 — ChatPanel */}
-        <ChatPanel connectionState={connectionState} />
+        <ChatPanel connectionState={connectionState} onChooseDiagramType={chooseDiagramType} />
       </div>
 
       {/* Overlay — HistoryDrawer */}

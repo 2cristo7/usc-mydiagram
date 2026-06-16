@@ -1,4 +1,4 @@
-import type { Message, DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry } from "../types";
+import type { Message, DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry, PendingTypeChoice } from "../types";
 import { create } from "zustand";
 import { persistCurrentDiagram } from "../lib/api";
 
@@ -51,6 +51,11 @@ interface MsgStore {
     // S7.4 — clarificación pendiente del agente (null si no hay ninguna)
     pendingClarification: Clarification | null;
     setPendingClarification: (c: Clarification | null) => void;
+    // S10.3 — elección de tipo de diagrama UML ambiguo. Camino separado del flujo
+    // de refine (pendingClarification/thread_id): se dispara por
+    // `diagram:type_clarification` y se resuelve emitiendo `message:regenerate`.
+    pendingTypeChoice: PendingTypeChoice | null;
+    setPendingTypeChoice: (choice: PendingTypeChoice | null) => void;
     // S7.5 — traza en vivo de tool calls del run actual. Se limpia al lanzar un
     // run nuevo (sendMessage), NO al responder una clarificación: la reanudación
     // continúa el MISMO run y la traza sigue acumulando.
@@ -127,6 +132,14 @@ interface DiagramStore {
     // estado vivo en memoria. El primer prompt tras esto arranca una generación
     // desde cero (currentDiagramId null → POST).
     newDiagram: () => void;
+    // S10.3 — al eliminar (borrado suave) el diagrama ABIERTO desde el historial,
+    // se vacía el canvas y se guarda aquí su id/título: el canvas muestra un aviso
+    // "en la papelera, clica para restaurar". null = no hay diagrama en este
+    // limbo. Restaurarlo (o cargar/crear otro) lo limpia; borrarlo en firme abre
+    // un diagrama nuevo.
+    trashedDiagram: { id: string; title: string } | null;
+    markCurrentTrashed: (info: { id: string; title: string }) => void;
+    clearTrashed: () => void;
 }
 
 export type Store = MsgStore & DiagramStore;
@@ -144,6 +157,8 @@ export const useStore = create<Store>()((set) => ({
     setGenerationPhase: (phase) => set({ generationPhase: phase }),
     pendingClarification: null,
     setPendingClarification: (c) => set({ pendingClarification: c }),
+    pendingTypeChoice: null,
+    setPendingTypeChoice: (choice) => set({ pendingTypeChoice: choice }),
 
     toolTrace: [],
     traceToolCall: (call) => set((state) => ({
@@ -169,6 +184,7 @@ export const useStore = create<Store>()((set) => ({
         currentDiagram: diagram,
         nodes: diagram.nodes,
         edges: diagram.edges,
+        trashedDiagram: null,
      }),
      updateNode: (id, changes) => {
         set((state) => ({
@@ -290,10 +306,32 @@ export const useStore = create<Store>()((set) => ({
         messages: [],
         toolTrace: [],
         pendingClarification: null,
+        pendingTypeChoice: null,
         editRequestNodeId: null,
         uiState: 'idle',
         generationPhase: 'idle',
+        trashedDiagram: null,
      }),
+     trashedDiagram: null,
+     // Vacía el canvas y el chat pero deja el aviso de "en la papelera": idéntico a
+     // newDiagram salvo que guarda info del diagrama para poder restaurarlo.
+     markCurrentTrashed: (info) => set({
+        nodes: [],
+        edges: [],
+        currentDiagram: null,
+        currentDiagramId: null,
+        lastGenerationPrompt: null,
+        lastGenerationType: null,
+        messages: [],
+        toolTrace: [],
+        pendingClarification: null,
+        pendingTypeChoice: null,
+        editRequestNodeId: null,
+        uiState: 'idle',
+        generationPhase: 'idle',
+        trashedDiagram: info,
+     }),
+     clearTrashed: () => set({ trashedDiagram: null }),
      importDiagram: (diagram) => set({
         nodes: diagram.nodes,
         edges: diagram.edges,
@@ -304,9 +342,11 @@ export const useStore = create<Store>()((set) => ({
         messages: [],
         toolTrace: [],
         pendingClarification: null,
+        pendingTypeChoice: null,
         editRequestNodeId: null,
         uiState: 'ready',
         generationPhase: 'done',
+        trashedDiagram: null,
      }),
      applyDiagram: (diagram) => set((state) => {
         // El done SIEMPRE manda (reconciliación incondicional), pero si los
