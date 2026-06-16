@@ -44,20 +44,21 @@ import { useStore } from '../store/index'
 import { useUiStore } from '../store/ui'
 import { useHistoryStore } from '../store/history'
 import { getDiagram, restoreDiagram } from '../lib/api'
-import { DiagramToFlow } from '../ui/utils/diagramToFlow'
+import { DiagramToFlow, computeDistributedAnchors, buildFlowEdges, type Box } from '../ui/utils/diagramToFlow'
 import { stagingNodePositions, stagingEdges } from '../ui/utils/stagingLayout'
 
-import { UmlClassNode } from './nodes/UmlClassNode'
 import { C4Node } from './nodes/C4Node'
 import { ArchitectureNode } from './nodes/ArchitectureNode'
 import { ArchitectureGroupNode } from './nodes/ArchitectureGroupNode'
 import { SequenceActorNode } from './nodes/SequenceActorNode'
 import { FlowNode } from './nodes/FlowNode'
 import { TableNode } from './nodes/TableNode'
-import { StateNode } from './nodes/StateNode'
 import { MindmapNode } from './nodes/MindmapNode'
 import { LifelineNode } from './nodes/LifelineNode'
 import { ActivationNode } from './nodes/ActivationNode'
+import { UseCaseNode } from './nodes/UseCaseNode'
+import { UseCaseActorNode } from './nodes/UseCaseActorNode'
+import { UseCaseSystemNode } from './nodes/UseCaseSystemNode'
 import { SequenceMessageEdge, EditableEdge, EdgeMarkers } from './edges'
 import { makeConnectionLine } from './edges/ConnectionLine'
 import { predictEdgeDefaults } from '../ui/utils/edgeDefaults'
@@ -71,17 +72,18 @@ import { GRID_SIZE } from '../ui/utils/grid'
 import { FIT_VIEW_OPTIONS, FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView'
 
 const nodeTypes = {
-  umlClass: UmlClassNode,
   c4: C4Node,
   architecture: ArchitectureNode,
   architectureGroup: ArchitectureGroupNode,
   sequenceActor: SequenceActorNode,
   flow: FlowNode,
   table: TableNode,
-  state: StateNode,
   mindmap: MindmapNode,
   lifeline: LifelineNode,
   activation: ActivationNode,
+  useCase: UseCaseNode,
+  useCaseActor: UseCaseActorNode,
+  useCaseSystem: UseCaseSystemNode,
 }
 
 // Un único modelo de edge editable (EditableEdge) para todos los diagramas: las
@@ -244,6 +246,38 @@ export function DiagramCanvas() {
     }
   }, [])
 
+  // ── Guarda contra zoom-durante-navegación ───────────────────────────────────
+  // El zoom (rueda) y la navegación (arrastre con botón central/derecho) son gestos
+  // mutuamente excluyentes, pero el *momentum scroll* de macOS sigue emitiendo
+  // eventos `wheel` de inercia un buen rato tras soltar la rueda —también con ratón
+  // físico—. Si arrancas a navegar mientras esa inercia aún llega, d3-zoom toma esos
+  // `wheel` como zoom y la vista "salta" en mitad del pan (el transform cambia de
+  // escala solo, frame a frame). Solución: mientras haya un botón pulsado, tragamos
+  // los `wheel` en FASE DE CAPTURA sobre el wrapper —antes de que el listener de
+  // d3-zoom (en un descendiente, fase de burbuja) los vea— de modo que zoom y
+  // navegación nunca se solapen. Callback ref para re-enganchar al cambiar de fase
+  // (staging/assembling/done montan wrappers distintos).
+  const wheelGuardCleanup = useRef<(() => void) | null>(null)
+  const canvasRef = useCallback((el: HTMLDivElement | null) => {
+    wheelGuardCleanup.current?.()
+    wheelGuardCleanup.current = null
+    if (!el) return
+    let dragging = false
+    const onDown = () => { dragging = true }
+    const onUp = () => { dragging = false }
+    const onWheel = (e: WheelEvent) => {
+      if (dragging || e.buttons !== 0) e.stopPropagation()
+    }
+    el.addEventListener('mousedown', onDown, true)
+    window.addEventListener('mouseup', onUp, true)
+    el.addEventListener('wheel', onWheel, true)
+    wheelGuardCleanup.current = () => {
+      el.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('mouseup', onUp, true)
+      el.removeEventListener('wheel', onWheel, true)
+    }
+  }, [])
+
   // ── Estado controlado del canvas interactivo ───────────────────────────────
   // React Flow v12 exige nodos/aristas controlados (con onNodesChange) para que
   // el arrastre siga al ratón en vivo. Derivamos del store via DiagramToFlow y
@@ -266,6 +300,45 @@ export function DiagramCanvas() {
     setRfNodes(derived.nodes)
     setRfEdges(derived.edges)
   }, [derived, setRfNodes, setRfEdges])
+
+  // Refinamiento del ruteo con tamaños MEDIDOS. El layout inicial (DiagramToFlow)
+  // calcula anclajes/waypoints con tamaños ESTIMADOS de los nodos; al renderizar, el
+  // tamaño real difiere y los anclajes "alineados" caen desfasados → escaloncitos.
+  // Una vez React Flow mide los nodos, recalculamos el ruteo con sus cajas reales y
+  // reconstruimos las aristas. Solo para diagramas que enrutan con dagre (no
+  // sequence/mindmap/architecture, que tienen su propio layout). La firma de
+  // geometría evita recomputar salvo que cambie posición o tamaño de algún nodo.
+  const nodeGeomSig = useMemo(
+    () =>
+      rfNodes
+        .map(
+          (n) =>
+            `${n.id}:${Math.round(n.position.x)},${Math.round(n.position.y)},${Math.round(
+              n.measured?.width ?? 0,
+            )},${Math.round(n.measured?.height ?? 0)}`,
+        )
+        .join('|'),
+    [rfNodes],
+  )
+  useEffect(() => {
+    if (!currentDiagram) return
+    const dt = currentDiagram.diagram_type
+    if (dt === 'sequence' || dt === 'mindmap' || dt === 'architecture' || dt === 'use_case') return
+
+    const boxes = new Map<string, Box>()
+    for (const n of rfNodes) {
+      const w = n.measured?.width
+      const h = n.measured?.height
+      if (!w || !h) return // aún no medidos: esperamos al siguiente cambio de firma
+      boxes.set(n.id, { cx: n.position.x + w / 2, cy: n.position.y + h / 2, w, h })
+    }
+    if (boxes.size === 0) return
+
+    const anchors = computeDistributedAnchors(currentDiagram, boxes)
+    setRfEdges(buildFlowEdges(currentDiagram, anchors))
+    // nodeGeomSig resume la geometría de rfNodes; depender de él evita re-render en bucle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeGeomSig, currentDiagram, setRfEdges])
 
   // Re-encuadre al CARGAR un diagrama distinto (p. ej. seleccionarlo en el
   // historial). El canvas interactivo ya está montado, y la prop `fitView` solo
@@ -542,7 +615,7 @@ export function DiagramCanvas() {
   }
 
   return (
-    <div className="relative flex h-full w-full">
+    <div ref={canvasRef} className="relative flex h-full w-full">
       <EdgeMarkers />
       <ReactFlow
         nodes={rfNodes}
