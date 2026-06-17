@@ -1,6 +1,7 @@
 import type { Message, DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry, PendingTypeChoice } from "../types";
 import { create } from "zustand";
 import { persistCurrentDiagram } from "../lib/api";
+import { toast } from "./toast";
 
 // Fase de animación de generación por streaming.
 // - 'idle': sin diagrama en curso, comportamiento normal.
@@ -27,7 +28,15 @@ function schedulePersist() {
     if (_saveTimer !== null) clearTimeout(_saveTimer)
     _saveTimer = setTimeout(() => {
         _saveTimer = null
-        persistCurrentDiagram()
+        // Consumimos el resultado para avisar al usuario si el autoguardado falla.
+        // 'no-session' no es un fallo real (usuario sin login): se ignora en
+        // silencio. El toast store deduplicará mensajes idénticos simultáneos,
+        // evitando spam si varias ediciones rápidas coinciden en el fallo.
+        persistCurrentDiagram().then((r) => {
+            if (!r.ok && r.error !== 'no-session') {
+                toast.error('No se pudieron guardar los cambios. Revisa tu conexión.')
+            }
+        })
     }, 800)
 }
 

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import { useStore } from '../store'
+import { toast } from '../store/toast'
 
 interface UseInlineEditOptions {
   initialValue: string
@@ -75,11 +76,22 @@ export function useInlineEdit({
   const commit = useCallback(
     (value: string) => {
       if (committedRef.current) return
+      // Si el valor resultante está vacío, descartamos en vez de persistir: un
+      // nodo o arista con label vacío rompe la legibilidad del diagrama. El
+      // guard committedRef se activa igualmente para evitar el doble-commit
+      // (blur tras Enter) incluso en el camino de descarte.
+      if (!value.trim()) {
+        committedRef.current = true
+        setIsEditing(false)
+        setEditValue(initialValue)
+        toast.warning('El nombre no puede estar vacío.')
+        return
+      }
       committedRef.current = true
       setIsEditing(false)
       onCommit(value)
     },
-    [onCommit]
+    [onCommit, initialValue]
   )
 
   const discard = useCallback(() => {
