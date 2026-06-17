@@ -13,6 +13,7 @@ import {
   ConnectionMode,
 } from '@xyflow/react'
 import { AlertTriangle, Trash2 } from 'lucide-react'
+import { EmptyState, Spinner } from '../ui/primitives'
 
 function DiagramQuestionIcon({ size = 48, className }: { size?: number; className?: string }) {
   return (
@@ -67,6 +68,7 @@ import { architectureLayoutElk, architectureLayoutSync } from '../ui/utils/archi
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
 import { persistCurrentDiagram } from '../lib/api'
+import { toast } from '../store/toast'
 import { beginHistoryInteraction, endHistoryInteraction } from '../store/historyManager'
 import { beginDragCursor, endDragCursor } from '../ui/utils/dragCursor'
 import { GRID_SIZE } from '../ui/utils/grid'
@@ -127,6 +129,7 @@ export function DiagramCanvas() {
   const addEdge = useStore((s) => s.addEdge)
   const canvasLocked = useUiStore((s) => s.canvasLocked)
   const gridEnabled = useUiStore((s) => s.gridEnabled)
+  const focusPrompt = useUiStore((s) => s.focusPrompt)
   const [, setSelectedNode] = useState<DiagramNode | null>(null)
   // Menús contextuales: se abren con click DERECHO (gesto tradicional de menú).
   // El derecho solo navega cuando arrastra (panOnDrag); un click derecho sin
@@ -245,6 +248,7 @@ export function DiagramCanvas() {
       s.setUiState('ready')
     } catch (e) {
       console.error('[DiagramCanvas] error restaurando diagrama de la papelera:', e)
+      toast.error('No se pudo restaurar el diagrama de la papelera.')
     }
   }, [])
 
@@ -582,7 +586,7 @@ export function DiagramCanvas() {
       return (
         <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
           <div className="flex flex-col items-center gap-4">
-            <div className="h-12 w-12 border-[4px] border-[var(--color-ink)] border-t-[var(--color-accent)] animate-spin" />
+            <Spinner size={48} label="Generando diagrama" />
             <p className="text-sm font-semibold text-[var(--color-ink)]">
               Generando diagrama...
             </p>
@@ -607,12 +611,12 @@ export function DiagramCanvas() {
     }
     return (
       <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <DiagramQuestionIcon size={48} className="text-[var(--color-ink)]/30" />
-          <p className="text-sm font-semibold text-[var(--color-ink)]/60">
-            Describe un diagrama en el chat para empezar
-          </p>
-        </div>
+        <EmptyState
+          icon={<DiagramQuestionIcon size={48} />}
+          title="Aún no hay ningún diagrama"
+          description="Describe en lenguaje natural lo que quieres modelar (un ERD, un diagrama de clases, un flujo…) y la IA lo generará por ti."
+          action={{ label: 'Escribir un diagrama', onClick: focusPrompt }}
+        />
       </div>
     )
   }
@@ -693,8 +697,22 @@ export function DiagramCanvas() {
     endDragCursor()
   }
 
+  // Banner de error no intrusivo: visible cuando un refinamiento falla pero ya hay
+  // un diagrama en el canvas (el bloque !currentDiagram no se alcanza en ese caso,
+  // así que el usuario no vería nada sin este aviso). Se superpone en la franja
+  // superior sin tapar el diagrama; desaparece al volver a 'ready' o 'generating'.
+  const showErrorBanner = uiState === 'error'
+
   return (
     <div ref={canvasRef} className="relative flex h-full w-full">
+      {showErrorBanner && (
+        <div className="absolute top-0 left-0 right-0 z-20 flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] border-b-[3px] border-[var(--color-danger)] shadow-[0_3px_0_var(--color-danger)] pointer-events-none">
+          <AlertTriangle size={16} className="shrink-0 text-[var(--color-danger)]" />
+          <p className="text-xs font-semibold text-[var(--color-ink)]">
+            No se pudo completar la operación. Revisa el chat e inténtalo de nuevo.
+          </p>
+        </div>
+      )}
       <EdgeMarkers />
       <ReactFlow
         nodes={rfNodes}
@@ -746,6 +764,21 @@ export function DiagramCanvas() {
           style={{ background: 'var(--color-surface)', ...MINIMAP_SIZE }}
         />
       </ReactFlow>
+      {currentDiagram.nodes.length === 0 && (
+        // Diagrama cargado/creado pero sin nodos: el grid sigue visible debajo.
+        // pointer-events-none deja pasar el arrastre desde la paleta al lienzo;
+        // solo el CTA recupera los eventos.
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="pointer-events-auto">
+            <EmptyState
+              icon={<DiagramQuestionIcon size={48} />}
+              title="Este diagrama está vacío"
+              description="Arrastra un nodo desde la barra de la izquierda o pídele un cambio al chat para empezar a construirlo."
+              action={{ label: 'Pedir un cambio al chat', onClick: focusPrompt }}
+            />
+          </div>
+        </div>
+      )}
       {edgeMenu && (
         <EdgeContextMenu
           edgeId={edgeMenu.edgeId}

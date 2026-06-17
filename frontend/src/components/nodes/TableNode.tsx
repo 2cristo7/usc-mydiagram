@@ -32,6 +32,9 @@ export function TableNode({ id, data, selected }: NodeProps<TableNodeType>) {
         )}
       </div>
       <div className="px-3 py-1.5">
+        {attributes.length === 0 && (
+          <p className="py-0.5 text-xs italic text-[var(--color-ink)]/40">Sin columnas</p>
+        )}
         {attributes.map((attr, i) => {
           const isPK = attr.includes('PK')
           const isFK = attr.includes('FK')

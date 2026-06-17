@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
+import { MessageSquareText } from 'lucide-react'
 import { ChatMessage } from './ChatMessage'
 import { ToolTray } from './ToolTray'
 import { TypeChoiceButtons } from './TypeChoiceButtons'
 import type { ConnectionState } from '../types'
 import { useStore } from '../store/index'
+import { EmptyState, Spinner } from '../ui/primitives'
 
 interface ChatPanelProps {
   connectionState: ConnectionState
@@ -23,16 +25,6 @@ const CONNECTION_COLORS: Record<ConnectionState, string> = {
   connected: 'var(--color-accent-3)',
   disconnected: 'var(--color-danger)',
   error: 'var(--color-danger)',
-}
-
-function Spinner() {
-  return (
-    <span
-      className="inline-block h-3.5 w-3.5 border-[2px] border-[var(--color-accent)] border-t-transparent animate-spin rounded-full"
-      role="status"
-      aria-label="trabajando"
-    />
-  )
 }
 
 export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelProps) {
@@ -59,7 +51,12 @@ export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelPro
       {/* Messages */}
       <div className="flex-1 overflow-y-auto py-2">
         {messages.length === 0 && (
-          <p className="text-center text-sm text-[var(--color-ink)]/40 py-8">Sin mensajes aún</p>
+          <EmptyState
+            className="py-10"
+            icon={<MessageSquareText size={40} />}
+            title="Aún no hay mensajes"
+            description="Escribe abajo lo que quieres modelar. Aquí verás la conversación con el agente y podrás pedir refinamientos."
+          />
         )}
         {messages.map((msg) => (
           <ChatMessage

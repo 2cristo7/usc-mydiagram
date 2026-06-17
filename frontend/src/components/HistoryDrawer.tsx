@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Drawer, Badge } from '../ui/primitives'
+import { LogIn, SearchX, Inbox, Trash2 } from 'lucide-react'
+import { Drawer, Badge, Spinner, EmptyState } from '../ui/primitives'
 import { useUiStore } from '../store/ui'
 import { useAuthStore } from '../store/auth'
 import {
@@ -15,6 +16,7 @@ import type { DiagramMeta } from '../lib/api'
 import { useStore } from '../store/index'
 import { useHistoryStore } from '../store/history'
 import { DIAGRAM_TYPE_OPTIONS } from '../types'
+import { toast } from '../store/toast'
 
 // Etiquetas en español, reutilizando el mismo origen que las tarjetas de
 // selección de tipo de diagrama. Si el tipo no está mapeado, se muestra crudo.
@@ -58,6 +60,12 @@ export function HistoryDrawer() {
 
   // Menú contextual (clic derecho). null = cerrado.
   const [menu, setMenu] = useState<Menu | null>(null)
+
+  // id del diagrama cuya carga está en curso (clic en una tarjeta): muestra
+  // spinner en esa tarjeta y bloquea más clics mientras llega del servidor.
+  const [loadingId, setLoadingId] = useState<string | null>(null)
+  // Vaciado de papelera en curso: bloquea el botón para no repetir la petición.
+  const [emptyingTrash, setEmptyingTrash] = useState(false)
 
   // Cualquier clic/scroll/Escape fuera del menú lo cierra.
   useEffect(() => {
@@ -109,6 +117,8 @@ export function HistoryDrawer() {
   )
 
   async function loadDiagram(id: string) {
+    if (loadingId) return
+    setLoadingId(id)
     try {
       const row = await getDiagram(id)
       setCurrentDiagram(row.data)
@@ -124,6 +134,9 @@ export function HistoryDrawer() {
       setDrawerOpen(false)
     } catch (e) {
       console.error('[HistoryDrawer] error cargando diagrama:', e)
+      toast.error('No se pudo abrir el diagrama.')
+    } finally {
+      setLoadingId(null)
     }
   }
 
@@ -151,6 +164,9 @@ export function HistoryDrawer() {
       }
     } catch (e) {
       console.error('[HistoryDrawer] error eliminando diagrama:', e)
+      // La tarjeta reaparece por el rollback optimista; el toast explica al usuario
+      // por qué volvió (sin él, la UI parece errática).
+      toast.error('No se pudo eliminar el diagrama.')
       setItems(prev)
     }
   }
@@ -171,6 +187,7 @@ export function HistoryDrawer() {
       }
     } catch (e) {
       console.error('[HistoryDrawer] error restaurando diagrama:', e)
+      toast.error('No se pudo restaurar el diagrama.')
       setTrashItems(prev)
     }
   }
@@ -186,12 +203,14 @@ export function HistoryDrawer() {
       if (useStore.getState().trashedDiagram?.id === id) newDiagram()
     } catch (e) {
       console.error('[HistoryDrawer] error borrando definitivamente:', e)
+      toast.error('No se pudo borrar definitivamente.')
       setTrashItems(prev)
     }
   }
 
   async function handleEmptyTrash() {
-    if (trashItems.length === 0) return
+    if (trashItems.length === 0 || emptyingTrash) return
+    setEmptyingTrash(true)
     const prev = trashItems
     setTrashItems([])
     try {
@@ -201,7 +220,10 @@ export function HistoryDrawer() {
       if (useStore.getState().trashedDiagram) newDiagram()
     } catch (e) {
       console.error('[HistoryDrawer] error vaciando papelera:', e)
+      toast.error('No se pudo vaciar la papelera.')
       setTrashItems(prev)
+    } finally {
+      setEmptyingTrash(false)
     }
   }
 
@@ -231,9 +253,13 @@ export function HistoryDrawer() {
           </button>
         </div>
         {!user ? (
-          <p className="text-center text-sm text-[var(--color-ink)]/50 py-8 px-4">
-            Inicia sesión con Google para ver tu historial de diagramas.
-          </p>
+          <div className="flex-1 flex items-center justify-center">
+            <EmptyState
+              icon={<LogIn size={40} />}
+              title="Inicia sesión para ver tu historial"
+              description="Con tu cuenta de Google guardamos automáticamente cada diagrama que generes y podrás recuperarlo desde aquí."
+            />
+          </div>
         ) : trashOpen ? (
           <>
             <div className="px-4 py-3 border-b-[3px] border-[var(--color-ink)]">
@@ -246,10 +272,11 @@ export function HistoryDrawer() {
               />
               <button
                 onClick={handleEmptyTrash}
-                disabled={trashItems.length === 0}
-                className="mt-3 block w-full border-[3px] border-[var(--color-ink)] p-2 text-sm font-semibold text-[var(--color-danger)] bg-[var(--color-bg)] hover:bg-[var(--color-danger)]/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={trashItems.length === 0 || emptyingTrash}
+                className="mt-3 flex w-full items-center justify-center gap-2 border-[3px] border-[var(--color-ink)] p-2 text-sm font-semibold text-[var(--color-danger)] bg-[var(--color-bg)] hover:bg-[var(--color-danger)]/10 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Vaciar papelera
+                {emptyingTrash && <Spinner size={14} label="Vaciando papelera" />}
+                {emptyingTrash ? 'Vaciando…' : 'Vaciar papelera'}
               </button>
             </div>
             <div className="flex-1 overflow-y-auto scrollbar-brutal">
@@ -260,9 +287,21 @@ export function HistoryDrawer() {
                 <p className="text-center text-sm text-[var(--color-danger)] py-8">{trashError}</p>
               )}
               {!trashLoading && !trashError && filteredTrash.length === 0 && (
-                <p className="text-center text-sm text-[var(--color-ink)]/50 py-8">
-                  Papelera vacía
-                </p>
+                trashSearch.trim() ? (
+                  <EmptyState
+                    className="py-10"
+                    icon={<SearchX size={36} />}
+                    title="Sin coincidencias"
+                    description={`Ningún diagrama de la papelera coincide con «${trashSearch.trim()}».`}
+                  />
+                ) : (
+                  <EmptyState
+                    className="py-10"
+                    icon={<Trash2 size={36} />}
+                    title="Papelera vacía"
+                    description="Los diagramas que elimines aparecerán aquí y podrás restaurarlos."
+                  />
+                )
               )}
               {!trashLoading &&
                 !trashError &&
@@ -314,9 +353,21 @@ export function HistoryDrawer() {
                 <p className="text-center text-sm text-[var(--color-danger)] py-8">{error}</p>
               )}
               {!loading && !error && filtered.length === 0 && (
-                <p className="text-center text-sm text-[var(--color-ink)]/50 py-8">
-                  Sin diagramas guardados
-                </p>
+                search.trim() ? (
+                  <EmptyState
+                    className="py-10"
+                    icon={<SearchX size={36} />}
+                    title="Sin coincidencias"
+                    description={`Ningún diagrama coincide con «${search.trim()}».`}
+                  />
+                ) : (
+                  <EmptyState
+                    className="py-10"
+                    icon={<Inbox size={36} />}
+                    title="Aún no has guardado diagramas"
+                    description="Genera tu primer diagrama desde el chat: se guardará aquí automáticamente."
+                  />
+                )
               )}
               {!loading &&
                 !error &&
@@ -324,11 +375,12 @@ export function HistoryDrawer() {
                   <button
                     key={item.id}
                     onClick={() => loadDiagram(item.id)}
+                    disabled={loadingId !== null}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       setMenu({ id: item.id, x: e.clientX, y: e.clientY, kind: 'active' })
                     }}
-                    className="w-full text-left px-4 py-3 border-b border-[var(--color-ink)]/20 hover:bg-[var(--color-accent)]/10 active:bg-[var(--color-accent)]/20"
+                    className="w-full text-left px-4 py-3 border-b border-[var(--color-ink)]/20 hover:bg-[var(--color-accent)]/10 active:bg-[var(--color-accent)]/20 disabled:cursor-default disabled:hover:bg-transparent"
                   >
                     <div className="flex items-center gap-2">
                       <div className="flex-1 min-w-0">
@@ -339,12 +391,16 @@ export function HistoryDrawer() {
                           {new Date(item.updated_at).toLocaleDateString()}
                         </span>
                       </div>
-                      <Badge
-                        color={BADGE_COLORS[item.diagram_type] ?? 'var(--color-accent)'}
-                        className="shrink-0 text-white"
-                      >
-                        {TYPE_LABELS[item.diagram_type] ?? item.diagram_type}
-                      </Badge>
+                      {loadingId === item.id ? (
+                        <Spinner size={16} label="Cargando diagrama" className="shrink-0" />
+                      ) : (
+                        <Badge
+                          color={BADGE_COLORS[item.diagram_type] ?? 'var(--color-accent)'}
+                          className="shrink-0 text-white"
+                        >
+                          {TYPE_LABELS[item.diagram_type] ?? item.diagram_type}
+                        </Badge>
+                      )}
                     </div>
                   </button>
                 ))}

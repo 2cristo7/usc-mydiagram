@@ -1,9 +1,9 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Download, Upload, RefreshCw } from 'lucide-react'
 import { toPng } from 'html-to-image'
 import { useStore } from '../store/index'
 import { diagramImportSchema } from '../types'
-import { Button, Menu } from '../ui/primitives'
+import { Button, Menu, Spinner } from '../ui/primitives'
 import {
   diagramFilename,
   triggerDownload,
@@ -15,6 +15,7 @@ import {
   loadImage,
 } from '../ui/utils/download'
 import { persistCurrentDiagram } from '../lib/api'
+import { toast } from '../store/toast'
 
 const IMAGE_PADDING = 40
 // Tope del lado mayor de la imagen (en px de flujo, antes de PIXEL_RATIO).
@@ -36,6 +37,10 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
   const importDiagram = useStore((s) => s.importDiagram)
   const lastGenerationPrompt = useStore((s) => s.lastGenerationPrompt)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // El rasterizado a PNG (diagramas grandes, hasta 4096px) y el import+guardado
+  // pueden tardar; bloqueamos la acción y mostramos carga mientras corren.
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   // No hay botón "Guardar": toda edición del canvas autoguarda sola (debounce en
   // el store) y los cambios de la IA persisten en el done. Aquí solo quedan
@@ -45,8 +50,10 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
   const canImport = uiState === 'idle' || uiState === 'ready' || uiState === 'error'
 
   async function handleExportPng() {
+    if (exporting) return
     const viewportEl = document.querySelector<HTMLElement>('.react-flow__viewport')
     if (!viewportEl) return
+    setExporting(true)
     // Encuadre del diagrama ENTERO: unión de los bounds de los nodos y de las
     // aristas (estas se curvan o se enrutan a los handles laterales, fuera del
     // rectángulo de los nodos; sin ellas el PNG recorta esas líneas — p. ej. las
@@ -55,7 +62,10 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
       getRenderedNodeBounds(viewportEl),
       getRenderedEdgeBounds(viewportEl),
     )
-    if (!bounds) return
+    if (!bounds) {
+      setExporting(false)
+      return
+    }
     // Escala natural (1.0) como en el tope de "Ajustar vista". Si a 1.0 el lado
     // mayor superara MAX_IMAGE_DIM, se reduce el zoom lo justo para que el
     // diagrama entero quepa: la excepción para diagramas enormes.
@@ -100,6 +110,9 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
       )
     } catch (err) {
       console.error('[export] fallo al exportar PNG:', err)
+      toast.error('No se pudo exportar la imagen PNG.')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -112,10 +125,11 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
+    setImporting(true)
     try {
       const parsed = diagramImportSchema.safeParse(JSON.parse(await file.text()))
       if (!parsed.success) {
-        window.alert('El archivo no es un diagrama MydIAgram válido.')
+        toast.error('El archivo no es un diagrama MydIAgram válido.')
         return
       }
       // Importar como diagrama NUEVO: no sobreescribe la sesión viva, arranca
@@ -125,10 +139,13 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
       // 'no-session' y el diagrama queda importado pero sin persistir.
       const r = await persistCurrentDiagram()
       if (!r.ok && r.error !== 'no-session') {
-        window.alert(`Diagrama importado, pero no se pudo guardar: ${r.error}`)
+        // El diagrama ya está en el canvas; el fallo es solo de persistencia.
+        toast.warning(`Diagrama importado, pero no se pudo guardar: ${r.error}`)
       }
     } catch {
-      window.alert('No se pudo leer el archivo: no es un JSON válido.')
+      toast.error('No se pudo leer el archivo: no es un JSON válido.')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -152,33 +169,33 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
             aria-label="Exportar diagrama"
             className="text-xs p-1.5 flex items-center"
           >
-            <Download size={14} />
+            {exporting ? <Spinner size={14} label="Exportando" /> : <Download size={14} />}
           </Button>
         }
         items={[
           {
-            label: 'Exportar PNG',
-            icon: <Download size={14} />,
+            label: exporting ? 'Exportando PNG…' : 'Exportar PNG',
+            icon: exporting ? <Spinner size={14} label="Exportando" /> : <Download size={14} />,
             onClick: handleExportPng,
-            disabled: !canExport,
+            disabled: !canExport || exporting,
           },
           {
             label: 'Exportar .mdia',
             icon: <Download size={14} />,
             onClick: handleExportJson,
-            disabled: !canExport,
+            disabled: !canExport || exporting,
           },
         ]}
       />
       <Button
         variant="secondary"
         onClick={() => fileInputRef.current?.click()}
-        disabled={!canImport}
+        disabled={!canImport || importing}
         title="Importar diagrama"
         aria-label="Importar diagrama (.mdia o .json)"
         className="text-xs p-1.5 flex items-center"
       >
-        <Upload size={14} />
+        {importing ? <Spinner size={14} label="Importando" /> : <Upload size={14} />}
       </Button>
       <input
         ref={fileInputRef}

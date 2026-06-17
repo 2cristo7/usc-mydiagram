@@ -20,6 +20,11 @@ interface UiStore {
   // fijan a las celdas del grid al arrastrarlos. Al desactivarlo, movimiento libre.
   gridEnabled: boolean
   toggleGrid: () => void
+  // Contador que se incrementa para pedir foco en el prompt flotante (lo usa el
+  // CTA del estado vacío del canvas). FloatingPrompt observa el cambio y enfoca
+  // su textarea. Un nonce en vez de un booleano para poder reenfocar repetido.
+  promptFocusNonce: number
+  focusPrompt: () => void
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -35,4 +40,6 @@ export const useUiStore = create<UiStore>((set) => ({
   toggleCanvasLock: () => set((s) => ({ canvasLocked: !s.canvasLocked })),
   gridEnabled: false,
   toggleGrid: () => set((s) => ({ gridEnabled: !s.gridEnabled })),
+  promptFocusNonce: 0,
+  focusPrompt: () => set((s) => ({ promptFocusNonce: s.promptFocusNonce + 1 })),
 }))

@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { signInWithGoogle } from '../hooks/useAuth'
+import { Spinner } from '../ui/primitives'
 
 interface GoogleLoginModalProps {
   open: boolean
@@ -32,21 +33,41 @@ function GoogleLogo({ size = 20 }: { size?: number }) {
 }
 
 export function GoogleLoginModal({ open, onClose }: GoogleLoginModalProps) {
+  // El login redirige toda la página vía OAuth; entre el clic y la redirección
+  // puede haber un instante de espera. Mostramos carga y bloqueamos el botón.
+  const [loading, setLoading] = useState(false)
+
+  // Cerrar descarta cualquier estado de carga pendiente y avisa al padre.
+  function close() {
+    setLoading(false)
+    onClose()
+  }
+
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') close()
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [open, onClose])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   if (!open) return null
+
+  async function handleLogin() {
+    setLoading(true)
+    try {
+      await signInWithGoogle()
+    } catch {
+      setLoading(false)
+    }
+  }
 
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center"
-      onMouseDown={onClose}
+      onMouseDown={close}
     >
       <div className="absolute inset-0 bg-black/40" />
       <div
@@ -57,7 +78,7 @@ export function GoogleLoginModal({ open, onClose }: GoogleLoginModalProps) {
         className="relative w-[340px] max-w-[90vw] bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] shadow-[var(--shadow-brutal-lg)] p-6 flex flex-col items-center gap-5"
       >
         <button
-          onClick={onClose}
+          onClick={close}
           aria-label="Cerrar"
           className="absolute top-3 right-3 flex h-7 w-7 items-center justify-center border-[2px] border-[var(--color-ink)] rounded-[var(--radius)] bg-[var(--color-surface)] text-[var(--color-ink)] transition-all duration-75 hover:translate-x-[-1px] hover:translate-y-[-1px] active:translate-x-[1px] active:translate-y-[1px]"
         >
@@ -76,11 +97,12 @@ export function GoogleLoginModal({ open, onClose }: GoogleLoginModalProps) {
         </div>
 
         <button
-          onClick={signInWithGoogle}
-          className="flex w-full items-center justify-center gap-3 px-4 py-2.5 font-semibold border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] bg-[var(--color-surface)] text-[var(--color-ink)] shadow-[var(--shadow-brutal)] transition-all duration-75 hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[var(--shadow-brutal-lg)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+          onClick={handleLogin}
+          disabled={loading}
+          className="flex w-full items-center justify-center gap-3 px-4 py-2.5 font-semibold border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] bg-[var(--color-surface)] text-[var(--color-ink)] shadow-[var(--shadow-brutal)] transition-all duration-75 hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[var(--shadow-brutal-lg)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:opacity-60 disabled:pointer-events-none"
         >
-          <GoogleLogo size={20} />
-          Continuar con Google
+          {loading ? <Spinner size={20} label="Conectando" /> : <GoogleLogo size={20} />}
+          {loading ? 'Conectando…' : 'Continuar con Google'}
         </button>
       </div>
     </div>

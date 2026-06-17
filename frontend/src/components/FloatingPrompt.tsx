@@ -1,6 +1,14 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Send } from 'lucide-react'
 import { useStore } from '../store/index'
+import { useUiStore } from '../store/ui'
+import { toast } from '../store/toast'
+
+// Límite razonable para que el agente no reciba prompts desproporcionados.
+// 2000 caracteres cubre cualquier descripción detallada de diagrama real.
+const MAX_PROMPT_LENGTH = 2000
+// Umbral a partir del cual mostramos el contador (> 90 % del máximo).
+const COUNTER_THRESHOLD = Math.floor(MAX_PROMPT_LENGTH * 0.9)
 
 interface FloatingPromptProps {
   onSendMessage: (msg: string) => void
@@ -11,6 +19,14 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { currentDiagram, pendingClarification, uiState, generationPhase } = useStore()
+  const promptFocusNonce = useUiStore((s) => s.promptFocusNonce)
+
+  // El CTA del canvas vacío incrementa promptFocusNonce: enfocamos el textarea.
+  // Ignoramos el valor inicial (0) para no robar foco al montar.
+  useEffect(() => {
+    if (promptFocusNonce === 0) return
+    textareaRef.current?.focus()
+  }, [promptFocusNonce])
 
   // El minimapa (footprint ~140px abajo a la derecha) solo se renderiza en las
   // fases 'assembling' y 'done'; durante el streaming ('staging') no existe. Por
@@ -36,6 +52,12 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
   function send() {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
+    // Bloqueamos mensajes excesivamente largos: el agente no los necesita y
+    // podrían saturar el contexto del LLM con texto irrelevante.
+    if (trimmed.length > MAX_PROMPT_LENGTH) {
+      toast.warning(`El mensaje es demasiado largo (máximo ${MAX_PROMPT_LENGTH} caracteres).`)
+      return
+    }
     if (pendingClarification) {
       onSendClarificationAnswer(trimmed)
     } else {
@@ -75,6 +97,19 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
             className="scrollbar-brutal block w-full resize-none bg-transparent px-3 py-2 text-sm text-[var(--color-ink)] placeholder:text-[var(--color-ink)]/40 focus:outline-none disabled:opacity-50 overflow-y-auto"
             style={{ maxHeight: `${24 * 8}px` }}
           />
+          {/* Contador discreto: aparece solo cuando el usuario supera el 90 % del
+              límite, para no distraer durante el uso normal. Rojo cuando excede. */}
+          {value.length > COUNTER_THRESHOLD && (
+            <span
+              className={`absolute bottom-1.5 right-2 text-[10px] font-mono pointer-events-none select-none transition-colors ${
+                value.length > MAX_PROMPT_LENGTH
+                  ? 'text-red-500'
+                  : 'text-[var(--color-ink)]/40'
+              }`}
+            >
+              {value.length}/{MAX_PROMPT_LENGTH}
+            </span>
+          )}
         </div>
         <button
           onClick={send}
