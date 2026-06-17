@@ -7,11 +7,15 @@ import type { Session, User } from '@supabase/supabase-js'
 interface AuthStore {
   session: Session | null
   user: User | null
+  // false hasta que getSession() resuelve por primera vez. Evita el parpadeo
+  // "invitado → logueado" al arrancar: la UI puede mostrar carga mientras tanto.
+  initialized: boolean
   setSession: (session: Session | null) => void
 }
 
 export const useAuthStore = create<AuthStore>()((set) => ({
   session: null,
   user: null,
-  setSession: (session) => set({ session, user: session?.user ?? null }),
+  initialized: false,
+  setSession: (session) => set({ session, user: session?.user ?? null, initialized: true }),
 }))
