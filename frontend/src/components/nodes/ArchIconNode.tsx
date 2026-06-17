@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import type { NodeType } from '../../types'
 import { useInlineEdit } from '../../hooks/useInlineEdit'
 import { useStore } from '../../store'
@@ -203,7 +203,7 @@ function ComponentIcon() {
   )
 }
 
-const ICON_MAP: Partial<Record<NodeType, () => JSX.Element>> = {
+const ICON_MAP: Partial<Record<NodeType, () => ReactElement>> = {
   database: DatabaseIcon, service: ServiceIcon,   queue:     QueueIcon,
   gateway:  GatewayIcon,  person:  PersonIcon,    system:    SystemIcon,
   container: ContainerIcon,                        component: ComponentIcon,

@@ -227,6 +227,13 @@ p {
   outline: none;
 }
 
+/* Los nodos de arquitectura (archIcon) dibujan su PROPIO anillo de selección
+   alrededor de icono + texto (ver ArchIconNode). Anulamos el outline global
+   para no duplicar el halo (si no, salen dos anillos). */
+.react-flow__node.react-flow__node-archIcon.selected {
+  outline: none;
+}
+
 /* Cursores estilo Miro.
    Fondo: cursor NORMAL en reposo y al arrastrar con el IZQUIERDO para seleccionar
    (RF marca el pane con .selection); solo al navegar con el botón DERECHO/central

@@ -7,6 +7,7 @@ import {
 import { useInlineEdit } from '../../hooks/useInlineEdit'
 import { useStore } from '../../store'
 import { useUiStore } from '../../store/ui'
+import { useArchGeom } from '../../store/archGeom'
 import { getFloatingAnchor } from '../../ui/utils/getFloatingAnchor'
 import { getWaypointPath } from '../../ui/utils/getWaypointPath'
 import { snapPoint } from '../../ui/utils/grid'
@@ -42,6 +43,10 @@ export function EditableEdge({
 
   const sourceNode = useInternalNode(source)
   const targetNode = useInternalNode(target)
+  // Recomputar el trazado cuando un nodo archIcon mide/actualiza su caja de texto
+  // (cambia la silueta botella sobre la que se anclan los extremos). measured no
+  // cambia (la caja sigue siendo 72×72), así que nos suscribimos a este version.
+  useArchGeom((s) => s.version)
 
   // Extremos por defecto: anclaje flotante automático (intersección borde-borde).
   // Con el grid activo se snappean en ambos ejes para que las aristas rectas

@@ -1,9 +1,37 @@
 import { Position, type Node } from '@xyflow/react'
+import {
+  archBottlePolygonForNode,
+  archIconCenterLocal,
+  isArchBottle,
+  rayIntersectPolygon,
+} from './archBottle'
 
 type AnchorResult = {
   x: number
   y: number
   position: Position
+}
+
+// Centro de referencia (en flujo) desde el que se traza el rayo de anclaje. Para
+// los nodos archIcon es el centro del ICONO (no el de la caja envolvente), de
+// modo que las aristas horizontales toquen el cuello a media altura del icono.
+function rayCenter(node: Node): { x: number; y: number } {
+  const p = absPos(node)
+  if (isArchBottle(node)) {
+    const c = archIconCenterLocal()
+    return { x: p.x + c.x, y: p.y + c.y }
+  }
+  const w = node.measured?.width ?? node.width ?? 100
+  const h = node.measured?.height ?? node.height ?? 40
+  return { x: p.x + w / 2, y: p.y + h / 2 }
+}
+
+// Lado dominante de salida/entrada a partir de la dirección del rayo (icono
+// cuadrado → comparación simétrica).
+function sideFromDir(dx: number, dy: number): Position {
+  return Math.abs(dx) >= Math.abs(dy)
+    ? dx > 0 ? Position.Right : Position.Left
+    : dy > 0 ? Position.Bottom : Position.Top
 }
 
 // Posición absoluta del nodo: los nodos internos de React Flow exponen
@@ -104,6 +132,19 @@ export function anchorPointOnShape(node: Node, anchor: { x: number; y: number })
   const p = absPos(node)
   const fullW = node.measured?.width ?? node.width ?? 100
   const fullH = node.measured?.height ?? node.height ?? 40
+
+  // archIcon: el anclaje (normalizado sobre la caja del icono) se interpreta como
+  // dirección desde el centro del icono y se interseca con la silueta botella, así
+  // el extremo se pega al contorno real (cuello del icono o cuerpo del texto).
+  if (isArchBottle(node)) {
+    const poly = archBottlePolygonForNode(node)
+    const origin = archIconCenterLocal()
+    const dir = { x: anchor.x * fullW - origin.x, y: anchor.y * fullH - origin.y }
+    if (dir.x === 0 && dir.y === 0) return { x: p.x + origin.x, y: p.y + origin.y }
+    const hit = rayIntersectPolygon(origin, dir, poly)
+    return { x: p.x + hit.x, y: p.y + hit.y }
+  }
+
   const w = fullW / 2
   const h = fullH / 2
   const cx = p.x + w
@@ -126,19 +167,27 @@ export function anchorPointOnShape(node: Node, anchor: { x: number; y: number })
 
 export function getFloatingAnchor(node: Node, otherNode: Node): AnchorResult {
   const np = absPos(node)
-  const op = absPos(otherNode)
   const fullW = node.measured?.width ?? node.width ?? 100
   const fullH = node.measured?.height ?? node.height ?? 40
-  const nx = np.x + fullW / 2
-  const ny = np.y + fullH / 2
-  const ox = op.x + (otherNode.measured?.width ?? otherNode.width ?? 100) / 2
-  const oy = op.y + (otherNode.measured?.height ?? otherNode.height ?? 40) / 2
-
-  const w = fullW / 2
-  const h = fullH / 2
+  // Centros de referencia (icono para archIcon, centro de caja para el resto).
+  const { x: nx, y: ny } = rayCenter(node)
+  const { x: ox, y: oy } = rayCenter(otherNode)
 
   const dx = ox - nx
   const dy = oy - ny
+
+  // archIcon: rayo centro-icono → centro-otro, intersecado con la silueta botella.
+  if (isArchBottle(node)) {
+    const position = sideFromDir(dx, dy)
+    if (dx === 0 && dy === 0) return { x: nx, y: ny, position }
+    const poly = archBottlePolygonForNode(node)
+    const origin = archIconCenterLocal()
+    const hit = rayIntersectPolygon(origin, { x: dx, y: dy }, poly)
+    return { x: np.x + hit.x, y: np.y + hit.y, position }
+  }
+
+  const w = fullW / 2
+  const h = fullH / 2
 
   const absDx = Math.abs(dx)
   const absDy = Math.abs(dy)
