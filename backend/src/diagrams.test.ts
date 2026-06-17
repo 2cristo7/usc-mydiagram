@@ -34,6 +34,8 @@ function makeBuilder() {
     insert: record('insert'),
     update: record('update'),
     eq: record('eq'),
+    is: record('is'),
+    not: record('not'),
     order: record('order'),
     single: vi.fn(() => Promise.resolve(result)),
     maybeSingle: vi.fn(() => Promise.resolve(result)),

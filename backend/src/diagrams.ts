@@ -74,7 +74,9 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
     .is('deleted_at', null)
     .order('updated_at', { ascending: false })
   if (error) {
-    res.status(500).json({ error: error.message })
+    // Logueamos el error real en servidor para no filtrar internos de Postgres al cliente.
+    console.error('[diagrams] error al listar:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   res.json(data)
@@ -90,7 +92,8 @@ router.get('/trash', async (req: AuthedRequest, res: Response) => {
     .not('deleted_at', 'is', null)
     .order('deleted_at', { ascending: false })
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al listar papelera:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   res.json(data)
@@ -106,7 +109,8 @@ router.get('/:id', async (req: AuthedRequest, res: Response) => {
     .eq('id', req.params.id)
     .maybeSingle()
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al obtener diagrama:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   if (!data) {
@@ -131,7 +135,8 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
     .select('id, title, diagram_type, created_at, updated_at')
     .single()
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al crear diagrama:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   res.status(201).json(data)
@@ -153,7 +158,8 @@ router.patch('/:id', async (req: AuthedRequest, res: Response) => {
     .select('id, title, diagram_type, created_at, updated_at')
     .maybeSingle()
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al actualizar diagrama:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   if (!data) {
@@ -174,7 +180,8 @@ router.post('/:id/restore', async (req: AuthedRequest, res: Response) => {
     .select('id')
     .maybeSingle()
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al restaurar diagrama:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   if (!data) {
@@ -195,7 +202,8 @@ router.delete('/:id/permanent', async (req: AuthedRequest, res: Response) => {
     .select('id')
     .maybeSingle()
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al borrar definitivamente diagrama:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   if (!data) {
@@ -215,7 +223,8 @@ router.delete('/trash', async (req: AuthedRequest, res: Response) => {
     .delete()
     .not('deleted_at', 'is', null)
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al vaciar papelera:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   res.status(204).end()
@@ -234,7 +243,8 @@ router.delete('/:id', async (req: AuthedRequest, res: Response) => {
     .select('id')
     .maybeSingle()
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[diagrams] error al mover a papelera:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
   if (!data) {
