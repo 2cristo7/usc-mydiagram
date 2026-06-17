@@ -5,7 +5,7 @@ import dagre from '@dagrejs/dagre';
 import { sequenceLayout } from './sequenceLayout';
 import { mindmapLayout } from './mindmapLayout';
 import { architectureLayoutSync } from './architectureLayout';
-import { defaultEdgeShape } from './edgeDefaults';
+import { defaultEdgeShape, edgeTypeStyle } from './edgeDefaults';
 import { routeOrthogonal, simpleZClear, type Rect, type Side as RouteSide } from './orthogonalRoute';
 
 const nodeTypeMap: Partial<Record<NodeType, string>> = {
@@ -160,29 +160,14 @@ export function buildFlowEdges(
     return diagram.edges.map((edge) => {
         const auto = anchors.get(edge.id);
 
-        // Defaults visuales según semántica de edge_type (solo cuando el usuario no
-        // ha guardado un estilo propio ya). Las aristas de casos de uso siguen la
-        // convención UML:
-        //  - include / extend → discontinua con flecha abierta hacia el target
-        //  - inherits          → línea sólida, flecha hueca apuntando al padre;
-        //                        el triángulo hueco lo da el marker #arrowHollow
-        //                        (aún no existe; mientras usamos la flecha abierta).
-        //  - association       → sólida sin flecha (targetArrow:false).
-        const edgeTypeDefaults: Record<string, Partial<typeof edge.data>> = {
-            include:  { strokeStyle: 'dashed', targetArrow: true,  sourceArrow: false, label: edge.label || '«include»' },
-            extend:   { strokeStyle: 'dashed', targetArrow: true,  sourceArrow: false, label: edge.label || '«extend»'  },
-            // inherits: triángulo hueco UML (generalización actor→actor).
-            // markerEndId apunta al marker SVG #arrowHollow definido en EdgeMarkers.
-            inherits: { strokeStyle: 'normal', targetArrow: false, sourceArrow: false, markerEndId: 'arrowHollow' },
-            association: { strokeStyle: 'normal', targetArrow: false, sourceArrow: false },
-        };
-        let typeDefaults: Partial<typeof edge.data> = edge.edge_type ? (edgeTypeDefaults[edge.edge_type] ?? {}) : {};
-        // Arquitectura: 'calls' es sólida; cualquier otra relación (dependencia) va
-        // discontinua. Mantiene el estilado al reconstruir las aristas en el
-        // refinamiento con tamaños medidos.
-        if (diagram.diagram_type === 'architecture') {
-            typeDefaults = { strokeStyle: (edge.edge_type ?? 'calls') === 'calls' ? 'normal' : 'dashed' };
-        }
+        // Defaults visuales según semántica de edge_type (solo rellenan lo que el
+        // usuario no ha fijado todavía). El estilo lo decide la fuente única
+        // edgeTypeStyle (compartida con el panel de edición); aquí solo añadimos las
+        // etiquetas «include»/«extend» por defecto, que son contenido inicial, no
+        // estilo, y por tanto no viven en edgeTypeStyle.
+        const typeDefaults: Partial<typeof edge.data> = edgeTypeStyle(edge.edge_type, diagram.diagram_type);
+        if (edge.edge_type === 'include') typeDefaults.label = edge.label || '«include»';
+        if (edge.edge_type === 'extend')  typeDefaults.label = edge.label || '«extend»';
 
         return {
             id: edge.id,

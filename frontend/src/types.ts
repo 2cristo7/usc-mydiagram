@@ -180,6 +180,41 @@ export type EdgeType = z.infer<typeof edgeTypeSchema>;
 export type DiagramNode = z.infer<typeof diagramNodeSchema>;
 export type DiagramEdge = z.infer<typeof diagramEdgeSchema>;
 
+// S10.3 — tipos de relación admitidos por cada tipo de diagrama, con etiqueta
+// legible y orden de presentación. Fuente ÚNICA del selector "Tipo de relación"
+// del panel de edición de aristas (EdgeContextMenu): cada diagrama solo expone la
+// semántica que le es propia (un ERD no debe ofrecer «include»; un mapa mental no
+// ofrece cardinalidades). Deriva del MISMO enum edgeTypeSchema; un edge_type nuevo
+// allí que no se mapee aquí queda fuera del selector aunque siga siendo válido.
+// El estilo visual de cada tipo lo decide edgeTypeStyle (ui/utils/edgeDefaults).
+export const DIAGRAM_EDGE_TYPES: Record<DiagramType, { value: EdgeType; label: string }[]> = {
+    erd: [
+        { value: 'one_to_one', label: 'Uno a uno' },
+        { value: 'one_to_many', label: 'Uno a muchos' },
+        { value: 'many_to_many', label: 'Muchos a muchos' },
+    ],
+    flowchart: [
+        { value: 'flow', label: 'Flujo' },
+        { value: 'conditional', label: 'Condicional' },
+    ],
+    architecture: [
+        { value: 'calls', label: 'Llama a' },
+        { value: 'depends_on', label: 'Depende de' },
+    ],
+    use_case: [
+        { value: 'association', label: 'Asociación' },
+        { value: 'include', label: '«include»' },
+        { value: 'extend', label: '«extend»' },
+        { value: 'inherits', label: 'Generalización' },
+    ],
+    mindmap: [
+        { value: 'association', label: 'Rama' },
+    ],
+    sequence: [
+        { value: 'sequence', label: 'Mensaje' },
+    ],
+};
+
 // S6.9 — degradación parcial: el diagrama es usable pero le faltó algo que el
 // agente no pudo resolver tras agotar los reintentos. Una entrada por dimensión.
 export type DegradationCategory = 'nodes' | 'edges' | 'structure';
