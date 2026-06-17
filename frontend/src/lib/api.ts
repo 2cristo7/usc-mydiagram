@@ -7,7 +7,10 @@ import type { DiagramSchema, Message } from '../types'
 // el único punto de acceso a datos. Aquí solo se adjunta el Bearer de la sesión;
 // la RLS la impone Supabase del otro lado del gateway.
 
-const API_URL = 'http://localhost:3001'
+// URL del gateway: configurable por entorno (VITE_API_URL) con fallback a local
+// para desarrollo. Sin esto, cualquier despliegue no-local rompe todas las
+// llamadas REST. El WebSocket usa su propia var (VITE_WS_URL en useWebSocket).
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
 
 // Metadata del historial (P5): lo que devuelve GET /diagrams, sin el `data`.
 export interface DiagramMeta {
@@ -143,4 +146,100 @@ export async function emptyTrash(): Promise<void> {
   if (!headers) throw new Error('Sesión requerida')
   const res = await fetch(`${API_URL}/diagrams/trash`, { method: 'DELETE', headers })
   if (!res.ok) throw new Error(`No se pudo vaciar la papelera (HTTP ${res.status})`)
+}
+
+// --- Configuración LLM por usuario (proveedor + modelos + transporte) ---
+// La api_key nunca se devuelve: el backend solo informa de `has_api_key`.
+export interface LlmConfig {
+  provider: 'openai' | 'anthropic' | 'gemini' | 'ollama'
+  transport: 'api' | 'direct' | 'browser'
+  model_fast: string
+  model_capable: string
+  base_url?: string
+  // S10.3c — proveedores comerciales con API key guardada (cifrada) a la vez.
+  saved_providers: string[]
+}
+
+export interface LlmConfigPayload {
+  provider: 'openai' | 'anthropic' | 'gemini' | 'ollama'
+  transport: 'api' | 'direct' | 'browser'
+  model_fast: string
+  model_capable: string
+  base_url?: string
+  // Solo se envía si el usuario introduce una key nueva; null/ausente la deja intacta.
+  api_key?: string
+}
+
+// La config es POR USUARIO (RLS vía auth.uid()): requiere el Bearer de la sesión.
+export async function getLlmConfig(): Promise<LlmConfig> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/llm-config`, { headers })
+  if (!res.ok) throw new Error(`No se pudo obtener la configuración LLM (HTTP ${res.status})`)
+  return res.json()
+}
+
+export async function putLlmConfig(payload: LlmConfigPayload): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/llm-config`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail.error ?? `No se pudo guardar la configuración LLM (HTTP ${res.status})`)
+  }
+}
+
+// Revoca el guardado permanente de la API key de UN proveedor (borra de Vault).
+// La fila de config (proveedor/modelos) permanece; solo desaparece la credencial.
+export async function deleteLlmApiKey(provider: string): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/llm-config/api-key/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+    headers,
+  })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail.error ?? `No se pudo borrar la API key (HTTP ${res.status})`)
+  }
+}
+
+// --- Derechos RGPD en autoservicio (S10.4) ---
+
+// Acceso/portabilidad (RGPD art. 15 y 20): descarga TODOS los datos de la cuenta
+// en un JSON. El backend marca Content-Disposition; aquí se materializa el blob
+// y se dispara la descarga sin navegar fuera de la app.
+export async function exportAccountData(): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/account/export`, { headers })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail.error ?? `No se pudieron exportar los datos (HTTP ${res.status})`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'mydiagram-datos.json'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+// Supresión / "derecho al olvido" (RGPD art. 17): borra la cuenta y, en cascada,
+// todos los datos asociados. Irreversible — la UI exige confirmación explícita.
+export async function deleteAccount(): Promise<void> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/account`, { method: 'DELETE', headers })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail.error ?? `No se pudo eliminar la cuenta (HTTP ${res.status})`)
+  }
 }
