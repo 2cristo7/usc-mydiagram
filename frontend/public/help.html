@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ayuda · MydIAgram</title>
+  <meta name="description" content="Guía de uso de MydIAgram y configuración del modelo de lenguaje: Ollama en local, API keys de proveedores, seguridad y derechos RGPD." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --surface: #ffffff;
+      --paper: #faf7f2;
+      --ink: #111111;
+      --accent: #ff5c00;
+      --accent-2: #2563eb;
+      --accent-3: #16a34a;
+      --danger: #e11d48;
+      --radius: 4px;
+      --border: 3px solid var(--ink);
+      --shadow: 4px 4px 0 0 var(--ink);
+      --shadow-lg: 6px 6px 0 0 var(--ink);
+      --sans: 'Space Grotesk', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.6;
+    }
+    a { color: var(--accent-2); }
+    code, kbd, .mono { font-family: var(--mono); }
+    code {
+      background: var(--surface);
+      border: 2px solid var(--ink);
+      border-radius: var(--radius);
+      padding: 0.05em 0.35em;
+      font-size: 0.88em;
+    }
+    kbd {
+      background: var(--ink); color: var(--surface);
+      border-radius: var(--radius); padding: 0.1em 0.45em; font-size: 0.82em;
+    }
+
+    /* Topbar */
+    header.top {
+      position: sticky; top: 0; z-index: 30;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; padding: 0.9rem 1.5rem;
+      background: var(--accent); color: var(--ink);
+      border-bottom: var(--border);
+    }
+    header.top .brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; font-size: 1.15rem; }
+    header.top .brand .logo {
+      width: 34px; height: 34px; display: grid; place-items: center;
+      background: var(--surface); border: var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); font-weight: 700;
+    }
+    header.top a.back {
+      font-family: var(--sans); font-weight: 600; text-decoration: none;
+      color: var(--ink); background: var(--surface);
+      border: var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 0.45rem 0.9rem; font-size: 0.9rem;
+      transition: transform .07s, box-shadow .07s;
+    }
+    header.top a.back:hover { transform: translate(-1px,-1px); box-shadow: var(--shadow-lg); }
+    header.top a.back:active { transform: translate(2px,2px); box-shadow: none; }
+
+    /* Layout */
+    .wrap { display: grid; grid-template-columns: 240px minmax(0,1fr); gap: 2rem; max-width: 1180px; margin: 0 auto; padding: 2rem 1.5rem 5rem; }
+    nav.toc { position: sticky; top: 90px; align-self: start; max-height: calc(100vh - 110px); overflow: auto; }
+    nav.toc ol { list-style: none; margin: 0; padding: 0; }
+    nav.toc > ol > li { margin-bottom: 0.25rem; }
+    nav.toc a { display: block; text-decoration: none; color: var(--ink); font-size: 0.9rem; padding: 0.3rem 0.5rem; border-radius: var(--radius); border: 2px solid transparent; }
+    nav.toc a:hover { background: var(--surface); border-color: var(--ink); }
+    nav.toc .sub { padding-left: 0.75rem; }
+    nav.toc .sub a { font-size: 0.82rem; opacity: 0.8; padding: 0.2rem 0.5rem; }
+
+    main { min-width: 0; }
+    section { margin-bottom: 3rem; scroll-margin-top: 84px; }
+    h1 { font-size: 2rem; margin: 0 0 0.5rem; }
+    h2 { font-size: 1.5rem; margin: 0 0 1rem; display: flex; align-items: center; gap: 0.55rem; }
+    h2 .num { background: var(--ink); color: var(--surface); font-size: 0.9rem; width: 1.7em; height: 1.7em; display: grid; place-items: center; border-radius: var(--radius); }
+    h3 { font-size: 1.15rem; margin: 1.8rem 0 0.6rem; }
+    p { margin: 0.6rem 0; }
+    ul, ol.steps { margin: 0.6rem 0; padding-left: 1.3rem; }
+    li { margin: 0.3rem 0; }
+
+    .card { background: var(--surface); border: var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.2rem 1.4rem; margin: 1rem 0; }
+    .lead { font-size: 1.05rem; }
+
+    .callout { border: var(--border); border-radius: var(--radius); padding: 0.9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); background: var(--surface); }
+    .callout .tag { font-weight: 700; display: inline-flex; align-items: center; gap: 0.4rem; margin-bottom: 0.2rem; }
+    .callout.info { border-left: 10px solid var(--accent-2); }
+    .callout.warn { border-left: 10px solid var(--accent); }
+    .callout.danger { border-left: 10px solid var(--danger); }
+    .callout.ok { border-left: 10px solid var(--accent-3); }
+
+    figure { margin: 1.2rem 0; }
+    figure img { width: 100%; height: auto; display: block; border: var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); background: var(--paper); }
+    figure figcaption { font-size: 0.85rem; opacity: 0.7; margin-top: 0.5rem; text-align: center; }
+    .shot-missing { border: 3px dashed var(--ink); border-radius: var(--radius); padding: 2.5rem 1rem; text-align: center; font-family: var(--mono); font-size: 0.85rem; opacity: 0.55; background: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px); }
+
+    pre { background: var(--ink); color: #f5f5f5; border-radius: var(--radius); padding: 1rem 1.1rem; overflow: auto; font-family: var(--mono); font-size: 0.85rem; box-shadow: var(--shadow); }
+    pre .c { color: #8a8f98; }
+    pre .k { color: #ff9d5c; }
+
+    table.grid { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+    table.grid th, table.grid td { border: 2px solid var(--ink); padding: 0.55rem 0.7rem; text-align: left; vertical-align: top; }
+    table.grid th { background: var(--ink); color: var(--surface); }
+
+    .pill { display: inline-block; font-family: var(--mono); font-size: 0.72rem; font-weight: 600; padding: 0.12rem 0.5rem; border: 2px solid var(--ink); border-radius: 999px; background: var(--surface); }
+    .pill.green { background: var(--accent-3); color: #fff; border-color: var(--accent-3); }
+    .pill.orange { background: var(--accent); color: var(--ink); }
+    .pill.blue { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 860px) {
+      .wrap { grid-template-columns: 1fr; }
+      nav.toc { position: static; max-height: none; border: var(--border); border-radius: var(--radius); background: var(--surface); padding: 0.75rem; box-shadow: var(--shadow); }
+      .two { grid-template-columns: 1fr; }
+    }
+    footer { border-top: var(--border); padding: 1.5rem; text-align: center; font-size: 0.85rem; opacity: 0.7; }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo">M</span> MydIAgram · Ayuda</div>
+    <a class="back" href="/">← Volver a la app</a>
+  </header>
+
+  <div class="wrap">
+    <nav class="toc" aria-label="Índice">
+      <ol>
+        <li><a href="#intro">Introducción</a></li>
+        <li><a href="#uso">1 · Cómo usar la app</a>
+          <ol class="sub">
+            <li><a href="#uso-generar">Generar un diagrama</a></li>
+            <li><a href="#uso-editar">Editar el diagrama</a></li>
+            <li><a href="#uso-chat">Refinar con el chat</a></li>
+            <li><a href="#uso-historial">Historial y papelera</a></li>
+            <li><a href="#uso-exportar">Exportar</a></li>
+          </ol>
+        </li>
+        <li><a href="#llm">2 · Configurar el modelo (LLM)</a>
+          <ol class="sub">
+            <li><a href="#llm-intro">¿Qué motor usa?</a></li>
+            <li><a href="#llm-ollama">Opción A · Ollama (local)</a></li>
+            <li><a href="#llm-api">Opción B · Proveedores (API key)</a></li>
+            <li><a href="#llm-modos">Transitoria vs. guardada</a></li>
+          </ol>
+        </li>
+        <li><a href="#seguridad">3 · Seguridad</a></li>
+        <li><a href="#rgpd">4 · Privacidad y RGPD</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="intro">
+        <h1>Centro de ayuda</h1>
+        <p class="lead">
+          MydIAgram convierte lo que escribes en lenguaje natural en <strong>diagramas editables</strong>
+          (entidad-relación, UML, flujos, arquitectura). Esta guía cubre dos cosas: cómo usar la
+          aplicación y —lo más importante— cómo <strong>configurar el modelo de lenguaje</strong> que
+          genera los diagramas, ya sea gratis y en local con Ollama o con la API de un proveedor.
+        </p>
+        <div class="callout info">
+          <span class="tag">¿Con prisa?</span>
+          <p style="margin:.2rem 0 0">Si solo quieres empezar a generar diagramas sin pagar nada, ve directo a
+          <a href="#llm-ollama">Opción A · Ollama en local</a>: instalas un programa, descargas un modelo y listo.</p>
+        </div>
+      </section>
+
+      <!-- ============================ USO ============================ -->
+      <section id="uso">
+        <h2><span class="num">1</span> Cómo usar la aplicación</h2>
+        <p>La interfaz tiene tres zonas: el <strong>lienzo</strong> central donde vive el diagrama, el
+        <strong>chat</strong> a la derecha para conversar con el agente, y la <strong>barra de herramientas</strong>
+        para editar, exportar y acceder a tu perfil.</p>
+        <figure>
+          <img src="/help/app-overview.png" alt="Vista general de la aplicación" data-shot />
+          <figcaption>Vista general: lienzo, chat y herramientas.</figcaption>
+        </figure>
+
+        <h3 id="uso-generar">Generar un diagrama</h3>
+        <p>Escribe en el campo de texto qué quieres representar y pulsa <kbd>Enter</kbd>. Por ejemplo:
+        <em>«una base de datos para una tienda online con clientes, pedidos y productos»</em>. El agente
+        clasifica el tipo de diagrama, extrae las entidades y las relaciones, y dibuja el resultado.</p>
+        <figure>
+          <img src="/help/prompt.png" alt="Campo de texto para describir el diagrama" data-shot />
+          <figcaption>Describe el diagrama en lenguaje natural y pulsa Enter.</figcaption>
+        </figure>
+
+        <h3 id="uso-editar">Editar el diagrama</h3>
+        <p>Todo lo generado es editable: arrastra los nodos para recolocarlos, haz doble clic sobre un
+        texto para renombrarlo, y usa la barra de herramientas para añadir nodos, cambiar el tipo de
+        relación de una arista o reorganizar el diseño automáticamente.</p>
+        <figure>
+          <img src="/help/canvas-edit.png" alt="Edición de nodos y aristas en el lienzo" data-shot />
+          <figcaption>Arrastra, renombra y reconecta — el diagrama es un modelo de datos vivo, no una imagen.</figcaption>
+        </figure>
+
+        <h3 id="uso-chat">Refinar con el chat</h3>
+        <p>En lugar de editar a mano, puedes pedir cambios en lenguaje natural: <em>«añade una entidad
+        Factura ligada a Pedido»</em> o <em>«convierte la relación entre Cliente y Pedido en uno-a-muchos»</em>.
+        El agente aplica el cambio sobre el diagrama existente.</p>
+        <figure>
+          <img src="/help/chat.png" alt="Panel de chat conversacional" data-shot />
+          <figcaption>Conversa para refinar el diagrama sin tocar el lienzo.</figcaption>
+        </figure>
+
+        <h3 id="uso-historial">Historial y papelera</h3>
+        <p>Si inicias sesión con Google, tus diagramas se guardan automáticamente y aparecen en el
+        historial, desde donde puedes reabrirlos. Los diagramas eliminados van primero a una
+        <strong>papelera</strong> desde la que puedes restaurarlos o borrarlos definitivamente.</p>
+        <figure>
+          <img src="/help/history.png" alt="Cajón de historial de diagramas" data-shot />
+          <figcaption>El historial guarda tus diagramas; la papelera permite restaurar.</figcaption>
+        </figure>
+
+        <h3 id="uso-exportar">Exportar</h3>
+        <p>Desde el menú de exportación puedes descargar el diagrama como imagen <strong>PNG</strong> o
+        como archivo <strong>.mdia</strong> (el formato propio, que conserva el modelo de datos para
+        reabrirlo más tarde).</p>
+        <figure>
+          <img src="/help/export.png" alt="Menú de exportación" data-shot />
+          <figcaption>Exporta a PNG (imagen) o .mdia (editable).</figcaption>
+        </figure>
+      </section>
+
+      <!-- ============================ LLM ============================ -->
+      <section id="llm">
+        <h2><span class="num">2</span> Configurar el modelo de lenguaje</h2>
+
+        <h3 id="llm-intro">¿Qué motor usa MydIAgram?</h3>
+        <p>El agente que genera los diagramas necesita un <strong>modelo de lenguaje (LLM)</strong> detrás.
+        Tienes dos caminos, y eliges en <span class="pill orange">Perfil ▸ Configuración</span>:</p>
+        <div class="two">
+          <div class="card">
+            <p><span class="pill green">Gratis · privado</span></p>
+            <strong>A · Ollama en tu ordenador</strong>
+            <p style="margin:.4rem 0 0">El modelo se ejecuta en tu propia máquina. No pagas nada y los
+            datos no salen a ningún proveedor externo. Ideal para empezar y para privacidad máxima.</p>
+          </div>
+          <div class="card">
+            <p><span class="pill blue">De pago · más potente</span></p>
+            <strong>B · Proveedor con API key</strong>
+            <p style="margin:.4rem 0 0">Usas OpenAI, Anthropic o Google Gemini con tu propia clave.
+            Más calidad y velocidad, pero necesitas una cuenta y pagas por uso al proveedor.</p>
+          </div>
+        </div>
+        <figure>
+          <img src="/help/llm-modal.png" alt="Modal de configuración del LLM" data-shot />
+          <figcaption>Configuración del modelo: proveedor, modelos rápido/capaz y credenciales.</figcaption>
+        </figure>
+
+        <!-- ---------- OLLAMA ---------- -->
+        <h3 id="llm-ollama">Opción A · Ollama en local (paso a paso)</h3>
+        <p><strong>¿Qué es Ollama?</strong> Es un programa gratuito y de código abierto que descarga y
+        ejecuta modelos de lenguaje directamente en tu ordenador, sin conexión a la nube. MydIAgram se
+        comunica con él para generar los diagramas.</p>
+
+        <div class="callout ok">
+          <span class="tag">Resultado al terminar</span>
+          <p style="margin:.2rem 0 0">Ollama instalado y un par de modelos descargados; en la app eliges
+          el proveedor <code>Ollama (local)</code> y ya puedes generar diagramas gratis.</p>
+        </div>
+
+        <ol class="steps">
+          <li><strong>Descarga e instala Ollama</strong> desde <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>.
+            <ul>
+              <li><strong>macOS</strong>: descarga el <code>.dmg</code>, ábrelo y arrastra Ollama a Aplicaciones.</li>
+              <li><strong>Windows</strong>: descarga e instala el <code>.exe</code> (Windows 10 o superior).</li>
+              <li><strong>Linux</strong>: ejecuta en un terminal <code>curl -fsSL https://ollama.com/install.sh | sh</code>.</li>
+            </ul>
+          </li>
+          <li><strong>Comprueba que arrancó.</strong> Tras instalarlo, Ollama queda corriendo en segundo
+          plano en <code>http://localhost:11434</code>. Para verificarlo abre un terminal y ejecuta:
+            <pre><span class="k">ollama</span> --version</pre>
+          </li>
+          <li><strong>Descarga los modelos</strong> que usa MydIAgram (uno ligero y rápido, otro más capaz).
+          Desde el terminal:
+            <pre><span class="c"># modelo rápido (ligero, ~1.4 GB)</span>
+<span class="k">ollama</span> pull qwen3:1.7b
+
+<span class="c"># modelo capaz (más calidad, ~5 GB)</span>
+<span class="k">ollama</span> pull qwen3:8b</pre>
+            <p style="margin:.4rem 0 0">Puedes usar otros modelos (por ejemplo <code>llama3.1</code> o
+            <code>mistral</code>); basta con escribir su nombre en la configuración. Los modelos grandes
+            piden más memoria RAM: si tu equipo es modesto, quédate con el modelo rápido para ambos campos.</p>
+          </li>
+          <li><strong>Selecciónalo en la app.</strong> Abre <span class="pill orange">Perfil ▸ Configuración</span>,
+          elige el proveedor <code>Ollama (local)</code> y escribe los nombres de modelo que descargaste en
+          «Modelo rápido» y «Modelo capaz».</li>
+        </ol>
+
+        <figure>
+          <img src="/help/llm-ollama.png" alt="Configuración de Ollama en la app" data-shot />
+          <figcaption>Proveedor Ollama: elige modelo rápido y modelo capaz entre los que tengas instalados.</figcaption>
+        </figure>
+
+        <h4 style="margin:1.4rem 0 .4rem">Transporte: «navegador» o «directo»</h4>
+        <p>Con Ollama hay dos formas de que la app llegue a tu modelo local:</p>
+        <table class="grid">
+          <thead><tr><th>Modo</th><th>Cómo funciona</th><th>Cuándo usarlo</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="pill">navegador</span><br>(por defecto)</td>
+              <td>Es <strong>tu navegador</strong> quien llama a <code>localhost:11434</code>. El cálculo del
+              modelo ocurre en tu máquina; el servidor solo coordina el mensaje. No requiere ninguna
+              configuración de red.</td>
+              <td>La opción normal: tú usas la app desde el mismo ordenador donde corre Ollama.</td>
+            </tr>
+            <tr>
+              <td><span class="pill">directo</span></td>
+              <td>Es el <strong>servidor</strong> quien llama a Ollama, en la URL que indiques
+              (<code>base_url</code>, por defecto <code>http://localhost:11434</code>).</td>
+              <td>Cuando Ollama corre en otra máquina o en el propio servidor accesible por red.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="callout info">
+          <span class="tag">Privacidad en modo Ollama</span>
+          <p style="margin:.2rem 0 0">La <em>inferencia</em> del modelo ocurre en local y <strong>no se envía
+          ninguna API key</strong> (Ollama no la necesita). En modo «navegador» el texto del prompt y el
+          resultado sí transitan por el servidor para coordinar la llamada, pero el modelo nunca se ejecuta
+          en la nube.</p>
+        </div>
+
+        <!-- ---------- PROVEEDORES ---------- -->
+        <h3 id="llm-api">Opción B · Proveedores con API key</h3>
+        <p>Si quieres más calidad o velocidad, puedes usar un proveedor comercial con tu propia clave. En
+        este modo, la generación ocurre en sus servidores: el prompt y la clave se usan en el servidor de
+        MydIAgram para llamar a la API del proveedor.</p>
+
+        <div class="callout warn">
+          <span class="tag">Aviso sobre los pasos</span>
+          <p style="margin:.2rem 0 0">Los proveedores cambian sus paneles a menudo: <strong>los pasos
+          siguientes son orientativos</strong> y pueden no coincidir exactamente con lo que veas. La idea
+          general (crear cuenta → ir a «API keys» → crear clave → copiarla) se mantiene.</p>
+        </div>
+
+        <h4 style="margin:1.2rem 0 .3rem">OpenAI (claves que empiezan por <code>sk-</code>)</h4>
+        <ol class="steps">
+          <li>Crea una cuenta en <a href="https://platform.openai.com" target="_blank" rel="noopener">platform.openai.com</a>.</li>
+          <li>Entra en <strong>API keys</strong> (menú de tu cuenta) → <strong>Create new secret key</strong>.</li>
+          <li>Copia la clave <em>en ese momento</em> (luego no se vuelve a mostrar) y pégala en la app.</li>
+          <li>Necesitarás añadir saldo o un método de pago en <strong>Billing</strong>; OpenAI cobra por uso.</li>
+        </ol>
+
+        <h4 style="margin:1.2rem 0 .3rem">Anthropic / Claude (claves <code>sk-ant-</code>)</h4>
+        <ol class="steps">
+          <li>Crea una cuenta en <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>.</li>
+          <li>Ve a <strong>API Keys</strong> → <strong>Create Key</strong>.</li>
+          <li>Copia la clave y pégala en la app. Configura un método de pago en <strong>Billing</strong>.</li>
+        </ol>
+
+        <h4 style="margin:1.2rem 0 .3rem">Google Gemini (claves que empiezan por <code>AIza…</code>)</h4>
+        <ol class="steps">
+          <li>Entra en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio · API keys</a> con tu cuenta de Google.</li>
+          <li>Pulsa <strong>Create API key</strong> y selecciona o crea un proyecto.</li>
+          <li>Copia la clave y pégala en la app.</li>
+        </ol>
+
+        <div class="callout danger">
+          <span class="tag">Trata tu API key como una contraseña</span>
+          <p style="margin:.2rem 0 0">Cualquiera con tu clave puede gastar dinero en tu nombre. No la
+          compartas ni la subas a repositorios. Si crees que se ha filtrado, <strong>revócala</strong> en el
+          panel del proveedor y crea una nueva.</p>
+        </div>
+
+        <!-- ---------- MODOS DE KEY ---------- -->
+        <h3 id="llm-modos">Dos formas de usar tu API key: transitoria o guardada</h3>
+        <p>MydIAgram te deja elegir, de forma deliberada, entre comodidad y minimización de datos:</p>
+
+        <div class="two">
+          <div class="card">
+            <p><span class="pill">por sesión · no se guarda</span> <span class="pill green">por defecto</span></p>
+            <strong>Clave transitoria</strong>
+            <ul>
+              <li>La clave vive solo en tu navegador (<code>sessionStorage</code>) y en la memoria de la
+              conexión con el servidor mientras la usas.</li>
+              <li><strong>Nunca toca la base de datos ni el disco</strong>: al cerrar la pestaña, desaparece.</li>
+              <li><span class="pill green">Ventaja</span> mínima exposición: no queda nada almacenado.</li>
+              <li><span class="pill orange">Coste</span> tendrás que volver a pegarla cada nueva sesión.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <p><span class="pill blue">guardada · cifrada</span></p>
+            <strong>Clave guardada</strong>
+            <ul>
+              <li>Se almacena cifrada en el servidor (Supabase Vault) y se reutiliza en futuras sesiones.</li>
+              <li>El servidor solo te dice si <em>tienes</em> clave guardada (<code>has_api_key</code>);
+              nunca te la devuelve.</li>
+              <li><span class="pill green">Ventaja</span> comodidad: no la vuelves a introducir.</li>
+              <li><span class="pill orange">Riesgo</span> la credencial reside (cifrada) en el servidor;
+              es un dato más que custodiar. Puedes <strong>revocarla</strong> cuando quieras desde la
+              configuración, lo que borra el secreto.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout info">
+          <span class="tag">Recomendación</span>
+          <p style="margin:.2rem 0 0">Si te preocupa la privacidad, usa la clave <strong>transitoria</strong>
+          (o directamente <strong>Ollama en local</strong>, donde no hay clave). Guarda la clave solo si la
+          comodidad te compensa y confías en la custodia cifrada del servidor.</p>
+        </div>
+      </section>
+
+      <!-- ============================ SEGURIDAD ============================ -->
+      <section id="seguridad">
+        <h2><span class="num">3</span> Cómo protegemos tus datos</h2>
+        <p>Estos son los criterios de seguridad que sigue la aplicación, descritos tal y como están
+        implementados:</p>
+
+        <div class="card">
+          <h3 style="margin-top:0">Las API keys</h3>
+          <ul>
+            <li><strong>Cifrado en reposo.</strong> Las claves <em>guardadas</em> se almacenan en
+            <strong>Supabase Vault</strong>, que las cifra en reposo con una clave maestra custodiada fuera
+            de la base de datos. En la tabla solo se guarda una <em>referencia</em> al secreto, nunca la
+            clave en claro.</li>
+            <li><strong>Nunca vuelven al navegador.</strong> La app solo recibe un indicador
+            (<code>has_api_key</code>) de si hay clave guardada. La clave descifrada solo se usa
+            <em>dentro del servidor</em> para llamar al proveedor.</li>
+            <li><strong>Modo transitorio sin persistencia.</strong> Si no la guardas, la clave vive solo en
+            memoria de tu navegador y de la conexión, y se descarta al desconectar.</li>
+            <li><strong>Revocable.</strong> Puedes borrar la clave guardada en cualquier momento; se elimina
+            el secreto del Vault.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0">Tu cuenta y tus diagramas</h3>
+          <ul>
+            <li><strong>Aislamiento por usuario (RLS).</strong> Cada fila de la base de datos está protegida
+            por <em>Row Level Security</em>: las políticas de Postgres garantizan que solo puedes leer y
+            escribir <strong>tus</strong> diagramas y tu configuración. El aislamiento lo impone la base de
+            datos, no solo el servidor.</li>
+            <li><strong>Sesión verificada criptográficamente.</strong> El inicio de sesión usa Google a
+            través de Supabase Auth. Cada petición lleva un token firmado que el servidor verifica con las
+            <strong>claves públicas (JWKS, ES256)</strong> de Supabase — sin compartir secretos.</li>
+            <li><strong>Un único punto de acceso a datos.</strong> El navegador nunca habla directamente con
+            la base de datos: toda la persistencia pasa por el servidor (gateway), que transporta tu
+            identidad y deja que la RLS decida.</li>
+          </ul>
+        </div>
+
+        <div class="callout warn">
+          <span class="tag">Transparencia</span>
+          <p style="margin:.2rem 0 0">Para acelerar generaciones repetidas existe una <strong>caché global</strong>
+          de resultados que <em>no está vinculada a tu cuenta</em> (no contiene tu identificador de usuario).
+          Guarda el prompt y el diagrama resultante de forma compartida y anonimizada entre usuarios.</p>
+        </div>
+      </section>
+
+      <!-- ============================ RGPD ============================ -->
+      <section id="rgpd">
+        <h2><span class="num">4</span> Privacidad y derechos RGPD</h2>
+        <p>MydIAgram trata datos personales mínimos y te da herramientas para ejercer tus derechos del
+        Reglamento General de Protección de Datos directamente desde la app.</p>
+
+        <h3>Qué datos se guardan</h3>
+        <table class="grid">
+          <thead><tr><th>Dato</th><th>De dónde sale</th><th>Para qué</th></tr></thead>
+          <tbody>
+            <tr><td>Email, nombre y avatar</td><td>Tu perfil de Google al iniciar sesión</td><td>Identificarte y asociar tus diagramas a tu cuenta</td></tr>
+            <tr><td>Diagramas y sus prompts</td><td>Lo que generas en la app</td><td>Guardar tu historial para reabrirlos</td></tr>
+            <tr><td>Configuración del LLM</td><td>Tus elecciones de proveedor/modelo</td><td>Recordar cómo quieres generar</td></tr>
+            <tr><td>API key (si la guardas)</td><td>Tú la introduces</td><td>Llamar al proveedor; cifrada en Vault</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Tus derechos y cómo ejercerlos</h3>
+        <div class="card">
+          <p><strong>Acceso y portabilidad</strong> (arts. 15 y 20) — recibir una copia de tus datos.</p>
+          <p style="margin:.2rem 0 0">Ve a <span class="pill orange">Perfil ▸ Mis datos y privacidad ▸ Descargar JSON</span>.
+          Obtienes un archivo con tu perfil, tu configuración (sin la API key) y todos tus diagramas,
+          incluidos los de la papelera.</p>
+        </div>
+        <div class="card">
+          <p><strong>Supresión / derecho al olvido</strong> (art. 17) — borrar tu cuenta y todo dato asociado.</p>
+          <p style="margin:.2rem 0 0">En <span class="pill orange">Perfil ▸ Mis datos y privacidad ▸ Eliminar cuenta</span>.
+          Tras confirmar escribiendo <code>ELIMINAR</code>, se borra tu usuario y, en cascada, tus diagramas,
+          tu configuración y tu API key. Es <strong>irreversible</strong>.</p>
+        </div>
+        <div class="card">
+          <p><strong>Rectificación y limpieza parcial</strong> — sin borrar la cuenta entera.</p>
+          <ul style="margin:.2rem 0 0">
+            <li><strong>Borrar un diagrama</strong>: desde el historial (va a la papelera; luego puedes
+            borrarlo definitivamente).</li>
+            <li><strong>Revocar la API key guardada</strong>: en <span class="pill orange">Configuración</span>,
+            sin perder el resto de ajustes.</li>
+          </ul>
+        </div>
+
+        <figure>
+          <img src="/help/privacy-modal.png" alt="Panel Mis datos y privacidad" data-shot />
+          <figcaption>«Mis datos y privacidad»: exportar (un clic) y eliminar cuenta (confirmación por escrito).</figcaption>
+        </figure>
+
+        <div class="callout info">
+          <span class="tag">Minimización de datos</span>
+          <p style="margin:.2rem 0 0">El modelo es «inicia sesión solo para guardar»: puedes usar la app y
+          generar diagramas sin cuenta. Y si eliges Ollama en local con clave transitoria, prácticamente
+          ningún dato personal sensible llega a almacenarse.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    MydIAgram · TFG · Esta página es una guía de ayuda autocontenida. Vuelve a la app cuando quieras.
+  </footer>
+
+  <script>
+    // Si una captura aún no existe, sustituye la imagen rota por un marcador
+    // discreto para que la maquetación no se rompa.
+    document.querySelectorAll('img[data-shot]').forEach(function (img) {
+      img.addEventListener('error', function () {
+        var ph = document.createElement('div');
+        ph.className = 'shot-missing';
+        ph.textContent = '· captura pendiente: ' + (img.getAttribute('alt') || '') + ' ·';
+        img.replaceWith(ph);
+      });
+    });
+  </script>
+</body>
+</html>
