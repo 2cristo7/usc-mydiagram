@@ -97,3 +97,8 @@ class DiagramState(TypedDict):
     # este flag. El grafo corta a END limpiamente (sin generar nodos ni emitir
     # `error`/`done`). El frontend lee el evento y re-lanza con el tipo ya fijado.
     needs_type_clarification: bool
+    # Runtime LLM per-request (S10.x). None → los nodos caen a env-based (_resolve_model).
+    # No usa Annotated: el runtime es un objeto singleton por petición, no acumulable;
+    # el último escritor gana (semántica replace). Tipado como object para evitar
+    # import circular entre state.py y llm.py.
+    llm: Optional[object]

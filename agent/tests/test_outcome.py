@@ -109,7 +109,9 @@ def test_degradations_make_done_degraded():
 
 def test_every_error_category_has_a_distinct_message():
     msgs = set(ERROR_MESSAGES.values())
-    assert len(msgs) == 3, "cada categoría de error con su mensaje propio"
+    # 4 categorías: not_a_diagram, empty, internal_error y llm_error (esta última
+    # propaga el mensaje real del proveedor LLM; aquí solo se valida su fallback).
+    assert len(msgs) == 4, "cada categoría de error con su mensaje propio"
     assert all(m.strip() for m in msgs)
 
 

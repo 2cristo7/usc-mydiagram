@@ -4,6 +4,8 @@ from llm import call_llm
 _AFFIRMATIVE = ("yes", "sí", "si")
 
 async def guard(state: DiagramState) -> DiagramState:
+    runtime = state.get("llm")
+    kwargs = {"runtime": runtime} if runtime is not None else {}
     reply = await call_llm(
         system=(
             "You are a binary classifier. Answer with exactly one English word, "
@@ -14,6 +16,7 @@ async def guard(state: DiagramState) -> DiagramState:
         user=state["prompt"],
         tier="fast",
         max_tokens=10,
+        **kwargs,
     )
     normalized = reply.strip().lower().lstrip("'\"").rstrip(".'\"")
     return {"is_diagram_request": normalized.startswith(_AFFIRMATIVE)}

@@ -315,15 +315,19 @@ def tool_events(update: dict, ws: DiagramWorkspace) -> list[dict]:
 # Construcción del grafo (por petición)
 # ---------------------------------------------------------------------------
 
-def build_agent_graph(ws: DiagramWorkspace, checkpointer=None):
+def build_agent_graph(ws: DiagramWorkspace, checkpointer=None, llm_config=None):
     """Compila el grafo ReAct para refinar `ws`. Se construye por petición porque
     las tools cierran sobre este workspace concreto (ver build_tools).
 
     `checkpointer` (S7.4): necesario para interrupt() — al pausar, LangGraph
     persiste el estado (messages) por thread_id y lo restaura al reanudar. Sin él,
-    ask_clarification no puede pausar (el grafo fallaría al llamar interrupt())."""
+    ask_clarification no puede pausar (el grafo fallaría al llamar interrupt()).
+
+    `llm_config` (S10.x): si se proporciona, se usa ese provider/modelo en vez del
+    env-based. Para transport='browser', get_chat_model lanzará NotImplementedError
+    (el loop ReAct no es compatible con el proxy del navegador)."""
     tools = build_tools(ws)
-    model = get_chat_model("capable").bind_tools(tools)
+    model = get_chat_model("capable", llm_config=llm_config).bind_tools(tools)
     tool_node = ToolNode(tools)
 
     async def agent(state: MessagesState) -> dict:

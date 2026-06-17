@@ -1,7 +1,7 @@
 import pytest
 import httpx
 from unittest.mock import patch, MagicMock, AsyncMock
-from llm import OllamaBackend
+from llm import OllamaBackend, LLMError
 
 BACKEND = OllamaBackend(model="qwen3:8b", url="http://localhost:11434/api/chat")
 
@@ -28,7 +28,7 @@ async def test_http_error():
 
     with patch("llm.httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(LLMError):
             await BACKEND.complete("system prompt", "user prompt", max_tokens=100)
 
 

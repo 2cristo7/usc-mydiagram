@@ -37,7 +37,31 @@ ERROR_MESSAGES: dict[str, str] = {
         "Se produjo un error interno generando el diagrama. Vuelve a intentarlo en "
         "unos segundos."
     ),
+    "llm_error": (
+        "Error del modelo de lenguaje. Revisa la configuración del proveedor LLM."
+    ),
 }
+
+
+def llm_error_event(message: str, provider: Optional[str] = None) -> dict:
+    """Construye el evento de error para un fallo del LLM con su mensaje REAL.
+
+    El `message` es el texto accionable que viene de LLMError.message (en español,
+    específico del fallo). Se devuelve el mismo esquema que los demás eventos de
+    error del stream: {"_type": "error", "category": "llm_error", "message": ...}.
+
+    `provider`: cuando se conoce el proveedor (openai/anthropic/gemini/ollama), se
+    incluye para que el frontend pueda ofrecer un botón "abrir configuración" ya
+    posicionado en ese proveedor.
+    """
+    event = {
+        "_type": "error",
+        "category": "llm_error",
+        "message": message,
+    }
+    if provider is not None:
+        event["provider"] = provider
+    return event
 
 
 def classify_outcome(state: Optional[DiagramState], *, crashed: bool = False) -> dict:

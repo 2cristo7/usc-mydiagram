@@ -38,6 +38,8 @@ def make_classify(queue: asyncio.Queue | None = None):
         # El grafo corta a END limpiamente (route_after_classify). Nunca se pregunta si
         # el tipo viene preseleccionado (el usuario ya eligió).
         preset = state.get("diagram_type")
+        runtime = state.get("llm")
+        rt_kwargs = {"runtime": runtime} if runtime is not None else {}
         valid_types = [t.value for t in DiagramType]
         # El sistema de tipo incluye el centinela para que el LLM pueda indicar
         # ambigüedad sin forzar una clasificación errónea.
@@ -59,6 +61,7 @@ def make_classify(queue: asyncio.Queue | None = None):
                 user=state["prompt"],
                 tier="fast",
                 max_tokens=10,
+                **rt_kwargs,
             )
             return llm_response_type.strip().lower()
 
@@ -68,6 +71,7 @@ def make_classify(queue: asyncio.Queue | None = None):
                 user=state["prompt"],
                 tier="fast",
                 max_tokens=20,
+                **rt_kwargs,
             )
             return llm_response_title.strip()
 

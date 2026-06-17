@@ -9,8 +9,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 from graph import build_graph, initial_generation_state
-from outcome import classify_outcome
+from outcome import classify_outcome, llm_error_event
 from schemas import CompactDiagram, DiagramType
+from llm import LLMConfig, LLMRuntime, LLMError
 
 app = FastAPI()
 
@@ -42,6 +43,14 @@ def _get_checkpointer():
         _checkpointer = InMemorySaver()
     return _checkpointer
 
+
+def _build_runtime(llm_config: Optional[LLMConfig]) -> Optional[LLMRuntime]:
+    """Construye un LLMRuntime desde llm_config. None → None (env-based)."""
+    if llm_config is None:
+        return None
+    return LLMRuntime(config=llm_config)
+
+
 class GenerateRequest(BaseModel):
     prompt: str
     # S10.2 — Tipo preseleccionado desde la UI (opcional). Ausente/None =
@@ -49,6 +58,8 @@ class GenerateRequest(BaseModel):
     # el valor contra el enum DiagramType en el BORDE: un tipo forzado fuera del
     # enum da 422 explícito, no fallo silencioso (tipos en los bordes, §2).
     diagram_type: Optional[DiagramType] = None
+    # S10.x — Configuración LLM por petición (opcional; None → env-based).
+    llm_config: Optional[LLMConfig] = None
 
 
 # S7.1 — Refinamiento sobre un diagrama existente. `diagram` es la versión
@@ -57,6 +68,8 @@ class GenerateRequest(BaseModel):
 class RefineRequest(BaseModel):
     prompt: str
     diagram: CompactDiagram
+    # S10.x — Configuración LLM por petición (opcional; None → env-based).
+    llm_config: Optional[LLMConfig] = None
 
 
 # S7.4 — Reanudación tras una clarificación. Endpoint SEPARADO de /refine/stream:
@@ -68,6 +81,8 @@ class RefineRequest(BaseModel):
 class ResumeRequest(BaseModel):
     thread_id: str
     answer: str = Field(min_length=1)
+    # S10.x — Configuración LLM por petición (opcional; None → env-based).
+    llm_config: Optional[LLMConfig] = None
 
 @app.get("/health")
 def health():
@@ -79,7 +94,8 @@ async def generate_stream(req: GenerateRequest):
     queue: asyncio.Queue = asyncio.Queue()
     graph = build_graph(queue)
 
-    initial_state = initial_generation_state(req.prompt, req.diagram_type)
+    runtime = _build_runtime(req.llm_config)
+    initial_state = initial_generation_state(req.prompt, req.diagram_type, llm_runtime=runtime)
 
     async def run_graph():
         # La taxonomía de desenlaces vive en classify_outcome (S6.9): main.py es el
@@ -87,6 +103,9 @@ async def generate_stream(req: GenerateRequest):
         try:
             result = await graph.ainvoke(initial_state)
             event = classify_outcome(result)
+        except LLMError as e:
+            print(f"[generate_stream] llm error: {e!r}")
+            event = llm_error_event(e.message, req.llm_config.provider if req.llm_config else None)
         except Exception as e:
             print(f"[generate_stream] graph error: {e!r}")
             event = classify_outcome(None, crashed=True)
@@ -114,7 +133,8 @@ async def generate_stream(req: GenerateRequest):
     return StreamingResponse(node_stream(), media_type="application/x-ndjson")
 
 
-async def _run_refine_agent(ws, graph_input, thread_id: str):
+async def _run_refine_agent(ws, graph_input, thread_id: str,
+                            llm_config: Optional[LLMConfig] = None):
     """Corre (o reanuda) el loop ReAct sobre `ws` emitiendo eventos NDJSON en vivo
     (generador async). S7.5: astream(stream_mode="updates") en vez de ainvoke —
     cada nodo completado yielda su aporte al estado y tool_events lo traduce a
@@ -128,7 +148,8 @@ async def _run_refine_agent(ws, graph_input, thread_id: str):
     reanudación puede volver a pedir aclaración)."""
     from agent_graph import build_agent_graph, extract_history, tool_events
 
-    agent_graph = build_agent_graph(ws, checkpointer=_get_checkpointer())
+    agent_graph = build_agent_graph(ws, checkpointer=_get_checkpointer(),
+                                    llm_config=llm_config)
     # recursion_limit acota el loop ReAct: cada vuelta agent→tools cuenta; un tope
     # evita que un modelo que no converge gire indefinidamente.
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
@@ -188,19 +209,98 @@ def _log_refine_event(event: dict) -> None:
               f"history: {[h['tool'] for h in event.get('refinement_history', [])]}")
 
 
-def _refine_response(ws, graph_input, thread_id: str) -> StreamingResponse:
+# Nombre legible + URL de gestión de la API key por proveedor, para construir
+# mensajes accionables ("revisa tu key de OpenAI en …").
+_PROVIDER_INFO: dict[str, dict[str, str]] = {
+    "openai": {"label": "OpenAI", "keys_url": "https://platform.openai.com/api-keys"},
+    "anthropic": {"label": "Anthropic", "keys_url": "https://console.anthropic.com/settings/keys"},
+    "gemini": {"label": "Gemini", "keys_url": "https://aistudio.google.com/app/apikey"},
+    "ollama": {"label": "Ollama", "keys_url": ""},
+}
+
+
+def _classify_provider_exception(e: Exception, provider: Optional[str] = None) -> Optional[str]:
+    """Mapea una excepción del proveedor LLM (lanzada por LangChain durante el loop
+    ReAct de /refine) a un mensaje accionable en español, o None si no es un fallo
+    reconocible del proveedor.
+
+    El loop ReAct usa los chat models de LangChain (ChatOpenAI/ChatAnthropic/…), que
+    NO levantan nuestro LLMError sino las excepciones nativas del SDK
+    (openai.AuthenticationError, anthropic.AuthenticationError, …). Sin esto, un 401
+    por API key inválida caía en el `except Exception` genérico y el usuario veía
+    «vuelve a intentarlo» — un consejo inútil: reintentar con la misma key vuelve a
+    fallar. Detectamos por status_code / nombre de clase / texto para no acoplarnos a
+    los SDKs (que pueden no estar instalados según el proveedor activo)."""
+    status = getattr(e, "status_code", None) or getattr(
+        getattr(e, "response", None), "status_code", None
+    )
+    name = type(e).__name__
+    text = str(e).lower()
+
+    info = _PROVIDER_INFO.get(provider or "", {"label": "LLM", "keys_url": ""})
+    label = info["label"]
+    keys_url = info["keys_url"]
+
+    is_auth = (
+        status == 401
+        or "authenticationerror" in name.lower()
+        or "permissiondenied" in name.lower()
+        or "invalid_api_key" in text
+        or "incorrect api key" in text
+        or "invalid x-api-key" in text
+        or "api key not valid" in text
+    )
+    if is_auth:
+        where = f" Genera o copia una válida en {keys_url} y" if keys_url else " La key correcta y"
+        return (
+            f"La API key de {label} no es válida o ha caducado.{where} pégala en "
+            f"«Configuración del modelo de lenguaje» para el proveedor {label}."
+        )
+
+    is_rate = status == 429 or "ratelimit" in name.lower() or "rate limit" in text
+    if is_rate:
+        return (
+            f"Has superado el límite de uso (o la cuota) de {label}. Espera un momento "
+            f"o revisa tu plan en el panel de {label}."
+        )
+
+    return None
+
+
+def _refine_response(ws, graph_input, thread_id: str,
+                     llm_config: Optional[LLMConfig] = None) -> StreamingResponse:
     async def stream():
         try:
-            async for event in _run_refine_agent(ws, graph_input, thread_id):
+            async for event in _run_refine_agent(ws, graph_input, thread_id,
+                                                 llm_config=llm_config):
                 _log_refine_event(event)
                 yield json.dumps(event) + "\n"
-        except Exception as e:
-            print(f"[refine_stream] agent error: {e!r}")
+        except NotImplementedError as e:
+            # Error explícito para transport='browser' en /refine (no soportado).
+            print(f"[refine_stream] not implemented: {e!r}")
             yield json.dumps({
                 "_type": "error",
                 "category": "internal_error",
-                "message": "Se produjo un error refinando el diagrama. Vuelve a intentarlo en unos segundos.",
+                "message": str(e),
             }) + "\n"
+        except LLMError as e:
+            print(f"[refine_stream] llm error: {e!r}")
+            yield json.dumps(llm_error_event(
+                e.message, llm_config.provider if llm_config is not None else None,
+            )) + "\n"
+        except Exception as e:
+            print(f"[refine_stream] agent error: {e!r}")
+            # Auth/cuota del proveedor → mensaje accionable (reintentar no sirve).
+            prov = llm_config.provider if llm_config is not None else None
+            provider_msg = _classify_provider_exception(e, prov)
+            if provider_msg is not None:
+                yield json.dumps(llm_error_event(provider_msg, prov)) + "\n"
+            else:
+                yield json.dumps({
+                    "_type": "error",
+                    "category": "internal_error",
+                    "message": "Se produjo un error refinando el diagrama. Vuelve a intentarlo en unos segundos.",
+                }) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
@@ -220,7 +320,8 @@ async def refine_stream(req: RefineRequest):
     ws = DiagramWorkspace.from_compact(req.diagram)
     messages = [SystemMessage(content=build_system_prompt(ws)), HumanMessage(content=req.prompt)]
     thread_id = uuid.uuid4().hex
-    return _refine_response(ws, {"messages": messages}, thread_id)
+    return _refine_response(ws, {"messages": messages}, thread_id,
+                            llm_config=req.llm_config)
 
 
 @app.post("/refine/resume")
@@ -237,4 +338,5 @@ async def refine_resume(req: ResumeRequest):
             status_code=404,
             detail="No hay ninguna clarificación pendiente para ese thread_id (¿expiró o ya fue respondida?).",
         )
-    return _refine_response(ws, Command(resume=req.answer), req.thread_id)
+    return _refine_response(ws, Command(resume=req.answer), req.thread_id,
+                            llm_config=req.llm_config)

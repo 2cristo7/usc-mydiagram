@@ -2,6 +2,27 @@ import json
 import os
 import httpx
 
+from pydantic import BaseModel
+from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Excepción pública para fallos del LLM
+# ---------------------------------------------------------------------------
+
+class LLMError(Exception):
+    """Excepción que representa un fallo conocido de cualquier backend LLM.
+
+    Atributos:
+        category (str): siempre 'llm_error' — identifica la categoría de error
+            para el cliente (mismo esquema que las categorías de outcome.py).
+        message (str): mensaje en español accionable, listo para mostrar al usuario.
+    """
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.category: str = "llm_error"
+        self.message: str = message
+
+
 # ---------------------------------------------------------------------------
 # Filtro de tokens de razonamiento (<think>...</think>) para modelos locales
 # ---------------------------------------------------------------------------
@@ -46,7 +67,7 @@ async def _strip_think(stream):
         yield buf
 
 # ---------------------------------------------------------------------------
-# Backends
+# Backends (raw HTTP, sin LangChain)
 # ---------------------------------------------------------------------------
 
 class OllamaBackend:
@@ -67,10 +88,21 @@ class OllamaBackend:
         }
         print(f"\n[OLLAMA/{self.model}] system: {system[:80]}...")
         print(f"[OLLAMA/{self.model}] user:   {user[:120]}")
-        async with httpx.AsyncClient(timeout=300) as client:
-            response = await client.post(self.url, json=payload)
-            response.raise_for_status()
-        content = response.json()["message"]["content"]
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                response = await client.post(self.url, json=payload)
+                response.raise_for_status()
+            content = response.json()["message"]["content"]
+        except httpx.HTTPStatusError as exc:
+            raise LLMError(f"Ollama respondió HTTP {exc.response.status_code}.") from exc
+        except httpx.ConnectError as exc:
+            raise LLMError(
+                "No se pudo conectar con Ollama. ¿Está corriendo (`ollama serve`)?"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError("El proveedor LLM (Ollama) tardó demasiado en responder.") from exc
+        except (json.JSONDecodeError, KeyError, IndexError) as exc:
+            raise LLMError("El proveedor LLM (Ollama) devolvió una respuesta inesperada.") from exc
         if "<think>" in content and "</think>" in content:
             content = content.split("</think>")[-1].strip()
         print(f"[OLLAMA/{self.model}] reply:  {content[:200]}")
@@ -90,18 +122,34 @@ class OllamaBackend:
         print(f"\n[OLLAMA/{self.model}] stream system: {system[:80]}...")
 
         async def _raw():
-            async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream("POST", self.url, json=payload) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                content = data.get("message", {}).get("content", "")
-                                if content:
-                                    yield content
-                            except (json.JSONDecodeError, KeyError):
-                                pass
+            try:
+                async with httpx.AsyncClient(timeout=300) as client:
+                    async with client.stream("POST", self.url, json=payload) as response:
+                        try:
+                            response.raise_for_status()
+                        except httpx.HTTPStatusError as exc:
+                            raise LLMError(
+                                f"Ollama respondió HTTP {exc.response.status_code}."
+                            ) from exc
+                        async for line in response.aiter_lines():
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    content = data.get("message", {}).get("content", "")
+                                    if content:
+                                        yield content
+                                except (json.JSONDecodeError, KeyError):
+                                    pass
+            except LLMError:
+                raise
+            except httpx.ConnectError as exc:
+                raise LLMError(
+                    "No se pudo conectar con Ollama. ¿Está corriendo (`ollama serve`)?"
+                ) from exc
+            except httpx.TimeoutException as exc:
+                raise LLMError(
+                    "El proveedor LLM (Ollama) tardó demasiado en responder."
+                ) from exc
 
         async for chunk in _strip_think(_raw()):
             yield chunk
@@ -125,10 +173,24 @@ class OpenAIBackend:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         print(f"\n[OPENAI/{self.model}] system: {system[:80]}...")
         print(f"[OPENAI/{self.model}] user:   {user[:120]}")
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(self.url, json=payload, headers=headers)
-            response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(self.url, json=payload, headers=headers)
+                response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status == 401:
+                raise LLMError(
+                    "La API key del proveedor LLM no es válida o falta (HTTP 401)."
+                ) from exc
+            raise LLMError(f"El proveedor LLM (OpenAI) respondió HTTP {status}.") from exc
+        except httpx.ConnectError as exc:
+            raise LLMError("No se pudo conectar con el proveedor LLM (OpenAI).") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError("El proveedor LLM (OpenAI) tardó demasiado en responder.") from exc
+        except (json.JSONDecodeError, KeyError, IndexError) as exc:
+            raise LLMError("El proveedor LLM (OpenAI) devolvió una respuesta inesperada.") from exc
         print(f"[OPENAI/{self.model}] reply:  {content[:200]}")
         return content
 
@@ -144,25 +206,349 @@ class OpenAIBackend:
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
         print(f"\n[OPENAI/{self.model}] stream system: {system[:80]}...")
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream("POST", self.url, json=payload, headers=headers) as response:
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                async with client.stream("POST", self.url, json=payload, headers=headers) as response:
+                    try:
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        status = exc.response.status_code
+                        if status == 401:
+                            raise LLMError(
+                                "La API key del proveedor LLM no es válida o falta (HTTP 401)."
+                            ) from exc
+                        raise LLMError(
+                            f"El proveedor LLM (OpenAI) respondió HTTP {status}."
+                        ) from exc
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: ") and line != "data: [DONE]":
+                            try:
+                                data = json.loads(line[6:])
+                                content = data["choices"][0]["delta"].get("content", "")
+                                if content:
+                                    yield content
+                            except (json.JSONDecodeError, KeyError):
+                                pass
+        except LLMError:
+            raise
+        except httpx.ConnectError as exc:
+            raise LLMError("No se pudo conectar con el proveedor LLM (OpenAI).") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError("El proveedor LLM (OpenAI) tardó demasiado en responder.") from exc
+
+
+class AnthropicBackend:
+    """Backend HTTP crudo para la API de Anthropic (Messages API).
+
+    El stream devuelve el texto completo en un único chunk (no requiere streaming
+    incremental real — compatible con el parser ijson de extract_nodes/edges).
+    """
+
+    def __init__(self, model: str, api_key: str):
+        self.model = model
+        self.api_key = api_key
+        self.url = "https://api.anthropic.com/v1/messages"
+
+    def _headers(self) -> dict:
+        return {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+    def _payload(self, system: str, user: str, max_tokens: int) -> dict:
+        return {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+        }
+
+    async def complete(self, system: str, user: str, max_tokens: int) -> str:
+        print(f"\n[ANTHROPIC/{self.model}] system: {system[:80]}...")
+        print(f"[ANTHROPIC/{self.model}] user:   {user[:120]}")
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    self.url,
+                    json=self._payload(system, user, max_tokens),
+                    headers=self._headers(),
+                )
                 response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line.startswith("data: ") and line != "data: [DONE]":
-                        try:
-                            data = json.loads(line[6:])
-                            content = data["choices"][0]["delta"].get("content", "")
-                            if content:
-                                yield content
-                        except (json.JSONDecodeError, KeyError):
-                            pass
+            content = response.json()["content"][0]["text"]
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status == 401:
+                raise LLMError(
+                    "La API key del proveedor LLM no es válida o falta (HTTP 401)."
+                ) from exc
+            raise LLMError(f"El proveedor LLM (Anthropic) respondió HTTP {status}.") from exc
+        except httpx.ConnectError as exc:
+            raise LLMError("No se pudo conectar con el proveedor LLM (Anthropic).") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError("El proveedor LLM (Anthropic) tardó demasiado en responder.") from exc
+        except (json.JSONDecodeError, KeyError, IndexError) as exc:
+            raise LLMError(
+                "El proveedor LLM (Anthropic) devolvió una respuesta inesperada."
+            ) from exc
+        print(f"[ANTHROPIC/{self.model}] reply:  {content[:200]}")
+        return content
+
+    async def stream(self, system: str, user: str, max_tokens: int):
+        # Anthropic soporta streaming SSE, pero para la generación de JSON con
+        # ijson basta con devolver el texto completo en un único chunk.
+        content = await self.complete(system, user, max_tokens)
+        yield content
+
+
+class GeminiBackend:
+    """Backend HTTP crudo para la API de Google Gemini (generateContent).
+
+    El stream devuelve el texto completo en un único chunk.
+    """
+
+    def __init__(self, model: str, api_key: str):
+        self.model = model
+        self.api_key = api_key
+
+    def _url(self) -> str:
+        return (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self.model}:generateContent?key={self.api_key}"
+        )
+
+    def _payload(self, system: str, user: str, max_tokens: int) -> dict:
+        return {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        }
+
+    async def complete(self, system: str, user: str, max_tokens: int) -> str:
+        print(f"\n[GEMINI/{self.model}] system: {system[:80]}...")
+        print(f"\n[GEMINI/{self.model}] user:   {user[:120]}")
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    self._url(),
+                    json=self._payload(system, user, max_tokens),
+                )
+                response.raise_for_status()
+            content = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status == 401:
+                raise LLMError(
+                    "La API key del proveedor LLM no es válida o falta (HTTP 401)."
+                ) from exc
+            raise LLMError(f"El proveedor LLM (Gemini) respondió HTTP {status}.") from exc
+        except httpx.ConnectError as exc:
+            raise LLMError("No se pudo conectar con el proveedor LLM (Gemini).") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError("El proveedor LLM (Gemini) tardó demasiado en responder.") from exc
+        except (json.JSONDecodeError, KeyError, IndexError) as exc:
+            raise LLMError(
+                "El proveedor LLM (Gemini) devolvió una respuesta inesperada."
+            ) from exc
+        print(f"[GEMINI/{self.model}] reply:  {content[:200]}")
+        return content
+
+    async def stream(self, system: str, user: str, max_tokens: int):
+        content = await self.complete(system, user, max_tokens)
+        yield content
+
+
+class BrowserBackend:
+    """Backend que delega la llamada LLM al gateway via proxy HTTP interno.
+
+    El cliente (browser) tiene una sesión WebSocket con el gateway. El agente
+    no llama al modelo directamente; el gateway lo reenvía al browser que ejecuta
+    Ollama localmente.
+
+    Contrato del gateway (POST {GATEWAY_INTERNAL_URL}/internal/llm):
+      Headers: X-Internal-Token: {INTERNAL_PROXY_SECRET}
+      Body:    { proxy_session, model, messages: [{role, content}], options }
+      200:     { content: str }
+      409:     { error_code: "browser_disconnected" }
+      502:     { error_code, detail }
+      504:     { error_code: "timeout" }
+    """
+
+    def __init__(self, model: str, proxy_session: str):
+        self.model = model
+        self.proxy_session = proxy_session
+        self.gateway_url = os.environ.get("GATEWAY_INTERNAL_URL", "http://localhost:3001")
+        self.internal_token = os.environ.get("INTERNAL_PROXY_SECRET", "")
+
+    def _messages(self, system: str, user: str) -> list:
+        # Mismo trato que OllamaBackend: el prefijo /no_think desactiva el modo de
+        # razonamiento de qwen3 (si no, gasta los tokens "pensando" y content sale
+        # vacío). Se combina con "think": False en el payload.
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"/no_think\n{user}"},
+        ]
+
+    async def complete(self, system: str, user: str, max_tokens: int) -> str:
+        print(f"\n[BROWSER/{self.model}] proxy_session={self.proxy_session} system: {system[:80]}...")
+        payload = {
+            "proxy_session": self.proxy_session,
+            "model": self.model,
+            "messages": self._messages(system, user),
+            # think: False viaja al navegador, que lo reenvía a Ollama. Imprescindible
+            # para modelos de razonamiento (qwen3) o content vuelve vacío.
+            "think": False,
+            "options": {"num_predict": max_tokens},
+        }
+        headers = {"X-Internal-Token": self.internal_token}
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                response = await client.post(
+                    f"{self.gateway_url}/internal/llm",
+                    json=payload,
+                    headers=headers,
+                )
+        except httpx.ConnectError as exc:
+            raise LLMError(
+                "No se pudo conectar con el proveedor LLM (BrowserProxy)."
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError(
+                "El proveedor LLM (BrowserProxy) tardó demasiado en responder."
+            ) from exc
+        if response.status_code == 401:
+            raise LLMError(
+                "La configuración del proxy interno del navegador es inválida (HTTP 401). "
+                "Revisa INTERNAL_PROXY_SECRET."
+            )
+        if response.status_code == 409:
+            raise LLMError(
+                "El navegador se desconectó antes de que el modelo pudiera responder "
+                "(browser_disconnected). Recarga la página y vuelve a intentarlo."
+            )
+        if response.status_code == 504:
+            raise LLMError(
+                "El navegador tardó demasiado en responder (timeout). "
+                "Comprueba que Ollama está corriendo localmente y vuelve a intentarlo."
+            )
+        if response.status_code == 502:
+            try:
+                body = response.json()
+            except Exception:
+                body = {}
+            detail = body.get("detail", response.text)
+            raise LLMError(
+                f"El proxy del navegador devolvió un error (502): {detail}"
+            )
+        try:
+            response.raise_for_status()
+            content = response.json()["content"]
+        except httpx.HTTPStatusError as exc:
+            raise LLMError(
+                f"El proveedor LLM (BrowserProxy) respondió HTTP {exc.response.status_code}."
+            ) from exc
+        except (json.JSONDecodeError, KeyError, IndexError) as exc:
+            raise LLMError(
+                "El proveedor LLM (BrowserProxy) devolvió una respuesta inesperada."
+            ) from exc
+        print(f"[BROWSER/{self.model}] reply:  {content[:200]}")
+        return content
+
+    async def stream(self, system: str, user: str, max_tokens: int):
+        # El proxy no implementa streaming SSE; devolvemos el texto completo en
+        # un único chunk (compatible con el parser ijson de extract_nodes/edges).
+        content = await self.complete(system, user, max_tokens)
+        yield content
 
 
 # ---------------------------------------------------------------------------
-# Router
+# LLMConfig — configuración por petición (opcional; None → env-based)
 # ---------------------------------------------------------------------------
 
-def _resolve_model(tier: str) -> OllamaBackend | OpenAIBackend:
+class LLMConfig(BaseModel):
+    """Configuración LLM por petición. Si ausente/None en el body → comportamiento
+    histórico basado en env vars (LLM_PROFILE). Todos los campos son opcionales
+    excepto provider y transport."""
+
+    provider: str          # "openai" | "anthropic" | "gemini" | "ollama"
+    transport: str         # "api" | "direct" | "browser"
+    model_fast: str
+    model_capable: str
+    api_key: Optional[str] = None      # comercial; None para ollama
+    base_url: Optional[str] = None     # override ollama-direct; None si no
+    proxy_session: Optional[str] = None  # socket id para ollama-browser; None si no
+
+
+# ---------------------------------------------------------------------------
+# LLMRuntime — abstracción per-request que expone complete/stream por tier
+# ---------------------------------------------------------------------------
+
+class LLMRuntime:
+    """Objeto per-request que encapsula la selección de modelo y backend.
+
+    Expone complete(system, user, tier, max_tokens) y stream(system, user, tier,
+    max_tokens) donde tier ∈ "fast" | "capable".
+
+    Si se construye con config=None, resuelve desde env vars (comportamiento
+    histórico). Así los nodos del grafo pueden usar siempre el runtime sin saber
+    si viene de una petición con LLMConfig o de la configuración global.
+    """
+
+    def __init__(self, config: Optional[LLMConfig] = None):
+        self._config = config  # None = resolver desde env en tiempo de llamada
+
+    def _backend_for(self, tier: str):
+        cfg = self._config
+        if cfg is None:
+            return _resolve_model(tier)
+
+        model = cfg.model_fast if tier == "fast" else cfg.model_capable
+
+        if cfg.provider == "ollama":
+            if cfg.transport == "browser":
+                if not cfg.proxy_session:
+                    raise ValueError(
+                        "transport='browser' requiere proxy_session para Ollama en el navegador."
+                    )
+                return BrowserBackend(model=model, proxy_session=cfg.proxy_session)
+            # direct o "api" por compatibilidad
+            url = cfg.base_url or os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+            return OllamaBackend(model=model, url=url)
+
+        if cfg.provider == "openai":
+            api_key = cfg.api_key or os.environ.get("OPENAI_API_KEY", "")
+            return OpenAIBackend(model=model, api_key=api_key)
+
+        if cfg.provider == "anthropic":
+            api_key = cfg.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+            return AnthropicBackend(model=model, api_key=api_key)
+
+        if cfg.provider == "gemini":
+            api_key = cfg.api_key or os.environ.get("GEMINI_API_KEY", "")
+            return GeminiBackend(model=model, api_key=api_key)
+
+        raise ValueError(
+            f"Proveedor desconocido: '{cfg.provider}'. "
+            "Valores válidos: 'ollama', 'openai', 'anthropic', 'gemini'."
+        )
+
+    async def complete(self, system: str, user: str, tier: str = "capable",
+                       max_tokens: int = 2048) -> str:
+        backend = self._backend_for(tier)
+        return await backend.complete(system, user, max_tokens)
+
+    async def stream(self, system: str, user: str, tier: str = "capable",
+                     max_tokens: int = 2048):
+        backend = self._backend_for(tier)
+        async for chunk in backend.stream(system, user, max_tokens):
+            yield chunk
+
+
+# ---------------------------------------------------------------------------
+# Router basado en env (comportamiento histórico)
+# ---------------------------------------------------------------------------
+
+def _resolve_model(tier: str):
     profile = os.environ.get("LLM_PROFILE", "local")
 
     if profile == "local":
@@ -185,15 +571,25 @@ def _resolve_model(tier: str) -> OllamaBackend | OpenAIBackend:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Public API (compatibilidad hacia atrás; los nodos prefieren LLMRuntime)
 # ---------------------------------------------------------------------------
 
-async def call_llm(system: str, user: str, tier: str = "capable", max_tokens: int = 2048) -> str:
+async def call_llm(system: str, user: str, tier: str = "capable",
+                   max_tokens: int = 2048,
+                   runtime: Optional["LLMRuntime"] = None) -> str:
+    if runtime is not None:
+        return await runtime.complete(system, user, tier, max_tokens)
     backend = _resolve_model(tier)
     return await backend.complete(system, user, max_tokens)
 
 
-async def stream_llm(system: str, user: str, tier: str = "capable", max_tokens: int = 2048):
+async def stream_llm(system: str, user: str, tier: str = "capable",
+                     max_tokens: int = 2048,
+                     runtime: Optional["LLMRuntime"] = None):
+    if runtime is not None:
+        async for chunk in runtime.stream(system, user, tier, max_tokens):
+            yield chunk
+        return
     backend = _resolve_model(tier)
     async for chunk in backend.stream(system, user, max_tokens):
         yield chunk
@@ -212,13 +608,62 @@ async def stream_llm(system: str, user: str, tier: str = "capable", max_tokens: 
 # Imports LAZY: cada perfil solo importa su paquete provider; correr en `local`
 # no exige tener instalado langchain-openai ni langchain-anthropic.
 
-def get_chat_model(tier: str = "capable"):
-    """Devuelve un BaseChatModel de LangChain con tool calling, según LLM_PROFILE.
+def get_chat_model(tier: str = "capable", llm_config: Optional[LLMConfig] = None):
+    """Devuelve un BaseChatModel de LangChain con tool calling, según LLM_PROFILE
+    o llm_config si se proporciona.
 
     `tier` espeja _resolve_model: "fast" usa el modelo ligero, cualquier otro el
-    capaz (el agente usa "capable": el tool calling exige el modelo fiable)."""
-    profile = os.environ.get("LLM_PROFILE", "local")
+    capaz (el agente usa "capable": el tool calling exige el modelo fiable).
+
+    `llm_config` (per-request): si se proporciona, se respeta el provider y
+    api_key/models. Para transport='browser', se lanza NotImplementedError ya que
+    el loop ReAct de LangChain no puede delegarse al proxy del navegador sin
+    implementar un BaseChatModel completo con soporte de tool-calling. Decisión
+    consciente: error explícito antes que fallo silencioso o parcial.
+    """
     fast = tier == "fast"
+
+    # Si hay configuración por petición, usarla.
+    if llm_config is not None:
+        if llm_config.transport == "browser":
+            raise NotImplementedError(
+                "El refinamiento (loop ReAct) no está disponible con transport='browser'. "
+                "El proxy del navegador no soporta tool-calling de LangChain. "
+                "Usa transport='direct' con Ollama local o un proveedor comercial "
+                "(openai, anthropic, gemini)."
+            )
+
+        model = llm_config.model_fast if fast else llm_config.model_capable
+
+        if llm_config.provider == "ollama":
+            from langchain_ollama import ChatOllama
+            url = llm_config.base_url or os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+            base_url = url.split("/api/")[0]
+            return ChatOllama(model=model, base_url=base_url, temperature=0,
+                              reasoning=False, num_ctx=8192)
+
+        if llm_config.provider == "openai":
+            from langchain_openai import ChatOpenAI
+            api_key = llm_config.api_key or os.environ.get("OPENAI_API_KEY", "")
+            return ChatOpenAI(model=model, api_key=api_key, temperature=0)
+
+        if llm_config.provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+            api_key = llm_config.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+            return ChatAnthropic(model=model, api_key=api_key, temperature=0)
+
+        if llm_config.provider == "gemini":
+            # langchain-google-genai es el paquete para Gemini con LangChain.
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            api_key = llm_config.api_key or os.environ.get("GEMINI_API_KEY", "")
+            return ChatGoogleGenerativeAI(model=model, google_api_key=api_key, temperature=0)
+
+        raise ValueError(
+            f"Proveedor desconocido en llm_config: '{llm_config.provider}'."
+        )
+
+    # Comportamiento histórico: resolver desde env (LLM_PROFILE).
+    profile = os.environ.get("LLM_PROFILE", "local")
 
     if profile == "local":
         from langchain_ollama import ChatOllama

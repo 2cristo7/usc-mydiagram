@@ -15,7 +15,7 @@ import pytest
 import httpx
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from llm import _resolve_model, OllamaBackend, OpenAIBackend
+from llm import _resolve_model, OllamaBackend, OpenAIBackend, LLMError
 
 
 # ----------------------------- Router por env vars -----------------------------
@@ -97,7 +97,7 @@ async def test_openai_complete_propagates_http_error():
     )
     with patch("llm.httpx.AsyncClient") as mock_client:
         mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(LLMError):
             await OPENAI.complete("system", "user", max_tokens=50)
 
 

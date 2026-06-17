@@ -1,7 +1,7 @@
 import asyncio
 import ijson
 from state import DiagramState
-from llm import stream_llm
+from llm import stream_llm, LLMError
 from schemas import DiagramNode, NodeType, ALLOWED_NODE_TYPES, node_type_allowed
 from prompts import get_node_prompt
 
@@ -57,7 +57,10 @@ Cada elemento DEBE tener exactamente esta forma:
         # un nodo ya válido durante el feedback, no se vuelve a mandar al canvas.
         already_streamed = {n.id for n in state["nodes"]}
 
-        raw_stream = stream_llm(system=system, user=prompt, tier="capable", max_tokens=2048)
+        runtime = state.get("llm")
+        kwargs = {"runtime": runtime} if runtime is not None else {}
+        raw_stream = stream_llm(system=system, user=prompt, tier="capable", max_tokens=2048,
+                                **kwargs)
 
         events = ijson.sendable_list()
         coro = ijson.items_coro(events, "item")
@@ -99,6 +102,8 @@ Cada elemento DEBE tener exactamente esta forma:
                 await drain()
             coro.close()
             await drain()
+        except LLMError:
+            raise
         except Exception as e:
             print(f"[extract_nodes] ijson parse error: {e}")
 

@@ -54,7 +54,7 @@ def route_after_validate_schema(state: DiagramState) -> str:
     return "extract_edges"
 
 
-def initial_generation_state(prompt: str, diagram_type=None) -> dict:
+def initial_generation_state(prompt: str, diagram_type=None, llm_runtime=None) -> dict:
     """Estado inicial del pipeline de generación S6. Centralizado aquí (S7.3) para
     que /generate/stream y el nodo `regenerate` del agente (escape hatch
     regenerate_from_scratch) arranquen el grafo con EXACTAMENTE los mismos campos
@@ -64,7 +64,10 @@ def initial_generation_state(prompt: str, diagram_type=None) -> dict:
     S10.2 — `diagram_type` opcional: si el usuario preseleccionó el tipo en la UI,
     entra aquí ya parseado (DiagramType) y classify se salta la llamada LLM de
     clasificación. None = automático (comportamiento histórico: lo clasifica el
-    LLM). El escape hatch regenerate_from_scratch no fuerza tipo → default None."""
+    LLM). El escape hatch regenerate_from_scratch no fuerza tipo → default None.
+
+    S10.x — `llm_runtime` (per-request): LLMRuntime construido desde llm_config.
+    None → comportamiento histórico (los nodos resuelven desde env vars)."""
     return {
         "prompt": prompt,
         "is_diagram_request": False,
@@ -84,6 +87,8 @@ def initial_generation_state(prompt: str, diagram_type=None) -> dict:
         "degradations": [],
         # S10.3 — flag de desambiguación de tipo (default False: no hay pregunta pendiente)
         "needs_type_clarification": False,
+        # S10.x — runtime LLM per-request (None = env-based)
+        "llm": llm_runtime,
     }
 
 

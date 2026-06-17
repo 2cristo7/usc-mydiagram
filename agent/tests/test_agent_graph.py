@@ -100,7 +100,8 @@ def _seed_erd() -> DiagramWorkspace:
 
 
 def _patch_model(monkeypatch, responses):
-    monkeypatch.setattr(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses))
+    monkeypatch.setattr(agent_graph, "get_chat_model",
+                        lambda tier="capable", **kw: _FakeModel(responses))
 
 
 # S9.3b — El rate limiter se trasladó al backend (Node); el agente ya no lo tiene,
@@ -251,7 +252,7 @@ def test_refine_stream_emits_done_with_full_diagram():
                               "edge_type": "one_to_many"}, "c2"),
         _DONE,
     ]
-    with patch.object(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses)):
+    with patch.object(agent_graph, "get_chat_model", lambda tier="capable", **kw: _FakeModel(responses)):
         resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
 
     assert resp.status_code == 200
@@ -427,7 +428,7 @@ def test_refine_clarification_roundtrip_over_http():
         _DONE,
     ])
     client = TestClient(main.app)
-    with patch.object(agent_graph, "get_chat_model", lambda tier="capable": model):
+    with patch.object(agent_graph, "get_chat_model", lambda tier="capable", **kw: model):
         resp = client.post("/refine/stream", json=_erd_body())
         assert resp.status_code == 200
         event = _events(resp)[-1]
@@ -467,7 +468,7 @@ def test_refine_done_includes_refinement_history():
         _ai_tool("add_node", {"node_type": "table", "label": "Carrito"}),
         _DONE,
     ]
-    with patch.object(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses)):
+    with patch.object(agent_graph, "get_chat_model", lambda tier="capable", **kw: _FakeModel(responses)):
         resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
 
     event = _events(resp)[-1]
@@ -572,7 +573,7 @@ def test_refine_stream_emits_live_tool_events_then_done():
                               "edge_type": "one_to_many"}, "c2"),
         _DONE,
     ]
-    with patch.object(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel(responses)):
+    with patch.object(agent_graph, "get_chat_model", lambda tier="capable", **kw: _FakeModel(responses)):
         resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
 
     events = _events(resp)
@@ -596,7 +597,7 @@ def test_refine_stream_clarification_run_also_streams_prior_tools():
         _tool_call("add_node", {"node_type": "table", "label": "Carrito"}, "c1"),
         _tool_call("ask_clarification", {"question": "¿Lo conecto a Usuario o a Producto?"}, "c2"),
     ])
-    with patch.object(agent_graph, "get_chat_model", lambda tier="capable": _FakeModel([mixed, _DONE])):
+    with patch.object(agent_graph, "get_chat_model", lambda tier="capable", **kw: _FakeModel([mixed, _DONE])):
         resp = TestClient(main.app).post("/refine/stream", json=_erd_body())
 
     events = _events(resp)
