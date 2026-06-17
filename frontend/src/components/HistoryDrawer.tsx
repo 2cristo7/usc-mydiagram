@@ -14,6 +14,13 @@ import {
 import type { DiagramMeta } from '../lib/api'
 import { useStore } from '../store/index'
 import { useHistoryStore } from '../store/history'
+import { DIAGRAM_TYPE_OPTIONS } from '../types'
+
+// Etiquetas en español, reutilizando el mismo origen que las tarjetas de
+// selección de tipo de diagrama. Si el tipo no está mapeado, se muestra crudo.
+const TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  DIAGRAM_TYPE_OPTIONS.map((o) => [o.value, o.label]),
+)
 
 const BADGE_COLORS: Record<string, string> = {
   erd: 'var(--color-accent)',
@@ -281,7 +288,7 @@ export function HistoryDrawer() {
                         color={BADGE_COLORS[item.diagram_type] ?? 'var(--color-accent)'}
                         className="shrink-0 text-white"
                       >
-                        {item.diagram_type}
+                        {TYPE_LABELS[item.diagram_type] ?? item.diagram_type}
                       </Badge>
                     </div>
                   </div>
@@ -336,7 +343,7 @@ export function HistoryDrawer() {
                         color={BADGE_COLORS[item.diagram_type] ?? 'var(--color-accent)'}
                         className="shrink-0 text-white"
                       >
-                        {item.diagram_type}
+                        {TYPE_LABELS[item.diagram_type] ?? item.diagram_type}
                       </Badge>
                     </div>
                   </button>
