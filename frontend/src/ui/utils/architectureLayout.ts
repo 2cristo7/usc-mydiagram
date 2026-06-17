@@ -2,11 +2,20 @@ import type { Node, Edge } from '@xyflow/react'
 import type { DiagramSchema, NodeType } from '../../types'
 
 // Tamaños y espaciados del layout provisional síncrono.
-// ArchIconNode: icono 72px + label ~40px → caja total 120×120px.
-// Se deja margen extra (NODE_ROW_GAP, GROUP_COL_GAP) para que las edge labels
-// no choquen con los nodos.
-const NODE_W = 120
+// ArchIconNode: la hitbox real (medida por React Flow) es solo el icono 64×64;
+// el label (tipo + título, ~130px de ancho) va en posición absoluta debajo y NO
+// infla esa caja. Para que el layout reserve el footprint COMPLETO (icono + label)
+// declaramos a ELK una caja NODE_W×NODE_H y luego centramos el icono dentro de
+// ella horizontalmente (ICON_X_OFFSET): así el label cabe dentro de la caja
+// reservada y ninguna arista lo cruza.
+// Caja real que mide React Flow para un archIcon: icono (64) + holgura PAD (4)
+// a cada lado, donde se anclan los edges. Debe coincidir con ICON + 2·PAD de
+// ArchIconNode.
+const ICON_SIZE = 72
+const NODE_W = 140
 const NODE_H = 120
+// Desplazamiento para centrar la caja del nodo dentro de la caja-footprint.
+const ICON_X_OFFSET = (NODE_W - ICON_SIZE) / 2
 const NODE_ROW_GAP = 40
 const GROUP_PADDING = 30
 const GROUP_HEADER_H = 36
@@ -109,7 +118,7 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
     for (const node of children) {
       const childPos = node.position
         ? node.position
-        : { x: GROUP_PADDING, y: yChild }
+        : { x: GROUP_PADDING + ICON_X_OFFSET, y: yChild }
 
       rfNodes.push({
         id: node.id,
@@ -135,7 +144,7 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
   let uX = 0
   for (const nodeId of ungrouped) {
     const node = nodeById.get(nodeId)!
-    const pos = node.position ?? { x: uX, y: ungroupedY }
+    const pos = node.position ?? { x: uX + ICON_X_OFFSET, y: ungroupedY }
 
     rfNodes.push({
       id: node.id,
@@ -181,10 +190,32 @@ type ElkNodeInput = {
   children?: ElkNodeInput[]
 }
 
+type ElkLabelInput = {
+  id: string
+  text: string
+  width: number
+  height: number
+}
+
 type ElkEdgeInput = {
   id: string
   sources: string[]
   targets: string[]
+  labels?: ElkLabelInput[]
+}
+
+// Ancho aproximado de una edge label (fuente ~13px) para que ELK reserve hueco.
+// El render real (EditableEdge) centra la caja; aquí solo importa la reserva.
+const EDGE_LABEL_CHAR_W = 7.2
+const EDGE_LABEL_PAD = 20
+const EDGE_LABEL_H = 26
+function estimateEdgeLabelSize(text: string): { width: number; height: number } {
+  const trimmed = text.trim()
+  if (!trimmed) return { width: 0, height: 0 }
+  return {
+    width: Math.round(trimmed.length * EDGE_LABEL_CHAR_W + EDGE_LABEL_PAD),
+    height: EDGE_LABEL_H,
+  }
 }
 
 type ElkGraphInput = ElkNodeInput & {
@@ -250,16 +281,31 @@ export async function architectureLayoutElk(
         'elk.algorithm': 'layered',
         'elk.direction': 'RIGHT',
         'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-        'elk.layered.spacing.nodeNodeBetweenLayers': '60',
-        'elk.spacing.nodeNode': '30',
+        // Espaciado generoso: las edge labels viven entre capas (dir. RIGHT) y
+        // necesitan hueco para no chocar con nodos ni con otras labels.
+        'elk.layered.spacing.nodeNodeBetweenLayers': '55',
+        'elk.spacing.nodeNode': '35',
+        // ELK reserva sitio para los labels declarados (labels[] en cada edge).
+        'elk.spacing.edgeLabel': '12',
+        'elk.layered.spacing.edgeLabelSpacing': '12',
+        'elk.spacing.edgeNode': '40',
+        'elk.spacing.edgeEdge': '25',
+        'elk.edgeLabels.inline': 'false',
         'elk.padding': '[top=20,left=20,bottom=20,right=20]',
       },
       children: elkChildren,
-      edges: diagram.edges.map((e) => ({
-        id: e.id,
-        sources: [e.source],
-        targets: [e.target],
-      })),
+      edges: diagram.edges.map((e) => {
+        const labelText = e.label ?? ''
+        const { width, height } = estimateEdgeLabelSize(labelText)
+        return {
+          id: e.id,
+          sources: [e.source],
+          targets: [e.target],
+          ...(width > 0
+            ? { labels: [{ id: `${e.id}__label`, text: labelText, width, height }] }
+            : {}),
+        }
+      }),
     }
 
     const result = (await elk.layout(elkGraph)) as ElkNodeResult
@@ -306,7 +352,7 @@ export async function architectureLayoutElk(
         const elkChild = elkContainer?.children?.find((c) => c.id === node.id)
         // Posición del hijo relativa al contenedor
         const relPos = node.position ?? {
-          x: elkChild?.x ?? GROUP_PADDING,
+          x: (elkChild?.x ?? GROUP_PADDING) + ICON_X_OFFSET,
           y: elkChild?.y ?? GROUP_HEADER_H + GROUP_PADDING,
         }
 
@@ -328,7 +374,7 @@ export async function architectureLayoutElk(
     for (const nodeId of ungrouped) {
       const node = nodeById.get(nodeId)!
       const elkPos = posMap.get(nodeId)
-      const pos = node.position ?? { x: elkPos?.x ?? 0, y: elkPos?.y ?? 0 }
+      const pos = node.position ?? { x: (elkPos?.x ?? 0) + ICON_X_OFFSET, y: elkPos?.y ?? 0 }
 
       rfNodes.push({
         id: node.id,
