@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { Message, ConnectionState, Degradation, DegradationCategory, AgentToolCall, AgentToolResult } from "../types";
+import { diagramSchema } from "../types";
 import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
 import { useAuthStore } from "../store/auth";
@@ -7,6 +8,9 @@ import { supabase } from "../lib/supabase";
 import { signOut } from "./useAuth";
 import { diagramToJson } from "../ui/utils/diagramToJson";
 import { persistCurrentDiagram } from "../lib/api";
+import { toast } from "../store/toast";
+import { useLlmSettingsStore } from "../store/llmSettings";
+import { readTransientKey } from "../lib/transientLlmKey";
 
 // Render diferenciado por categoría (S6.9 P4): cada degradación se traduce a un
 // aviso de chat legible. Fallback genérico para una categoría futura sin etiqueta.
@@ -66,6 +70,33 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // verificación del backend ocurre solo en el handshake).
     const userId = useAuthStore((s) => s.user?.id ?? null);
 
+    // Timeout de generación: si el backend no emite diagram:done ni diagram:error
+    // en 90 s (p. ej. el agente Python se cuelga), se limpia el estado y se avisa.
+    const genTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Guard para el toast de connect_error: evita spamear el mismo aviso en cada
+    // intento de reconexión consecutivo. Se resetea al conectar con éxito.
+    const connectErrorToastedRef = useRef(false);
+
+    // Arranca el temporizador de generación. Llámalo justo antes de setUiState('generating').
+    // Si ya había uno pendiente (caso raro: doble emisión), lo cancela primero.
+    const startGenTimeout = () => {
+        if (genTimeoutRef.current) clearTimeout(genTimeoutRef.current);
+        genTimeoutRef.current = setTimeout(() => {
+            genTimeoutRef.current = null;
+            setGenerationPhase('idle');
+            setUiState('error');
+            toast.error('La generación está tardando demasiado. Inténtalo de nuevo.');
+        }, 90_000);
+    };
+
+    // Cancela el temporizador de generación (done, error, disconnect, clarification…).
+    const cancelGenTimeout = () => {
+        if (genTimeoutRef.current) {
+            clearTimeout(genTimeoutRef.current);
+            genTimeoutRef.current = null;
+        }
+    };
 
     useEffect(() => {
 
@@ -73,8 +104,11 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         let authUnsub: (() => void) | undefined;
 
         try {
+            // #1 — URL configurable por entorno: VITE_WS_URL en producción / staging;
+            // fallback a localhost para desarrollo local sin variable definida.
+            const wsUrl = import.meta.env.VITE_WS_URL ?? 'http://localhost:3001';
             const token = useAuthStore.getState().session?.access_token;
-            socketRef.current = io('http://localhost:3001', {
+            socketRef.current = io(wsUrl, {
                 transports: ['websocket'],
                 auth: token ? { token } : {},
             });
@@ -107,7 +141,19 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
             socket.on('connect', () => {
                 setConnectionState('connected');
+                // #4 — nueva conexión exitosa: permitir de nuevo el toast de error
+                // en la siguiente racha de fallos.
+                connectErrorToastedRef.current = false;
                 console.log("WebSocket connected");
+                // S10.3b — Key transitoria: registramos el emisor para que el modal
+                // de ajustes pueda empujar una key nueva al socket vivo, y
+                // reenviamos la key ya guardada en sessionStorage (sobrevive a
+                // recargas pero no al backend, que la perdió en la reconexión).
+                useLlmSettingsStore.getState().registerTransientEmitter((payload) => {
+                    if (socket.connected) socket.emit('llm:set_transient_key', payload);
+                });
+                const stored = readTransientKey();
+                if (stored) socket.emit('llm:set_transient_key', { provider: stored.provider, api_key: stored.key });
             });
 
             socket.on('diagram:node_ready', (node) => {
@@ -161,22 +207,45 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                             }
                             break;
                     }
+                } else {
+                    // #6 — la tool falló: avisamos con un warning no bloqueante.
+                    // La traza visual ya marcará el paso como 'error'; el toast
+                    // complementa con feedback visible en la esquina.
+                    toast.warning('Una operación del agente falló durante el refinamiento.');
                 }
                 if (data?.id) traceToolResult(data.id, isError ? 'error' : 'ok');
             });
 
             socket.on('diagram:done', (data) => {
+                // #2 — desenlace válido: cancelar el timeout de generación.
+                cancelGenTimeout();
+
                 // S7.5 — reconciliación incondicional: el done de un refinamiento
                 // trae el snapshot completo del workspace (la verdad) y se aplica
                 // SIEMPRE; si los eventos en vivo ya dejaron el canvas idéntico,
                 // la guarda de idempotencia de applyDiagram evita el re-render.
                 if (data?.diagram) {
-                    const { currentDiagram } = useStore.getState();
-                    applyDiagram({
-                        title: data.title ?? currentDiagram?.title ?? '',
+                    // #7 — validar el snapshot con diagramSchema antes de aplicarlo.
+                    // Si la validación falla (p. ej. el backend envió datos corruptos)
+                    // se avisa al usuario y NO se toca el canvas (evita estado roto).
+                    const parseResult = diagramSchema.safeParse({
+                        title: data.title ?? '',
                         diagram_type: data.diagram.diagram_type,
                         nodes: data.diagram.nodes ?? [],
                         edges: data.diagram.edges ?? [],
+                    });
+                    if (!parseResult.success) {
+                        toast.error('El diagrama recibido no es válido.');
+                        setGenerationPhase('idle');
+                        setUiState('error');
+                        return;
+                    }
+                    const { currentDiagram } = useStore.getState();
+                    applyDiagram({
+                        title: data.title ?? currentDiagram?.title ?? '',
+                        diagram_type: parseResult.data.diagram_type,
+                        nodes: parseResult.data.nodes,
+                        edges: parseResult.data.edges,
                     });
                 }
                 addMessage({
@@ -234,6 +303,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // botones (ChatPanel lee pendingClarification del store). El input
             // queda habilitado para respuesta libre.
             socket.on('agent:clarification', (data) => {
+                // #2 — desenlace válido: cancelar el timeout de generación.
+                cancelGenTimeout();
                 addMessage({
                     id: crypto.randomUUID(),
                     text: data?.question ?? '¿Puedes aclarar tu petición?',
@@ -253,6 +324,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // (thread_id/resume). Se guarda la pregunta+opciones en pendingTypeChoice;
             // la respuesta va por `message:regenerate` (ver chooseDiagramType).
             socket.on('diagram:type_clarification', (data) => {
+                // #2 — desenlace válido: cancelar el timeout de generación.
+                cancelGenTimeout();
                 const question: string = data?.question ?? '¿Qué tipo de diagrama UML quieres generar?';
                 const options: { label: string; value: string }[] = Array.isArray(data?.options)
                     ? data.options
@@ -268,6 +341,24 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             });
 
             socket.on('diagram:error', (data) => {
+                // #2 — desenlace válido (error explícito del backend): cancelar timeout.
+                cancelGenTimeout();
+
+                // Errores de LLM propagados por el agente: se muestran SOLO en el
+                // banner rojo superior (AlertBanner, vía ollamaError del store), que
+                // ya lleva su botón "Abrir configuración". El spinner se detiene
+                // igual. No se añade mensaje al chat (sería redundante).
+                if (data?.category === 'llm_error') {
+                    useLlmSettingsStore.getState().setOllamaError({
+                        error_code: 'llm_error',
+                        detail: data.error ?? 'Error del modelo de lenguaje.',
+                        provider: data.provider,
+                    });
+                    setGenerationPhase('idle');
+                    setUiState('error');
+                    return;
+                }
+
                 addMessage({
                     id: crypto.randomUUID(),
                     text: data?.error ?? 'Error generando el diagrama',
@@ -276,6 +367,50 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 });
                 setGenerationPhase('idle');
                 setUiState('error');
+            });
+
+            // Proxy del LLM en el navegador (transporte ollama-browser): el gateway
+            // delega aquí la completion para que peguemos a NUESTRO Ollama local.
+            // El navegador no distingue de forma fiable "Ollama apagado" de "CORS
+            // bloqueado" (ambos lanzan TypeError) → un único error_code combinado.
+            socket.on('llm:request', async (req: {
+                request_id: string;
+                model: string;
+                messages: Array<{ role: string; content: string }>;
+                options?: Record<string, unknown>;
+                think?: boolean;
+            }) => {
+                const { request_id, model, messages, options, think } = req;
+                const setOllamaError = useLlmSettingsStore.getState().setOllamaError;
+                try {
+                    const res = await fetch('http://localhost:11434/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        // `think` se reenvía tal cual lo manda el agente: para modelos de
+                        // razonamiento (qwen3) viaja `false`, si no el content vuelve vacío.
+                        body: JSON.stringify({ model, messages, stream: false, think, options }),
+                    });
+                    if (!res.ok) {
+                        const error_code = res.status === 404 ? 'model_missing' : 'unknown';
+                        const detail = `Ollama respondió HTTP ${res.status}`;
+                        setOllamaError({ error_code, detail, model });
+                        socket.emit('llm:error', { request_id, error_code, detail, model });
+                        return;
+                    }
+                    const data = await res.json();
+                    // Fallback: si el modelo ignora think:false y emite <think>…</think>
+                    // inline, nos quedamos con lo que va tras el cierre (igual que OllamaBackend).
+                    let content: string = data?.message?.content ?? '';
+                    if (content.includes('<think>') && content.includes('</think>')) {
+                        content = content.split('</think>').pop()?.trim() ?? '';
+                    }
+                    setOllamaError(null);
+                    socket.emit('llm:response', { request_id, content });
+                } catch (err) {
+                    const detail = (err as Error).message;
+                    setOllamaError({ error_code: 'ollama_unreachable', detail, model });
+                    socket.emit('llm:error', { request_id, error_code: 'ollama_unreachable', detail, model });
+                }
             });
 
             socket.on('disconnect', (reason) => {
@@ -288,12 +423,18 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 // realmente había una generación en curso; una caída en reposo no
                 // debe ensuciar el chat ni dejar el canvas en estado de error.
                 if (useStore.getState().generationPhase === 'idle') return;
+                // #2 — la desconexión interrumpió la generación: cancelar timeout
+                // (evitar doble toast/reset si el timer ya disparó antes).
+                cancelGenTimeout();
                 addMessage({
                     id: crypto.randomUUID(),
                     text: 'Conexión perdida durante la generación. Inténtalo de nuevo.',
                     sender: 'system',
                     timestamp: new Date(),
                 });
+                // #5 — toast complementario al mensaje de chat: visible aunque el
+                // panel de chat esté minimizado o fuera del viewport.
+                toast.error('Conexión perdida durante la generación.');
                 setGenerationPhase('idle');
                 setUiState('error');
             });
@@ -302,6 +443,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 setConnectionState('error');
                 setUiState('error');
                 console.error("WebSocket error:", error);
+                // #4 — un solo toast por racha de fallos para no spamear al usuario.
+                // connectErrorToastedRef se resetea en el handler 'connect' (éxito).
+                if (!connectErrorToastedRef.current) {
+                    connectErrorToastedRef.current = true;
+                    toast.error('No se pudo conectar con el servidor.');
+                }
             });
         } catch (error) {
             Promise.resolve().then(() => {
@@ -312,6 +459,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         }
 
         return () => {
+            // #2 — limpiar el timeout de generación al desmontar / recrear el socket.
+            cancelGenTimeout();
+            // S10.3b — el socket muere: el emisor transitorio ya no es válido.
+            useLlmSettingsStore.getState().registerTransientEmitter(null);
             authUnsub?.();
             if (socketRef.current) {
                 socketRef.current.disconnect();
@@ -333,6 +484,14 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         };
         addMessage(userMessage);
 
+        // #3 — guard de conexión: si el socket no existe o está desconectado,
+        // el emit se perdería en silencio y el spinner quedaría colgado. El mensaje
+        // ya se añadió al chat (correcto), pero NO entramos en 'generating'.
+        if (!socketRef.current?.connected) {
+            toast.error('Sin conexión con el servidor. Reintenta en unos segundos.');
+            return;
+        }
+
         // S7.1 — el frontend tiene la señal más fiable y temprana para decidir
         // generación vs refinamiento: ¿existe ya un diagrama en el canvas? El texto
         // del prompt no lo revela ("añade Carrito" es refinamiento solo si hay
@@ -350,11 +509,13 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // diagrama). Reseteamos el acumulador de cambios para este run.
             isRefiningRef.current = true;
             refineChangesRef.current = { added: [], updated: [], deleted: [], addedEdges: 0, deletedEdges: 0 };
-            socketRef.current?.emit('message:refine', {
+            setUiState('generating');
+            // #2 — arrancar timeout ANTES de emitir para cubrir cualquier cuelgue.
+            startGenTimeout();
+            socketRef.current.emit('message:refine', {
                 prompt: text,
                 diagram: diagramToJson(currentDiagram),
             });
-            setUiState('generating');
             return;
         } else {
             isRefiningRef.current = false;
@@ -367,13 +528,15 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // que "Regenerar" conserve el mismo tipo. El campo viaja SOLO si hay
             // tipo: undefined ⇒ el agente clasifica (no inventamos un valor "auto").
             setLastGenerationType(selectedDiagramType);
-            socketRef.current?.emit('message:send', {
+            setUiState('generating');
+            setGenerationPhase('staging');
+            // #2 — arrancar timeout ANTES de emitir.
+            startGenTimeout();
+            socketRef.current.emit('message:send', {
                 prompt: text,
                 diagram_type: selectedDiagramType ?? undefined,
             });
         }
-        setUiState('generating');
-        setGenerationPhase('staging');
     };
 
     // S9.3b — Redo: regenera el prompt que originó el diagrama, IGNORANDO la
@@ -382,6 +545,13 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     const regenerate = () => {
         const { lastGenerationPrompt: prompt, lastGenerationType } = useStore.getState();
         if (!prompt) return;
+
+        // #3 — guard de conexión antes de cambiar cualquier estado de UI.
+        if (!socketRef.current?.connected) {
+            toast.error('Sin conexión con el servidor. Reintenta en unos segundos.');
+            return;
+        }
+
         addMessage({
             id: crypto.randomUUID(),
             text: 'Regenerando el diagrama…',
@@ -398,8 +568,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         clearDiagramContent();
         setUiState('generating');
         setGenerationPhase('staging');
+        // #2 — arrancar timeout ANTES de emitir.
+        startGenTimeout();
         // S10.2 — conserva el tipo forzado del diagrama original (o auto si null).
-        socketRef.current?.emit('message:regenerate', {
+        socketRef.current.emit('message:regenerate', {
             prompt,
             diagram_type: lastGenerationType ?? undefined,
         });
@@ -412,18 +584,28 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         const { pendingClarification, addMessage, setPendingClarification, setUiState } = useStore.getState();
         if (!pendingClarification) return;
 
+        // #3 — guard de conexión: si el socket no está disponible, no entrar en
+        // 'generating' (el botón de respuesta quedaría bloqueado indefinidamente).
+        if (!socketRef.current?.connected) {
+            toast.error('Sin conexión con el servidor. Reintenta en unos segundos.');
+            return;
+        }
+
         addMessage({
             id: crypto.randomUUID(),
             text: answer,
             sender: 'user',
             timestamp: new Date(),
         });
-        socketRef.current?.emit('message:clarification_answer', {
+        setPendingClarification(null);
+        setUiState('generating');
+        // #2 — arrancar timeout: la clarificación reanuda el agente, que puede
+        // volver a colgarse igual que en la generación inicial.
+        startGenTimeout();
+        socketRef.current.emit('message:clarification_answer', {
             thread_id: pendingClarification.thread_id,
             answer,
         });
-        setPendingClarification(null);
-        setUiState('generating');
     };
 
     // S10.3 — el usuario eligió un tipo de diagrama tras `diagram:type_clarification`.
@@ -438,6 +620,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         // Recuperar el último mensaje del usuario como prompt original
         const originalPrompt = [...messages].reverse().find((m) => m.sender === 'user')?.text;
         if (!originalPrompt) return;
+
+        // #3 — guard de conexión antes de entrar en 'generating'.
+        if (!socketRef.current?.connected) {
+            toast.error('Sin conexión con el servidor. Reintenta en unos segundos.');
+            return;
+        }
 
         // Actualizar tipo seleccionado en la UI para coherencia visual
         // (el valor viene como string; el store acepta DiagramType)
@@ -457,8 +645,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         clearDiagramContent();
         setUiState('generating');
         setGenerationPhase('staging');
+        // #2 — arrancar timeout ANTES de emitir.
+        startGenTimeout();
 
-        socketRef.current?.emit('message:regenerate', {
+        socketRef.current.emit('message:regenerate', {
             prompt: originalPrompt,
             diagram_type: diagramTypeValue,
         });
