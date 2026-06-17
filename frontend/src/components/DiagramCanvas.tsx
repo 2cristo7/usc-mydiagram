@@ -63,7 +63,7 @@ import { UseCaseSystemNode } from './nodes/UseCaseSystemNode'
 import { SequenceMessageEdge, EditableEdge, EdgeMarkers } from './edges'
 import { makeConnectionLine } from './edges/ConnectionLine'
 import { predictEdgeDefaults } from '../ui/utils/edgeDefaults'
-import { architectureLayoutElk } from '../ui/utils/architectureLayout'
+import { architectureLayoutElk, architectureLayoutSync } from '../ui/utils/architectureLayout'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
 import { persistCurrentDiagram } from '../lib/api'
@@ -298,10 +298,35 @@ export function DiagramCanvas() {
   )
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(derived.nodes)
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(derived.edges)
+  // Re-siembra del estado local al cambiar currentDiagram. EXCLUYE arquitectura:
+  // su layout lo posee el efecto ELK (gated por estructura, más abajo). Re-sembrar
+  // aquí el layout síncrono provisional en cada cambio de posición reposicionaría
+  // los contenedores (cuya posición no se persiste) y haría "saltar" el diagrama
+  // tras cada arrastre. El resto de tipos sí re-siembran siempre: DiagramToFlow
+  // respeta node.position, así que reflejar undo/redo o ediciones de la IA es
+  // idempotente y no produce saltos.
   useEffect(() => {
+    if (currentDiagram?.diagram_type === 'architecture') return
     setRfNodes(derived.nodes)
     setRfEdges(derived.edges)
-  }, [derived, setRfNodes, setRfEdges])
+  }, [derived, currentDiagram, setRfNodes, setRfEdges])
+
+  // Firma ESTRUCTURAL del diagrama de arquitectura (ids + tipos + grupos de nodos y
+  // conectividad de aristas), SIN posiciones. El refinamiento ELK reflota todo el
+  // layout —contenedores incluidos—, así que solo debe correr cuando cambia la
+  // estructura (carga inicial, alta/baja de nodos o aristas, regrupado), nunca al
+  // persistir una posición tras arrastrar.
+  const archStructureSig = useMemo(() => {
+    if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return null
+    const nodeSig = currentDiagram.nodes
+      .map((n) => `${n.id}~${n.node_type}~${n.attributes.filter((a) => /^group\s*:/i.test(a)).join(';')}`)
+      .join('|')
+    const edgeSig = currentDiagram.edges.map((e) => `${e.id}~${e.source}>${e.target}`).join('|')
+    return `${nodeSig}#${edgeSig}`
+  }, [currentDiagram])
+  // Última firma estructural ya pintada con el layout provisional. Distingue un
+  // cambio de estructura (re-pintar provisional) de un recálculo manual (no).
+  const lastArchSigRef = useRef<string | null>(null)
 
   // Refinamiento del ruteo con tamaños MEDIDOS. El layout inicial (DiagramToFlow)
   // calcula anclajes/waypoints con tamaños ESTIMADOS de los nodos; al renderizar, el
@@ -384,12 +409,26 @@ export function DiagramCanvas() {
     return () => clearTimeout(t)
   }, [relayoutTick])
 
-  // Refinamiento async ELK para diagramas de arquitectura.
-  // El layout provisional síncrono (de useMemo) ya pintó algo; cuando ELK resuelve
-  // sobrescribimos las posiciones con el resultado final, sin parpadeo perceptible.
+  // Layout de arquitectura: pintado síncrono provisional inmediato + refinamiento
+  // async con ELK. Gated por archStructureSig (y relayoutTick para el recálculo
+  // manual): solo corre cuando cambia la ESTRUCTURA, NO al persistir una posición
+  // tras arrastrar. Así mover un nodo no reflota ni hace "saltar" el resto del
+  // diagrama (el arrastre en vivo ya actualiza rfNodes via onNodesChange).
   useEffect(() => {
     if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return
     if (generationPhase === 'staging' || generationPhase === 'assembling') return
+
+    // Pintado provisional inmediato SOLO en cambio estructural (carga inicial, otro
+    // diagrama, alta/baja de nodos): evita un flash del diagrama anterior mientras
+    // ELK resuelve. En un recálculo manual (relayoutTick) los nodos ya están en
+    // pantalla; saltarse el provisional deja que ELK los anime directo a su posición
+    // final en un solo movimiento, sin doble salto.
+    if (archStructureSig !== lastArchSigRef.current) {
+      lastArchSigRef.current = archStructureSig
+      const provisional = architectureLayoutSync(currentDiagram)
+      setRfNodes(provisional.nodes)
+      setRfEdges(provisional.edges)
+    }
 
     let cancelled = false
     architectureLayoutElk(currentDiagram).then(({ nodes: elkNodes, edges: elkEdges }) => {
@@ -401,7 +440,36 @@ export function DiagramCanvas() {
     return () => {
       cancelled = true
     }
-  }, [currentDiagram, generationPhase, setRfNodes, setRfEdges])
+    // currentDiagram se lee dentro pero NO está en deps a propósito: el disparador
+    // es la estructura (archStructureSig) y el recálculo manual (relayoutTick).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archStructureSig, relayoutTick, generationPhase, setRfNodes, setRfEdges])
+
+  // Cambios de posición SIN cambio estructural (undo/redo, ediciones de posición de
+  // la IA) no disparan el layout de arquitectura. Para reflejarlos, parcheamos solo
+  // la posición de los nodos en rfNodes desde currentDiagram, sin relanzar el layout
+  // (que reflotaría los contenedores). Al soltar un arrastre, currentDiagram y
+  // rfNodes ya coinciden → no-op (comparamos antes de escribir, sin bucle de render).
+  // No toca los contenedores de grupo (no viven en currentDiagram.nodes), que se
+  // quedan donde ELK los colocó.
+  useEffect(() => {
+    if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return
+    const posById = new Map(
+      currentDiagram.nodes.filter((n) => n.position).map((n) => [n.id, n.position!]),
+    )
+    setRfNodes((prev) => {
+      let changed = false
+      const next = prev.map((n) => {
+        const p = posById.get(n.id)
+        if (p && (p.x !== n.position.x || p.y !== n.position.y)) {
+          changed = true
+          return { ...n, position: { x: p.x, y: p.y } }
+        }
+        return n
+      })
+      return changed ? next : prev
+    })
+  }, [currentDiagram, setRfNodes])
 
   // ── FASE STAGING ────────────────────────────────────────────────────────────
   // Durante 'staging' mostramos el almacén: nodos en fila superior (reales, con
