@@ -38,24 +38,110 @@ export interface TypeClarificationItem {
   options: TypeClarificationOption[]
 }
 
+// Configuración LLM opcional que el gateway añade al body cuando el usuario
+// tiene una fila en llm_configs. El agente Python la usa para elegir
+// proveedor/modelo; si no se incluye, el agente usa sus propias variables de env.
+export interface LlmConfig {
+  provider: string
+  transport: string
+  model_fast: string
+  model_capable: string
+  api_key?: string | null
+  base_url?: string | null
+  // Para transport=="browser": socket.id del cliente que actuará de proxy LLM.
+  proxy_session?: string | null
+}
+
 export async function streamAgentToSocket(
   url: string,
   body: object,
   socket: SocketLike,
   onDone?: (done: DoneEvent) => void,
+  llmConfig?: LlmConfig,
 ) {
+  // [1] Timeout de inactividad: se reinicia con cada chunk recibido. Elegimos
+  // inactividad (no tiempo total) porque los streams de generación pueden ser
+  // largos pero siempre emiten chunks periódicos; el cuelgue real se detecta
+  // cuando el agente acepta la conexión pero deja de escribir. 120 s es
+  // suficiente margen para las respuestas más lentas sin dejar el spinner
+  // indefinidamente si Python se congela.
+  const INACTIVITY_TIMEOUT_MS = 120_000
+  const controller = new AbortController()
+  let inactivityTimer: ReturnType<typeof setTimeout> | null = null
+
+  const resetInactivityTimer = () => {
+    if (inactivityTimer !== null) clearTimeout(inactivityTimer)
+    inactivityTimer = setTimeout(() => {
+      controller.abort()
+    }, INACTIVITY_TIMEOUT_MS)
+  }
+
+  const clearInactivityTimer = () => {
+    if (inactivityTimer !== null) {
+      clearTimeout(inactivityTimer)
+      inactivityTimer = null
+    }
+  }
+
   try {
+    // Arrancamos el timer antes del fetch: si la conexión tarda en
+    // establecerse también cuenta como inactividad.
+    resetInactivityTimer()
+
+    // Si hay config LLM del usuario, se incluye en el body para que el agente
+    // Python use el proveedor/modelo configurado en vez de sus defaults de env.
+    const fullBody = llmConfig ? { ...body, llm_config: llmConfig } : body
     const agentRes = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(fullBody),
+      signal: controller.signal,
     })
+
+    // [2] Comprobamos el status HTTP antes de intentar leer el stream.
+    // Un 4xx/5xx del agente (p.ej. 422 de validación FastAPI o 500 interno)
+    // no debe dejar el frontend en spinner infinito.
+    if (!agentRes.ok) {
+      let detail = ''
+      try {
+        detail = await agentRes.text()
+      } catch {
+        // best-effort: si no se puede leer el cuerpo, seguimos igual
+      }
+      console.error(`Agente devolvió HTTP ${agentRes.status}:`, detail.slice(0, 500))
+      socket.emit('diagram:error', {
+        error: 'El servidor de generación devolvió un error. Inténtalo de nuevo.',
+        category: 'agent_http_error',
+      })
+      return
+    }
+
+    // Protección explícita frente a body null (edge case en algunos entornos
+    // fetch de Node donde body puede ser null aunque status sea 2xx).
+    if (!agentRes.body) {
+      console.error('Agente devolvió respuesta sin body.')
+      socket.emit('diagram:error', {
+        error: 'El servidor de generación devolvió un error. Inténtalo de nuevo.',
+        category: 'agent_http_error',
+      })
+      return
+    }
+
     const decoder = new TextDecoder()
-    const reader = agentRes.body!.getReader()
+    const reader = agentRes.body.getReader()
     let buffer = ''
+
+    // [3] Flag para emitir diagram:error por líneas desconocidas con shape de
+    // error de FastAPI como máximo una vez por stream (evita spam si llegan
+    // varias líneas extrañas seguidas).
+    let validationErrorEmitted = false
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
+      // Reiniciamos el timer de inactividad en cada chunk: mientras el agente
+      // siga escribiendo, no hay cuelgue.
+      resetInactivityTimer()
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
@@ -142,21 +228,45 @@ export async function streamAgentToSocket(
             case 'error':
               // Propaga la categoría del fallo además del mensaje accionable.
               console.log(`❌ error         → [${item.category}] ${item.message}`)
-              socket.emit('diagram:error', { error: item.message, category: item.category })
+              socket.emit('diagram:error', { error: item.message, category: item.category, provider: item.provider })
               break
             default:
-              // Un 422 del agente llega aquí: el cuerpo es {"detail": [...]} de
-              // FastAPI, sin _type. Loguear la línea entera hace visible el
-              // motivo exacto de la validación fallida.
+              // [3] Línea sin _type reconocido. Si tiene `detail` es casi seguro
+              // un error de validación de FastAPI (422); en ese caso informamos
+              // al usuario una única vez para no spamear. Cualquier otra línea
+              // rara se descarta en silencio (solo log) — no queremos emitir
+              // diagram:error por eventos de traza u otros formatos futuros.
               console.warn('Tipo de evento NDJSON desconocido:', item._type, '·', line.slice(0, 500))
+              if (!validationErrorEmitted && item.detail !== undefined) {
+                validationErrorEmitted = true
+                socket.emit('diagram:error', {
+                  error: 'La petición no es válida.',
+                  category: 'validation_error',
+                })
+              }
           }
         } catch {
           console.warn('Línea NDJSON inválida ignorada:', line)
         }
       }
     }
+
+    // Stream terminado correctamente: cancelamos el timer para que no aborte
+    // ninguna operación posterior que reutilice el controller.
+    clearInactivityTimer()
   } catch (err) {
-    console.error('Error llamando al agente:', err)
-    socket.emit('diagram:error', { error: 'Error generando el diagrama' })
+    clearInactivityTimer()
+    // AbortError indica que saltó el timeout de inactividad (o una cancelación
+    // explícita futura). Distinguimos el caso para dar un mensaje accionable.
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.error('Timeout de inactividad alcanzado llamando al agente.')
+      socket.emit('diagram:error', {
+        error: 'El servidor tardó demasiado en responder. Inténtalo de nuevo.',
+        category: 'timeout',
+      })
+    } else {
+      console.error('Error llamando al agente:', err)
+      socket.emit('diagram:error', { error: 'Error generando el diagrama' })
+    }
   }
 }

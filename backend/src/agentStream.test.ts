@@ -50,11 +50,13 @@ test('reenvía el body como JSON POST a la URL del agente', async () => {
   const { socket } = fakeSocket()
   await streamAgentToSocket('http://agent/refine/stream', { prompt: 'hola' }, socket)
 
-  expect(fetchSpy).toHaveBeenCalledWith('http://agent/refine/stream', {
+  // objectContaining: además de method/headers/body, el fetch lleva ahora un
+  // `signal` (AbortController para el timeout de inactividad); no lo fijamos aquí.
+  expect(fetchSpy).toHaveBeenCalledWith('http://agent/refine/stream', expect.objectContaining({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt: 'hola' }),
-  })
+  }))
 })
 
 // ── Mapeo _type → evento Socket.io ──────────────────────────────────────────
@@ -151,15 +153,22 @@ describe('mapeo de eventos NDJSON', () => {
     }])
   })
 
-  test('un _type desconocido (p. ej. el {"detail": …} de un 422) no emite nada y no rompe el stream', async () => {
+  test('un {"detail": …} de un 422 → emite diagram:error (validation_error) una sola vez y no rompe el stream', async () => {
     stubFetchWithChunks([
       line({ detail: [{ msg: 'field required' }] }),
+      line({ detail: [{ msg: 'otro' }] }),
       line({ _type: 'node', data: { id: 'a' } }),
     ])
     const { socket, emits } = fakeSocket()
     await streamAgentToSocket('http://agent', {}, socket)
 
-    expect(emits).toEqual([{ event: 'diagram:node_ready', payload: { id: 'a' } }])
+    // El primer {detail} (shape de error de validación FastAPI) se traduce a un
+    // diagram:error accionable; el segundo NO re-emite (flag de una vez por stream);
+    // el stream continúa y el node posterior se emite con normalidad.
+    expect(emits).toEqual([
+      { event: 'diagram:error', payload: { error: 'La petición no es válida.', category: 'validation_error' } },
+      { event: 'diagram:node_ready', payload: { id: 'a' } },
+    ])
   })
 })
 
