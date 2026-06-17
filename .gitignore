@@ -20,3 +20,8 @@ __pycache__/
 
 # Cola transitoria de commits (la consume y reescribe ./commit.sh)
 COMMITS.pending
+
+commit.sh
+
+# Workspace local de Claude Code (worktrees y estado efímero)
+.claude/
