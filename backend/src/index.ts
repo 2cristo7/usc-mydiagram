@@ -3,7 +3,9 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import { Server } from 'socket.io'
 import diagramsRouter from './diagrams'
-import { attachAgentHandlers } from './socketHandlers'
+import llmConfigRouter from './llmConfig'
+import accountRouter from './account'
+import { attachAgentHandlers, createInternalLlmRouter } from './socketHandlers'
 
 // Cargar variables de entorno
 dotenv.config()
@@ -32,6 +34,22 @@ app.get('/health', (req, res) => {
 // S9.3 — Persistencia de diagramas (CRUD). Todas las rutas exigen sesión
 // (requireAuth dentro del router): "login solo para guardar".
 app.use('/diagrams', diagramsRouter)
+
+// S10.3 — Configuración LLM del usuario (provider, modelo, api_key cifrada).
+// Todas las rutas exigen sesión (requireAuth dentro del router).
+app.use('/llm-config', llmConfigRouter)
+
+// S10.4 — Derechos RGPD en autoservicio (acceso/portabilidad y supresión).
+// Todas las rutas exigen sesión (requireAuth dentro del router).
+app.use('/account', accountRouter)
+
+// S10.3 — Proxy LLM browser: el agente Python delega las llamadas a la API LLM
+// al navegador del usuario cuando transport="browser". Solo accesible desde
+// localhost con INTERNAL_PROXY_SECRET (no exponer en el CORS público).
+//
+// Env requeridas: INTERNAL_PROXY_SECRET (compartida con el agente Python).
+// Env opcional:   AGENT_BASE_URL (por defecto http://localhost:8000).
+app.use('/internal/llm', createInternalLlmRouter(io))
 
 // Wiring del socket (handshake auth + entradas del agente + frescura de token).
 // La lógica vive en socketHandlers.ts con inyección de dependencias para poder

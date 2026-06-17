@@ -63,6 +63,7 @@ export async function verifySupabaseToken(token: string): Promise<AuthenticatedU
 // usuario), no solo el userId ya extraído.
 export interface AuthedRequest extends Request {
   userId?: string
+  email?: string
   accessToken?: string
 }
 
@@ -82,8 +83,9 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     return
   }
   try {
-    const { userId } = await verifySupabaseToken(token)
+    const { userId, email } = await verifySupabaseToken(token)
     req.userId = userId
+    req.email = email
     req.accessToken = token
     next()
   } catch (err) {
