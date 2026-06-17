@@ -1,0 +1,61 @@
+# MydIAgram — orquestación de los tres procesos independientes (regla arquitectónica:
+# nunca fusionarlos; aquí cada uno es un servicio aislado que habla por HTTP/WS).
+#
+# - frontend: estáticos servidos por nginx (:8080 en el host → :80 en el contenedor)
+# - backend : API Gateway Node/Socket.io (:3001), único punto de entrada a datos
+# - agent   : microservicio IA Python/FastAPI (:8000), solo accesible vía red interna
+#
+# BD: Supabase CLOUD (no se contineriza) → se apunta por variables de entorno.
+# LLM: agnóstico → el perfil/credenciales viven en agent/.env; este compose no asume
+#      ninguno (pendiente de coordinar con el sistema de LLM por frontend).
+#
+# Copia .env.example a .env y rellena los valores antes de `docker compose up --build`.
+
+services:
+  agent:
+    build: ./agent
+    # El perfil de LLM y sus credenciales viven en agent/.env (sin asunciones aquí).
+    env_file:
+      - ./agent/.env
+    environment:
+      # Secreto compartido con el backend para el proxy LLM interno.
+      INTERNAL_PROXY_SECRET: ${INTERNAL_PROXY_SECRET}
+    expose:
+      - "8000"   # solo red interna; no se publica al host
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    depends_on:
+      - agent
+    environment:
+      PORT: 3001
+      # Supabase cloud
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # DNS interno de compose: el agente es alcanzable por su nombre de servicio.
+      AGENT_BASE_URL: http://agent:8000
+      INTERNAL_PROXY_SECRET: ${INTERNAL_PROXY_SECRET}
+      # Opcionales (tienen defaults en el código)
+      RATE_LIMIT: ${RATE_LIMIT:-5}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      CACHE_TTL_DAYS: ${CACHE_TTL_DAYS:-30}
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      # VITE_* se hornean en build-time → se pasan como build args.
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_WS_URL: ${VITE_WS_URL}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
