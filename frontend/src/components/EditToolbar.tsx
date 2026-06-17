@@ -8,6 +8,11 @@ import { NodePalette } from './NodePalette';
 import { AuthButton } from './AuthButton';
 import { FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView';
 
+// Retardo entre relayout() y el fitView de centrado. Debe cubrir la animación de
+// "Recalcular layout" (LAYOUT_ANIM_MS = 400 ms en DiagramCanvas) más el margen del
+// refinamiento ELK, para que el encuadre mida ya las posiciones finales.
+const RELAYOUT_FIT_DELAY_MS = 450;
+
 export function EditToolbar() {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
   const { undo, redo, canUndo, canRedo, reset: resetHistory } = useHistoryStore();
@@ -53,7 +58,10 @@ export function EditToolbar() {
             relayout();
             // Tras reposicionar todo, encuadramos la vista al nuevo layout con
             // las MISMAS opciones que el resto (holgura inferior + tope 1.0).
-            setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), 0);
+            // Esperamos a que los nodos lleguen a sus posiciones (animación de
+            // layout + refinamiento ELK async) antes de encuadrar; si no, el
+            // fitView mediría el layout viejo y centraría mal.
+            setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), RELAYOUT_FIT_DELAY_MS);
           }}
           aria-label="Recalcular el layout automático del diagrama"
         />
