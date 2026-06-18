@@ -7,6 +7,41 @@ export interface Message {
     timestamp: Date;
 }
 
+// S10.3 — Reinvención del "chat": no era una conversación, era un sistema de jobs
+// (request → diagrama). Cada cambio del diagrama se persiste como una VERSIÓN en un
+// diario lineal append-only (ver migración diagram_versions). El antiguo log de
+// mensajes se SUBSUME aquí: las tarjetas de operación se derivan de las versiones.
+//
+// origin:
+//   · generate/refine → hito del AGENTE (sale en la lista de operaciones).
+//   · manual_edit     → edición a mano (NO sale en la lista; navegable con ◀ ▶).
+//   · restore         → "volver a esta versión" (reaparece como hito en la lista).
+export type VersionOrigin = 'generate' | 'refine' | 'manual_edit' | 'restore';
+
+// Resumen del delta de una operación, para el "recibo" de la tarjeta.
+export interface OpSummary {
+    added?: string[];
+    updated?: string[];
+    deleted?: string[];
+    addedEdges?: number;
+    deletedEdges?: number;
+}
+
+// Metadata de una versión del diario (sin el snapshot `data`, que se trae al
+// navegar). Es la unidad que pinta el panel de operaciones.
+export interface VersionMeta {
+    id: string;
+    seq: number;
+    origin: VersionOrigin;
+    instruction: string | null;
+    op_summary: OpSummary | null;
+    // El diario es un ÁRBOL: id de la versión de la que se derivó esta. null =
+    // raíz. Navegar a una versión y crear una nueva la cuelga de ahí; lo que queda
+    // fuera del camino vivo son ramas muertas (se muestran arriba en la lista).
+    parent_version_id: string | null;
+    created_at: string;
+}
+
 export type UIState = 'idle' | 'generating' | 'ready' | 'error' | 'awaiting_clarification';
 
 // S7.4 — el agente pausó pidiendo una aclaración: pregunta (+ opciones como
@@ -104,7 +139,7 @@ export const edgeVisualDataSchema = z.object({
     label: z.string().optional(),
     labelT: z.number().optional(),
     waypoints: z.array(z.object({ x: z.number(), y: z.number() })).optional(),
-    shape: z.enum(['straight', 'elbow', 'curved']).optional(),
+    shape: z.enum(['straight', 'elbow', 'curved', 'radial']).optional(),
     strokeStyle: z.enum(['normal', 'dashed', 'dotted']).optional(),
     // Color y grosor del trazo. Propiedades comunes a TODOS los edges; las usa
     // p. ej. el mapa mental para ramas coloreadas y de grosor decreciente por
@@ -139,11 +174,24 @@ export const diagramEdgeSchema = z.object({
     data: edgeVisualDataSchema.optional(),
 });
 
+// Geometría manual de los contenedores de GRUPO de arquitectura (clave = id del
+// contenedor, `group__Nombre`). Los grupos son derivados (no viven en `nodes`): su
+// layout lo calcula ELK. Si el usuario redimensiona/mueve un contenedor, su
+// geometría se guarda aquí y el layout la respeta. Solo-canvas: NO se envía al
+// agente (diagramToJson solo manda diagram_type/nodes/edges).
+export const groupLayoutSchema = z.record(
+    z.string(),
+    z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+);
+
 export const diagramSchema = z.object({
     title: z.string(),
     diagram_type: diagramTypeSchema,
     nodes: z.array(diagramNodeSchema),
     edges: z.array(diagramEdgeSchema),
+    // Override de geometría de los contenedores de grupo (arquitectura). Opcional:
+    // un diagrama sin grupos o sin resize manual no lo lleva.
+    group_layout: groupLayoutSchema.optional(),
 });
 
 // Schema del IMPORT: la estructura válida + integridad referencial. Una arista cuyo
@@ -232,7 +280,7 @@ export interface EdgeVisualData {
   label?: string
   labelT?: number
   waypoints?: { x: number; y: number }[]
-  shape?: 'straight' | 'elbow' | 'curved'
+  shape?: 'straight' | 'elbow' | 'curved' | 'radial'
   strokeStyle?: 'normal' | 'dashed' | 'dotted'
   strokeColor?: string
   strokeWidth?: number

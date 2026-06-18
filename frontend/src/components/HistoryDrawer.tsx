@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/auth'
 import {
   listDiagrams,
   getDiagram,
+  listVersions,
   deleteDiagram,
   listTrash,
   restoreDiagram,
@@ -41,7 +42,7 @@ type Menu = { id: string; x: number; y: number; kind: 'active' | 'trash' }
 export function HistoryDrawer() {
   const { drawerOpen, setDrawerOpen } = useUiStore()
   const user = useAuthStore((s) => s.user)
-  const { setCurrentDiagram, setCurrentDiagramId, setLastGenerationPrompt, setUiState, setMessages } = useStore()
+  const { setCurrentDiagram, setCurrentDiagramId, setLastGenerationPrompt, setUiState, setVersions } = useStore()
   const markCurrentTrashed = useStore((s) => s.markCurrentTrashed)
   const newDiagram = useStore((s) => s.newDiagram)
   const currentDiagramId = useStore((s) => s.currentDiagramId)
@@ -124,11 +125,14 @@ export function HistoryDrawer() {
       setCurrentDiagram(row.data)
       setCurrentDiagramId(row.id)
       setLastGenerationPrompt(row.prompt ?? null)
-      // Restaura la conversación del diagrama. El timestamp viaja como string ISO
-      // (jsonb): se revive a Date porque ChatMessage llama a toLocaleTimeString.
-      setMessages(
-        (row.messages ?? []).map((m) => ({ ...m, timestamp: new Date(m.timestamp) })),
-      )
+      // Restaura el diario de versiones del diagrama: puebla la lista de
+      // operaciones y habilita la navegación ◀ ▶. Si falla, el diagrama abre
+      // igual con el diario vacío (degrada, no rompe).
+      try {
+        setVersions(await listVersions(id))
+      } catch {
+        setVersions([])
+      }
       useHistoryStore.getState().reset()
       setUiState('ready')
       setDrawerOpen(false)

@@ -1,6 +1,6 @@
 import { useStore } from '../store/index'
 import { useAuthStore } from '../store/auth'
-import type { DiagramSchema, Message } from '../types'
+import type { DiagramSchema, VersionMeta, VersionOrigin, OpSummary } from '../types'
 
 // S9.3 — Cliente REST de persistencia. El frontend NUNCA habla con Supabase
 // directamente (decisión P1): toda la persistencia pasa por el gateway, que es
@@ -23,22 +23,38 @@ export interface DiagramMeta {
   deleted_at?: string | null
 }
 
-// Mensaje tal como vuelve de la BD: el timestamp viaja serializado (string ISO),
-// no como Date. Se revive a Date al cargar (ChatMessage llama a toLocaleTimeString).
-export type StoredMessage = Omit<Message, 'timestamp'> & { timestamp: string }
-
 // Fila completa: metadata + data (el diagrama para cargar al canvas) + el prompt
-// de origen (S9.3b: permite regenerar un diagrama cargado del historial) + la
-// conversación persistida (jsonb messages).
+// de origen (S9.3b: permite regenerar un diagrama cargado del historial). El
+// historial de conversación ya no vive aquí: se deriva del diario de versiones
+// (GET /diagrams/:id/versions), que se carga aparte al abrir el diagrama.
 export interface DiagramRow extends DiagramMeta {
   data: DiagramSchema
   prompt: string | null
-  messages: StoredMessage[]
+}
+
+// Una versión completa del diario (con su snapshot) — la devuelve GET de una
+// versión concreta al navegar a ella.
+export interface DiagramVersionRow extends VersionMeta {
+  diagram_id: string
+  user_id: string
+  data: DiagramSchema
+}
+
+// Contexto de la OPERACIÓN que produce un guardado. Define qué versión se anota
+// en el diario. Sin contexto, el guardado es una edición manual (autosave).
+export interface SaveContext {
+  prompt?: string
+  origin?: VersionOrigin
+  instruction?: string | null
+  op_summary?: OpSummary | null
 }
 
 export interface SaveResult {
   ok: boolean
   id?: string
+  // Versión recién creada en el diario (la devuelve POST/PATCH): el store la
+  // añade a `versions` para que la navegación ◀ ▶ y la lista la vean al instante.
+  version?: VersionMeta
   error?: string
 }
 
@@ -48,20 +64,30 @@ function authHeaders(): Record<string, string> | null {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
 }
 
-async function doSave(prompt?: string): Promise<SaveResult> {
+async function doSave(ctx?: SaveContext): Promise<SaveResult> {
   const headers = authHeaders()
   if (!headers) return { ok: false, error: 'no-session' }
 
   // Lectura FRESCA del store: al estar serializado, un guardado encadenado ve
   // ya el id que fijó el anterior → POST una vez, PATCH después.
-  const { currentDiagram, currentDiagramId, setCurrentDiagramId, messages } = useStore.getState()
+  const { currentDiagram, currentDiagramId, currentVersionId, setCurrentDiagramId } = useStore.getState()
   if (!currentDiagram || !currentDiagram.diagram_type) return { ok: false, error: 'no-diagram' }
 
   const isUpdate = currentDiagramId !== null
   const url = isUpdate ? `${API_URL}/diagrams/${currentDiagramId}` : `${API_URL}/diagrams`
-  // Lectura fresca de messages: el done ya añadió el turno del sistema antes de
-  // disparar el guardado, así que la conversación viaja completa hasta aquí.
-  const body = JSON.stringify({ diagram: currentDiagram, prompt, messages })
+  // Cada guardado anota una versión en el diario; `version` describe la operación
+  // (generate/refine/manual_edit) y de qué versión se deriva (parent_id = posición
+  // actual en el árbol). Sin contexto → manual_edit (autosave).
+  const body = JSON.stringify({
+    diagram: currentDiagram,
+    prompt: ctx?.prompt,
+    version: {
+      origin: ctx?.origin ?? 'manual_edit',
+      instruction: ctx?.instruction ?? null,
+      op_summary: ctx?.op_summary ?? null,
+      parent_id: currentVersionId,
+    },
+  })
 
   try {
     const res = await fetch(url, { method: isUpdate ? 'PATCH' : 'POST', headers, body })
@@ -69,11 +95,11 @@ async function doSave(prompt?: string): Promise<SaveResult> {
       const detail = await res.json().catch(() => ({}))
       return { ok: false, error: detail.error ?? `HTTP ${res.status}` }
     }
-    const saved = (await res.json()) as DiagramMeta
+    const saved = (await res.json()) as DiagramMeta & { version?: VersionMeta }
     // Primer guardado: cacheamos el id en el store (P4) para que los siguientes
     // sean PATCH del mismo diagrama, no un segundo INSERT.
     if (!isUpdate) setCurrentDiagramId(saved.id)
-    return { ok: true, id: saved.id }
+    return { ok: true, id: saved.id, version: saved.version ?? undefined }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   }
@@ -85,10 +111,30 @@ async function doSave(prompt?: string): Promise<SaveResult> {
 // sobrevive a un fallo (catch) para no quedarse atascada.
 let queue: Promise<unknown> = Promise.resolve()
 
-export function persistCurrentDiagram(prompt?: string): Promise<SaveResult> {
-  const next = queue.then(() => doSave(prompt))
+export function persistCurrentDiagram(ctx?: SaveContext): Promise<SaveResult> {
+  const next = queue.then(() => doSave(ctx))
   queue = next.catch(() => undefined)
   return next
+}
+
+// Diario de versiones de un diagrama (metadata, sin snapshots). Lo carga la
+// apertura de un diagrama del historial para poblar la lista de operaciones y
+// habilitar la navegación ◀ ▶.
+export async function listVersions(diagramId: string): Promise<VersionMeta[]> {
+  const headers = authHeaders()
+  if (!headers) return []
+  const res = await fetch(`${API_URL}/diagrams/${diagramId}/versions`, { headers })
+  if (!res.ok) throw new Error(`No se pudo cargar el historial de versiones (HTTP ${res.status})`)
+  return res.json()
+}
+
+// Una versión completa (con su snapshot) para previsualizarla al navegar a ella.
+export async function getVersion(diagramId: string, versionId: string): Promise<DiagramVersionRow> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/diagrams/${diagramId}/versions/${versionId}`, { headers })
+  if (!res.ok) throw new Error(`No se pudo cargar la versión (HTTP ${res.status})`)
+  return res.json()
 }
 
 export async function listDiagrams(): Promise<DiagramMeta[]> {

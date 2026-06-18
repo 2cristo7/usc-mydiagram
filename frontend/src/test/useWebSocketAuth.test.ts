@@ -16,17 +16,21 @@ const h = vi.hoisted(() => {
     emit: vi.fn(),
     disconnect: vi.fn(),
   }
-  const store = { addMessage: vi.fn(), setUiState: vi.fn() }
+  const store = { setActiveOperation: vi.fn(), setUiState: vi.fn() }
+  const toast = { error: vi.fn(), warning: vi.fn() }
   const storeActions = {
-    addNode: vi.fn(), addEdge: vi.fn(), addMessage: store.addMessage, setUiState: store.setUiState,
+    addNode: vi.fn(), addEdge: vi.fn(), setUiState: store.setUiState,
     setPendingClarification: vi.fn(), updateNode: vi.fn(), removeNode: vi.fn(),
     removeEdge: vi.fn(), applyDiagram: vi.fn(), traceToolCall: vi.fn(),
     traceToolResult: vi.fn(), clearToolTrace: vi.fn(),
+    setGenerationPhase: vi.fn(), clearDiagramContent: vi.fn(), setPendingTypeChoice: vi.fn(),
+    addVersion: vi.fn(), setActiveOperation: store.setActiveOperation,
   }
   return {
     handlers,
     fakeSocket,
     store,
+    toast,
     signOut: vi.fn(),
     unsubscribe: vi.fn(),
     authCb: undefined as undefined | ((event: string, session: unknown) => void),
@@ -55,6 +59,7 @@ vi.mock('../hooks/useAuth', () => ({ signOut: h.signOut }))
 vi.mock('../store/index', () => ({ useStore: h.useStore }))
 vi.mock('../store/auth', () => ({ useAuthStore: h.useAuthStore }))
 vi.mock('../lib/api', () => ({ persistCurrentDiagram: vi.fn(async () => ({ ok: true })) }))
+vi.mock('../store/toast', () => ({ toast: h.toast }))
 vi.mock('../ui/utils/diagramToJson', () => ({ diagramToJson: vi.fn() }))
 
 import { useWebSocket } from '../hooks/useWebSocket'
@@ -66,7 +71,7 @@ beforeEach(() => {
 })
 
 describe('useWebSocket — endurecimiento JWT (S10.1)', () => {
-  it('auth:expired → avisa en el chat y desloguea', () => {
+  it('auth:expired → avisa (toast) y desloguea', () => {
     renderHook(() => useWebSocket())
     expect(h.handlers.has('auth:expired')).toBe(true)
 
@@ -74,7 +79,7 @@ describe('useWebSocket — endurecimiento JWT (S10.1)', () => {
 
     expect(h.signOut).toHaveBeenCalledOnce()
     expect(h.store.setUiState).toHaveBeenCalledWith('error')
-    const aviso = h.store.addMessage.mock.calls.find(([m]) => /expirado/i.test((m as { text: string }).text))
+    const aviso = h.toast.error.mock.calls.find(([m]) => /expirado/i.test(m as string))
     expect(aviso).toBeTruthy()
   })
 

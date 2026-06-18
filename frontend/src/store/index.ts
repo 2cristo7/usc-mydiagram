@@ -1,16 +1,17 @@
-import type { Message, DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry, PendingTypeChoice } from "../types";
+import type { DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry, PendingTypeChoice, VersionMeta } from "../types";
 import { create } from "zustand";
 import { persistCurrentDiagram } from "../lib/api";
 import { toast } from "./toast";
 
 // Fase de animación de generación por streaming.
 // - 'idle': sin diagrama en curso, comportamiento normal.
-// - 'staging': los nodos/aristas van llegando; se muestran en la fila almacén.
-// - 'assembling': diagram:done recibido; animando transición al layout final.
-// - 'done': animación completada; canvas interactivo normal.
-// Solo la generación/refinamiento por streaming pasa por 'staging' y 'assembling'.
-// Cargar un diagrama guardado va directamente a 'done'.
-export type GenerationPhase = 'idle' | 'staging' | 'assembling' | 'done';
+// - 'live': los nodos/aristas van llegando y el diagrama se MONTA en tiempo real
+//   (nube radial → cristalización dagre por cada arista). Ver liveLayout.ts.
+// - 'done': montaje completado; canvas interactivo normal.
+// Solo la generación por streaming pasa por 'live'. El refinamiento aplica deltas
+// en vivo sobre el canvas interactivo (no toca generationPhase). Cargar un diagrama
+// guardado va directamente a 'done'.
+export type GenerationPhase = 'idle' | 'live' | 'done';
 
 // Autoguardado con debounce: TODA edición manual del diagrama (renombrar nodos,
 // añadir/borrar nodos y aristas, editar aristas, arrastrar, recalcular layout)
@@ -26,14 +27,22 @@ function schedulePersist() {
     // de diagram:done una vez cerrado el run.
     if (useStore.getState().uiState !== 'ready') return
     if (_saveTimer !== null) clearTimeout(_saveTimer)
+    // Una edición manual hace que el canvas DIVERJA de la última versión: el botón
+    // "volver a esta versión" se habilita para todas las tarjetas (ya no estás en
+    // ninguna) hasta que el guardado de debounce cree la versión manual_edit.
+    if (useStore.getState().currentVersionSeq !== null) {
+        useStore.setState({ currentVersionSeq: null })
+    }
     _saveTimer = setTimeout(() => {
         _saveTimer = null
-        // Consumimos el resultado para avisar al usuario si el autoguardado falla.
+        // Edición MANUAL → versión origin 'manual_edit' (navegable con ◀ ▶, no sale
+        // en la lista de operaciones). La versión devuelta se añade al diario.
         // 'no-session' no es un fallo real (usuario sin login): se ignora en
-        // silencio. El toast store deduplicará mensajes idénticos simultáneos,
-        // evitando spam si varias ediciones rápidas coinciden en el fallo.
-        persistCurrentDiagram().then((r) => {
-            if (!r.ok && r.error !== 'no-session') {
+        // silencio. El toast store deduplica mensajes idénticos simultáneos.
+        persistCurrentDiagram({ origin: 'manual_edit' }).then((r) => {
+            if (r.ok && r.version) {
+                useStore.getState().addVersion(r.version)
+            } else if (!r.ok && r.error !== 'no-session') {
                 toast.error('No se pudieron guardar los cambios. Revisa tu conexión.')
             }
         })
@@ -41,11 +50,44 @@ function schedulePersist() {
 }
 
 interface MsgStore {
-    messages: Message[];
-    addMessage: (message: Message) => void;
-    // S10.x — reemplaza la conversación completa. Lo usa la carga del historial
-    // para restaurar los mensajes del diagrama abierto (addMessage solo añade).
-    setMessages: (messages: Message[]) => void;
+    // S10.3 — Diario de versiones (reemplaza el log de mensajes del chat). Es la
+    // metadata de TODAS las versiones (agente + manuales), ordenada por seq. La
+    // lista de operaciones se DERIVA filtrando origin != 'manual_edit'; la
+    // navegación ◀ ▶ recorre la lista completa.
+    versions: VersionMeta[];
+    // Reemplaza el diario entero (al abrir un diagrama del historial).
+    setVersions: (versions: VersionMeta[]) => void;
+    // Añade una versión recién creada (tras un guardado) y se posiciona en el tip.
+    addVersion: (version: VersionMeta) => void;
+    // Comando del usuario EN VUELO (generación/refinamiento en curso). Se pinta
+    // como tarjeta "en progreso" en el panel; al terminar se vuelve una versión.
+    // null = no hay operación corriendo.
+    activeOperation: string | null;
+    setActiveOperation: (op: string | null) => void;
+    // seq de la versión cuyo estado coincide EXACTAMENTE con el canvas actual.
+    // null = el canvas DIVERGE (se editó a mano y aún no coincide con ninguna
+    // versión). Gobierna el botón "volver a esta versión": una tarjeta cuyo seq ==
+    // currentVersionSeq está deshabilitada (ya estás en ella); al editar diverge.
+    currentVersionSeq: number | null;
+    // id de la versión sobre la que se asienta el canvas = PADRE de la próxima
+    // versión que se cree (la posición en el árbol). A diferencia de
+    // currentVersionSeq, NO se pone a null al divergir: una edición manual cuelga
+    // su versión de aquí. Lo fija addVersion (al guardar) y goToVersion (al navegar).
+    currentVersionId: string | null;
+    // ANCLA DE ORDENACIÓN de la lista: la última versión del AGENTE creada (el
+    // "head" del camino explorado). Solo cambia al crear una versión generate/refine
+    // o al cargar; NO al navegar ni en ediciones manuales. Así la lista se reordena
+    // (ramas muertas arriba) solo cuando refinas, no al moverte por el histórico.
+    headVersionId: string | null;
+    // Navegar a una versión EXISTENTE (botón "volver a esta versión"): pone el
+    // canvas en su snapshot y mueve la posición del árbol ahí, SIN crear versión
+    // nueva (el diario nunca pierde progreso; ramificar es trabajo de la siguiente
+    // edición). Es navegación pura: no persiste.
+    goToVersion: (version: VersionMeta, diagram: DiagramSchema) => void;
+    // Contador que incrementa en cada goToVersion. El canvas lo observa para animar
+    // la transición de nodos (glide a sus posiciones + entrada/salida) en vez de un
+    // flash. No persiste; señal efímera (espejo de relayoutTick).
+    navTick: number;
     // S10.x — petición de edición inline de un nodo desde fuera del componente
     // (menú contextual "Editar"). El nodo con este id arranca su edición y limpia
     // la petición. null = sin petición pendiente.
@@ -106,6 +148,10 @@ interface DiagramStore {
     // Persiste la posición del nodo tras un drag. Actualiza DiagramNode.position
     // en el store (nodes[] y currentDiagram.nodes[]) y dispara guardado en BD.
     updateNodePosition(id: string, position: { x: number; y: number }): void;
+    // Persiste la geometría manual de un contenedor de GRUPO (arquitectura) tras
+    // redimensionarlo/moverlo. Va a currentDiagram.group_layout y dispara guardado
+    // en BD (versión manual_edit) → queda versionado y navegable, sobrevive recargas.
+    setGroupGeometry(containerId: string, geom: { x: number; y: number; width: number; height: number }): void;
     // Migration path: EditableEdge uses this to persist inline label/type edits.
     // updates maps to Partial<DiagramEdge> (the domain type stored in edge data).
     updateEdge(edgeId: string, updates: Partial<DiagramEdge>): void;
@@ -155,9 +201,40 @@ export type Store = MsgStore & DiagramStore;
 
 export const useStore = create<Store>()((set) => ({
 
-    messages: [],
-    addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
-    setMessages: (messages) => set({ messages }),
+    versions: [],
+    // Al cargar un diagrama, el canvas coincide con su última versión guardada (la
+    // de mayor seq = el HEAD en BD), que es la posición de partida en el árbol.
+    setVersions: (versions) => set({
+        versions,
+        currentVersionSeq: versions.at(-1)?.seq ?? null,
+        currentVersionId: versions.at(-1)?.id ?? null,
+        headVersionId: versions.at(-1)?.id ?? null,
+    }),
+    addVersion: (version) => set((state) => ({
+        versions: [...state.versions, version],
+        // El canvas pasa a coincidir EXACTAMENTE con la versión recién guardada, que
+        // además es la nueva posición en el árbol (padre de la siguiente).
+        currentVersionSeq: version.seq,
+        currentVersionId: version.id,
+        // El ancla de orden solo avanza con versiones del AGENTE: una edición manual
+        // NO reordena la lista (mantiene el head anterior).
+        headVersionId: version.origin === 'manual_edit' ? state.headVersionId : version.id,
+    })),
+    activeOperation: null,
+    setActiveOperation: (op) => set({ activeOperation: op }),
+    currentVersionSeq: null,
+    currentVersionId: null,
+    headVersionId: null,
+    goToVersion: (version, diagram) => set((state) => ({
+        currentDiagram: diagram,
+        nodes: diagram.nodes,
+        edges: diagram.edges,
+        currentVersionSeq: version.seq,
+        currentVersionId: version.id,
+        trashedDiagram: null,
+        navTick: state.navTick + 1,
+    })),
+    navTick: 0,
     editRequestNodeId: null,
     requestNodeEdit: (id) => set({ editRequestNodeId: id }),
     uiState: 'idle',
@@ -225,6 +302,14 @@ export const useStore = create<Store>()((set) => ({
         }))
         schedulePersist()
      },
+     setGroupGeometry: (containerId, geom) => {
+        set((state) => {
+            if (!state.currentDiagram) return {}
+            const group_layout = { ...(state.currentDiagram.group_layout ?? {}), [containerId]: geom }
+            return { currentDiagram: { ...state.currentDiagram, group_layout } }
+        })
+        schedulePersist()
+     },
      addNode: (node: DiagramNode) => {
         set((state) => {
             const updatedNodes = [...state.nodes, node]
@@ -283,10 +368,13 @@ export const useStore = create<Store>()((set) => ({
                 const { waypoints: _wp, ...data } = edge.data
                 return { ...edge, data }
             })
+            // Recalcular descarta también la geometría manual de los grupos
+            // (group_layout) para que el layout automático los redimensione.
+            const { group_layout: _gl, ...rest } = state.currentDiagram
             return {
                 nodes,
                 edges,
-                currentDiagram: { ...state.currentDiagram, nodes, edges },
+                currentDiagram: { ...rest, nodes, edges },
                 relayoutTick: state.relayoutTick + 1,
             }
         })
@@ -312,7 +400,11 @@ export const useStore = create<Store>()((set) => ({
         currentDiagramId: null,
         lastGenerationPrompt: null,
         lastGenerationType: null,
-        messages: [],
+        versions: [],
+        currentVersionSeq: null,
+        currentVersionId: null,
+        headVersionId: null,
+        activeOperation: null,
         toolTrace: [],
         pendingClarification: null,
         pendingTypeChoice: null,
@@ -331,7 +423,11 @@ export const useStore = create<Store>()((set) => ({
         currentDiagramId: null,
         lastGenerationPrompt: null,
         lastGenerationType: null,
-        messages: [],
+        versions: [],
+        currentVersionSeq: null,
+        currentVersionId: null,
+        headVersionId: null,
+        activeOperation: null,
         toolTrace: [],
         pendingClarification: null,
         pendingTypeChoice: null,
@@ -348,7 +444,11 @@ export const useStore = create<Store>()((set) => ({
         currentDiagramId: null,
         lastGenerationPrompt: null,
         lastGenerationType: null,
-        messages: [],
+        versions: [],
+        currentVersionSeq: null,
+        currentVersionId: null,
+        headVersionId: null,
+        activeOperation: null,
         toolTrace: [],
         pendingClarification: null,
         pendingTypeChoice: null,

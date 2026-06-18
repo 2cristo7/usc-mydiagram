@@ -10,7 +10,9 @@ vi.mock('../lib/api', () => ({
 
 beforeEach(() => {
     useStore.setState({
-      messages: [],
+      versions: [],
+      currentVersionSeq: null,
+      activeOperation: null,
       uiState: 'idle',
       generationPhase: 'idle',
       nodes: [],
@@ -22,10 +24,30 @@ beforeEach(() => {
     })
   })
 
-test('addMessage', () => {
-  const message = { id: '1', text: 'Hello, world!', sender: 'user' as const, timestamp: new Date() }
-  useStore.getState().addMessage(message)
-  expect(useStore.getState().messages).toContain(message)
+test('addVersion: añade al diario y el canvas pasa a coincidir con esa versión', () => {
+  const v = { id: '1', seq: 1, origin: 'generate' as const, instruction: 'Crea un ERD', op_summary: null, created_at: new Date().toISOString() }
+  useStore.getState().addVersion(v)
+  expect(useStore.getState().versions).toContain(v)
+  expect(useStore.getState().currentVersionSeq).toBe(1)
+})
+
+test('headVersionId (ancla de orden) solo avanza con versiones del agente, no con manual_edit', () => {
+  const gen = { id: 'g', seq: 1, origin: 'generate' as const, instruction: 'x', op_summary: null, parent_version_id: null, created_at: '' }
+  const manual = { id: 'm', seq: 2, origin: 'manual_edit' as const, instruction: null, op_summary: null, parent_version_id: 'g', created_at: '' }
+  const refine = { id: 'r', seq: 3, origin: 'refine' as const, instruction: 'y', op_summary: null, parent_version_id: 'm', created_at: '' }
+  useStore.getState().addVersion(gen)
+  expect(useStore.getState().headVersionId).toBe('g')
+  useStore.getState().addVersion(manual) // manual NO mueve el ancla → la lista no se reordena
+  expect(useStore.getState().headVersionId).toBe('g')
+  useStore.getState().addVersion(refine) // refine SÍ mueve el ancla
+  expect(useStore.getState().headVersionId).toBe('r')
+})
+
+test('una edición manual hace divergir el canvas (currentVersionSeq → null)', () => {
+  useStore.getState().setCurrentDiagram({ title: 'T', diagram_type: 'erd' as DiagramType, nodes: [{ id: 'n1', label: 'A', node_type: 'table' as NodeType, attributes: [] }], edges: [] })
+  useStore.setState({ uiState: 'ready', currentVersionSeq: 5 })
+  useStore.getState().updateNode('n1', { label: 'B' })
+  expect(useStore.getState().currentVersionSeq).toBeNull()
 })
 
 // S10.2 — tipo preseleccionado para la próxima generación.
@@ -155,33 +177,27 @@ test('generationPhase: valor inicial es idle', () => {
   expect(useStore.getState().generationPhase).toBe('idle')
 })
 
-test('generationPhase: transición idle → staging al iniciar streaming', () => {
-  useStore.getState().setGenerationPhase('staging' as GenerationPhase)
-  expect(useStore.getState().generationPhase).toBe('staging')
+test('generationPhase: transición idle → live al iniciar streaming', () => {
+  useStore.getState().setGenerationPhase('live' as GenerationPhase)
+  expect(useStore.getState().generationPhase).toBe('live')
 })
 
-test('generationPhase: transición staging → assembling al recibir diagram:done', () => {
-  useStore.getState().setGenerationPhase('staging' as GenerationPhase)
-  useStore.getState().setGenerationPhase('assembling' as GenerationPhase)
-  expect(useStore.getState().generationPhase).toBe('assembling')
-})
-
-test('generationPhase: transición assembling → done al completar la animación', () => {
-  useStore.getState().setGenerationPhase('assembling' as GenerationPhase)
+test('generationPhase: transición live → done al terminar el montaje en vivo', () => {
+  useStore.getState().setGenerationPhase('live' as GenerationPhase)
   useStore.getState().setGenerationPhase('done' as GenerationPhase)
   expect(useStore.getState().generationPhase).toBe('done')
 })
 
-test('generationPhase: cargar diagrama existente (setCurrentDiagram) NO entra en staging', () => {
+test('generationPhase: cargar diagrama existente (setCurrentDiagram) NO entra en live', () => {
   // Simula carga desde historial: setCurrentDiagram nunca toca generationPhase.
   const diagram = { title: 'Test', diagram_type: 'erd' as DiagramType, nodes: [], edges: [] }
   useStore.getState().setCurrentDiagram(diagram)
-  // La fase sigue en 'idle' (o el valor que tenía), no en 'staging'.
+  // La fase sigue en 'idle' (o el valor que tenía), no en 'live'.
   expect(useStore.getState().generationPhase).toBe('idle')
 })
 
 test('generationPhase: error de generación vuelve a idle', () => {
-  useStore.getState().setGenerationPhase('staging' as GenerationPhase)
+  useStore.getState().setGenerationPhase('live' as GenerationPhase)
   // En useWebSocket, diagram:error llama a setGenerationPhase('idle')
   useStore.getState().setGenerationPhase('idle' as GenerationPhase)
   expect(useStore.getState().generationPhase).toBe('idle')

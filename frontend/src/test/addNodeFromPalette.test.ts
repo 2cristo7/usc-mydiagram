@@ -31,7 +31,9 @@ const flowchartDiagram = () => ({
 
 beforeEach(() => {
   useStore.setState({
-    messages: [],
+    versions: [],
+    currentVersionSeq: null,
+    activeOperation: null,
     uiState: 'idle',
     generationPhase: 'idle',
     nodes: [],
