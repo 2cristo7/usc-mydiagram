@@ -44,9 +44,11 @@ function DiagramQuestionIcon({ size = 48, className }: { size?: number; classNam
 import { useStore } from '../store/index'
 import { useUiStore } from '../store/ui'
 import { useHistoryStore } from '../store/history'
-import { getDiagram, restoreDiagram } from '../lib/api'
+import { getDiagram, restoreDiagram, listVersions } from '../lib/api'
 import { DiagramToFlow, computeDistributedAnchors, buildFlowEdges, type Box } from '../ui/utils/diagramToFlow'
-import { stagingNodePositions, stagingEdges } from '../ui/utils/stagingLayout'
+import { liveLayout } from '../ui/utils/liveLayout'
+import { useArchGeom, getArchTextSize } from '../store/archGeom'
+import { archFootprintLocalBounds } from '../ui/utils/archBottle'
 
 import { C4Node } from './nodes/C4Node'
 import { ArchitectureNode } from './nodes/ArchitectureNode'
@@ -106,6 +108,10 @@ const MINIMAP_SIZE = { width: 100, height: 75 }
 // transición CSS de `.animate-layout .react-flow__node` en index.css.
 const LAYOUT_ANIM_MS = 400
 
+// Duración de la animación de navegación entre versiones (ms). Debe coincidir con
+// `.animate-nav` en index.css.
+const NAV_ANIM_MS = 400
+
 // Modelo de ratón estilo Miro:
 //  · Botón derecho (2) y rueda/central (1) arrastran el lienzo para navegar/pan
 //    sobre el fondo (el central duplica al derecho). El derecho navega siempre,
@@ -124,8 +130,12 @@ export function DiagramCanvas() {
   const uiState = useStore((s) => s.uiState)
   const generationPhase = useStore((s) => s.generationPhase)
   const trashedDiagram = useStore((s) => s.trashedDiagram)
-  const streamingNodes = useStore((s) => s.nodes)
-  const streamingEdges = useStore((s) => s.edges)
+  // Tipo preseleccionado/forzado: durante el montaje en vivo currentDiagram aún no
+  // trae diagram_type (lo fija applyDiagram en el done), así que para que el layout
+  // en vivo sea el REAL (mindmap radial, secuencia…) lo resolvemos igual que el
+  // header: currentDiagram.diagram_type ?? preselección ?? tipo de la generación.
+  const selectedDiagramType = useStore((s) => s.selectedDiagramType)
+  const lastGenerationType = useStore((s) => s.lastGenerationType)
   const addEdge = useStore((s) => s.addEdge)
   const canvasLocked = useUiStore((s) => s.canvasLocked)
   const gridEnabled = useUiStore((s) => s.gridEnabled)
@@ -241,9 +251,11 @@ export function DiagramCanvas() {
       s.setCurrentDiagram(row.data)
       s.setCurrentDiagramId(row.id)
       s.setLastGenerationPrompt(row.prompt ?? null)
-      s.setMessages(
-        (row.messages ?? []).map((m) => ({ ...m, timestamp: new Date(m.timestamp) })),
-      )
+      try {
+        s.setVersions(await listVersions(row.id))
+      } catch {
+        s.setVersions([])
+      }
       useHistoryStore.getState().reset()
       s.setUiState('ready')
     } catch (e) {
@@ -309,11 +321,57 @@ export function DiagramCanvas() {
   // tras cada arrastre. El resto de tipos sí re-siembran siempre: DiagramToFlow
   // respeta node.position, así que reflejar undo/redo o ediciones de la IA es
   // idempotente y no produce saltos.
+  // navTick incrementa al navegar a otra versión (goToVersion): distingue un cambio
+  // de currentDiagram por NAVEGACIÓN (animar) de uno por edición normal (no animar).
+  const navTick = useStore((s) => s.navTick)
+  const navTickRef = useRef(0)
+  const [animateNav, setAnimateNav] = useState(false)
+
+  // Ventana de animación de navegación para TODOS los tipos (arquitectura incluida):
+  // activa .animate-nav durante NAV_ANIM_MS para que las nuevas posiciones —vengan
+  // de la re-siembra (no-arq) o del layout ELK (arq)— se animen en vez de saltar.
   useEffect(() => {
+    if (navTick === 0) return
+    setAnimateNav(true)
+    const t = setTimeout(() => setAnimateNav(false), NAV_ANIM_MS + 50)
+    return () => clearTimeout(t)
+  }, [navTick])
+
+  // Re-siembra de rfNodes desde currentDiagram (NO arquitectura: su layout lo posee
+  // el efecto ELK de más abajo). En una NAVEGACIÓN etiqueta además la entrada/salida
+  // de nodos para su fundido; cualquier otro cambio re-siembra directo.
+  useEffect(() => {
+    const isNav = navTick !== navTickRef.current
+    navTickRef.current = navTick
     if (currentDiagram?.diagram_type === 'architecture') return
-    setRfNodes(derived.nodes)
+    if (!isNav) {
+      setRfNodes(derived.nodes)
+      setRfEdges(derived.edges)
+      return
+    }
+    // Los nodos que PERSISTEN reciben sus nuevas posiciones y "vuelan" hasta ellas
+    // (transición CSS de .animate-nav); los que APARECEN entran con fundido
+    // (rf-enter); los que DESAPARECEN se mantienen un instante con fundido de salida
+    // (rf-leave) y se retiran al cerrar la ventana.
+    setRfNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]))
+      const nextIds = new Set(derived.nodes.map((n) => n.id))
+      const entering = derived.nodes.map((n) =>
+        prevById.has(n.id) ? n : { ...n, className: `${n.className ?? ''} rf-enter`.trim() },
+      )
+      const leaving = prev
+        .filter((n) => !nextIds.has(n.id))
+        .map((n) => ({ ...n, className: `${n.className ?? ''} rf-leave`.trim(), draggable: false, selectable: false }))
+      return [...entering, ...leaving]
+    })
     setRfEdges(derived.edges)
-  }, [derived, currentDiagram, setRfNodes, setRfEdges])
+    const t = setTimeout(() => {
+      // Limpia las clases de entrada y descarta los nodos que salieron.
+      setRfNodes(derived.nodes)
+      setRfEdges(derived.edges)
+    }, NAV_ANIM_MS + 50)
+    return () => clearTimeout(t)
+  }, [derived, currentDiagram, navTick, setRfNodes, setRfEdges])
 
   // Firma ESTRUCTURAL del diagrama de arquitectura (ids + tipos + grupos de nodos y
   // conectividad de aristas), SIN posiciones. El refinamiento ELK reflota todo el
@@ -340,6 +398,9 @@ export function DiagramCanvas() {
   // enrutan con computeDistributedAnchors); se excluyen sequence (mensajes
   // posicionales) y mindmap (layout radial propio). La firma de geometría evita
   // recomputar salvo que cambie posición o tamaño de algún nodo.
+  // Versión de la geometría de texto de los archIcon (cambia al medir/actualizar
+  // el texto). El ruteo de arquitectura depende del footprint icono+texto.
+  const archGeomVersion = useArchGeom((s) => s.version)
   const nodeGeomSig = useMemo(
     () =>
       rfNodes
@@ -362,23 +423,40 @@ export function DiagramCanvas() {
     // relativa al padre), así que usamos la posición ABSOLUTA del nodo interno.
     const CONTAINER_TYPES = new Set(['useCaseSystem', 'architectureGroup'])
     const containerIds = new Set<string>()
+    // `boxes`: caja de la FORMA real del nodo (icono 72×72 en archIcon). Define dónde
+    // se anclan los extremos → la flecha aterriza SOBRE el nodo, nunca en el margen
+    // vacío junto al texto. `footprints`: caja completa icono+texto, usada SOLO como
+    // obstáculo del ruteo para que las líneas rodeen el texto sin cruzarlo.
     const boxes = new Map<string, Box>()
+    const footprints = new Map<string, Box>()
     for (const n of rfNodes) {
       const w = n.measured?.width
       const h = n.measured?.height
       if (!w || !h) return // aún no medidos: esperamos al siguiente cambio de firma
       // Posición absoluta (correcta también para hijos de un grupo de arquitectura).
       const abs = getInternalNode(n.id)?.internals.positionAbsolute ?? n.position
-      boxes.set(n.id, { cx: abs.x + w / 2, cy: abs.y + h / 2, w, h })
+      const iconBox: Box = { cx: abs.x + w / 2, cy: abs.y + h / 2, w, h }
+      boxes.set(n.id, iconBox)
+      if (n.type === 'archIcon') {
+        const { w: tw, h: th } = getArchTextSize(n.id)
+        const b = archFootprintLocalBounds(tw, th)
+        const fw = b.right - b.left
+        const fh = b.bottom - b.top
+        footprints.set(n.id, { cx: abs.x + b.left + fw / 2, cy: abs.y + b.top + fh / 2, w: fw, h: fh })
+      } else {
+        footprints.set(n.id, iconBox)
+      }
       if (n.type && CONTAINER_TYPES.has(n.type)) containerIds.add(n.id)
     }
     if (boxes.size === 0) return
 
-    const anchors = computeDistributedAnchors(currentDiagram, boxes, containerIds)
+    const anchors = computeDistributedAnchors(currentDiagram, boxes, containerIds, footprints)
     setRfEdges(buildFlowEdges(currentDiagram, anchors))
     // nodeGeomSig resume la geometría de rfNodes; depender de él evita re-render en bucle.
+    // archGeomVersion: el footprint de los archIcon depende del tamaño de su texto
+    // (medido tras montar), así que re-rutear cuando cambie.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeGeomSig, currentDiagram, setRfEdges, getInternalNode])
+  }, [nodeGeomSig, archGeomVersion, currentDiagram, setRfEdges, getInternalNode])
 
   // Re-encuadre al CARGAR un diagrama distinto (p. ej. seleccionarlo en el
   // historial). El canvas interactivo ya está montado, y la prop `fitView` solo
@@ -398,6 +476,18 @@ export function DiagramCanvas() {
     const t = setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), 80)
     return () => clearTimeout(t)
   }, [currentDiagramId, fitView])
+
+  // Re-encuadre continuo durante el montaje en vivo: la prop `fitView` solo encuadra
+  // al montar, pero el diagrama CRECE mientras la cola de revelado lo va tejiendo.
+  // Re-encuadramos ANIMADO en cada cambio de currentDiagram (cada tick de la cola):
+  // la cámara "sigue" suavemente al diagrama según se ensambla en vez de saltar. Las
+  // llamadas animadas se re-apuntan entre sí (d3-zoom), produciendo un seguimiento
+  // continuo. Retardo de un frame para que React Flow haya aplicado los nodos nuevos.
+  useEffect(() => {
+    if (generationPhase !== 'live') return
+    const t = setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), 0)
+    return () => clearTimeout(t)
+  }, [generationPhase, currentDiagram, fitView])
 
   // Animación del "Recalcular layout": al disparar relayout(), el store
   // incrementa relayoutTick. Activamos una clase que pone una transición CSS en
@@ -420,7 +510,7 @@ export function DiagramCanvas() {
   // diagrama (el arrastre en vivo ya actualiza rfNodes via onNodesChange).
   useEffect(() => {
     if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return
-    if (generationPhase === 'staging' || generationPhase === 'assembling') return
+    if (generationPhase === 'live') return
 
     // Pintado provisional inmediato SOLO en cambio estructural (carga inicial, otro
     // diagrama, alta/baja de nodos): evita un flash del diagrama anterior mientras
@@ -475,61 +565,30 @@ export function DiagramCanvas() {
     })
   }, [currentDiagram, setRfNodes])
 
-  // ── FASE STAGING ────────────────────────────────────────────────────────────
-  // Durante 'staging' mostramos el almacén: nodos en fila superior (reales, con
-  // su tipo custom) y aristas nativas con etiqueta.
-  // Nunca hay currentDiagram definitivo aquí (el snapshot llega en diagram:done).
-  if (generationPhase === 'staging') {
-    return (
-      <div className="relative flex h-full w-full">
-        {/* Banner informativo superpuesto */}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 bg-[var(--color-surface)] border-[2px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] text-xs font-semibold text-[var(--color-ink)] pointer-events-none">
-          Recibiendo elementos… ({streamingNodes.length} nodos · {streamingEdges.length} aristas)
-        </div>
-        <ReactFlow
-          nodes={stagingNodePositions(streamingNodes)}
-          edges={stagingEdges(streamingEdges)}
-          fitView
-          fitViewOptions={FIT_VIEW_OPTIONS}
-          nodesDraggable={false}
-          panOnDrag={PAN_ON_DRAG}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onConnect={onConnect}
-          onConnectStart={onConnectStart}
-          onConnectEnd={onConnectEnd}
-          onNodeMouseEnter={onNodeMouseEnter}
-          onNodeMouseLeave={onNodeMouseLeave}
-          onContextMenu={suppressContextMenu}
-          className="bg-[var(--color-bg)]"
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background
-            variant={BackgroundVariant.Dots}
-            color="var(--color-ink)"
-            gap={20}
-            size={1}
-            style={{ opacity: 0.12 }}
-          />
-        </ReactFlow>
-      </div>
-    )
-  }
-
-  // ── FASE ASSEMBLING ─────────────────────────────────────────────────────────
-  // El snapshot final ya llegó (applyDiagram ya actualizó currentDiagram).
-  // Calculamos el layout final y renderizamos con la clase 'is-assembling' en el
-  // wrapper, que activa via CSS una transición de transform en los nodos React Flow.
-  // React Flow verá que las posiciones cambiaron y animará el movimiento.
-  if (generationPhase === 'assembling' && currentDiagram) {
-    const { nodes: finalNodes, edges: finalEdges } = DiagramToFlow(currentDiagram)
+  // ── FASE LIVE ───────────────────────────────────────────────────────────────
+  // Montaje en tiempo real durante la generación por streaming. liveLayout coloca los
+  // nodos que van llegando en un CÍRCULO RADIAL compacto y, según llegan las aristas,
+  // cristaliza la estructura real (mindmap radial, ERD con dagre…) tirando de los nodos
+  // conectados a su sitio; los aún sueltos esperan en un anillo. La cola de revelado de
+  // useWebSocket marca el ritmo (un elemento cada ~190 ms+). La clase 'is-live' aplica
+  // vía CSS la transición de transform, de modo que cada recálculo se ve como un glide.
+  // El re-encuadre (cámara que sigue el montaje) lo lleva el efecto de más arriba.
+  if (generationPhase === 'live' && currentDiagram) {
+    // Resolver el tipo para el layout en vivo (ver arriba). Si lo conocemos y aún no
+    // está en currentDiagram, se lo inyectamos para que liveLayout elija el layout real
+    // (p. ej. mindmap radial) en vez del dagre genérico por defecto.
+    const liveType = currentDiagram.diagram_type ?? selectedDiagramType ?? lastGenerationType
+    const liveDiagram = liveType && !currentDiagram.diagram_type
+      ? { ...currentDiagram, diagram_type: liveType }
+      : currentDiagram
+    const { nodes: liveNodes, edges: liveEdges } = liveLayout(liveDiagram)
 
     return (
-      <div className="relative flex h-full w-full is-assembling">
+      <div className="relative flex h-full w-full is-live">
         <EdgeMarkers />
         <ReactFlow
-          nodes={finalNodes}
-          edges={finalEdges}
+          nodes={liveNodes}
+          edges={liveEdges}
           fitView
           fitViewOptions={FIT_VIEW_OPTIONS}
           nodesDraggable={false}
@@ -748,7 +807,7 @@ export function DiagramCanvas() {
         onPaneClick={() => { setSelectedNode(null); closeEdgeMenu(); closeNodeMenu() }}
         connectionMode={ConnectionMode.Loose}
         connectionLineComponent={connectionLineComponent}
-        className={`bg-[var(--color-bg)]${animateLayout ? ' animate-layout' : ''}`}
+        className={`bg-[var(--color-bg)]${animateLayout ? ' animate-layout' : ''}${animateNav ? ' animate-nav' : ''}`}
         proOptions={{ hideAttribution: true }}
       >
         <Background

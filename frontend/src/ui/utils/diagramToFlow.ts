@@ -39,7 +39,7 @@ const nodeTypeOverrides: Partial<Record<DiagramType, Partial<Record<NodeType, st
 // a dagre. Aproxima el TableNode/UmlClassNode: cabecera + una fila por atributo,
 // con fuente monoespaciada (~7.3px por carácter). Los valores son holgados a
 // propósito; es mejor sobreestimar (más aire) que solapar.
-function estimateNodeSize(label: string, attributes?: string[]): { width: number, height: number } {
+export function estimateNodeSize(label: string, attributes?: string[]): { width: number, height: number } {
     const attrs = attributes ?? [];
     const longest = Math.max(label.length, ...attrs.map((a) => a.length), 0);
     // padding lateral (24) + hueco para el icono PK/FK (~18) + ancho del texto.
@@ -195,6 +195,12 @@ export function computeDistributedAnchors(
     // el «system» de casos de uso o los grupos de arquitectura): las aristas tienen
     // que poder cruzar su frontera para alcanzar a los hijos que viven dentro.
     containerIds?: Set<string>,
+    // Cajas de OBSTÁCULO alternativas (footprint completo) usadas SOLO para esquivar
+    // nodos al rutear. La colocación de anclajes y la elección de lado siguen usando
+    // `boxes` (la caja de la forma real, p. ej. el icono 72×72 de archIcon) para que
+    // el extremo aterrice SOBRE el nodo y la flecha apunte bien; el footprint solo
+    // amplía el área que las líneas deben rodear (p. ej. el texto bajo el icono).
+    obstacleBoxes?: Map<string, Box>,
 ): Map<string, EdgeRouting> {
     // `desired` = coordenada absoluta a lo largo del lado donde el anclaje quiere
     // estar para que la arista salga recta: el centro del solape perpendicular entre
@@ -277,8 +283,11 @@ export function computeDistributedAnchors(
     // Pasada de ruteo ortogonal: para cada arista, calcula waypoints que rodean los
     // demás nodos en lugar de atravesarlos. Las cajas (Rect) se reutilizan por
     // identidad para excluir los nodos origen/destino como obstáculos.
+    // Los obstáculos usan el footprint (texto incluido) cuando se proporciona, así
+    // las líneas rodean también el texto; los extremos siguen anclados sobre `boxes`.
+    const obstacles = obstacleBoxes ?? boxes;
     const rects = new Map<string, Rect>();
-    for (const [id, b] of boxes) rects.set(id, { x: b.cx - b.w / 2, y: b.cy - b.h / 2, w: b.w, h: b.h });
+    for (const [id, b] of obstacles) rects.set(id, { x: b.cx - b.w / 2, y: b.cy - b.h / 2, w: b.w, h: b.h });
     // Los contenedores se excluyen del conjunto de obstáculos (sus hijos sí cuentan).
     const allRects = [...rects.entries()]
         .filter(([id]) => !containerIds?.has(id))
@@ -423,6 +432,15 @@ function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
     return { nodes: allNodes, edges };
 }
 
+// Resuelve el componente React Flow (`type`) de un nodo del dominio: override por
+// diagram_type → mapa general → 'default'. Compartido por dagreLayout y el layout
+// en vivo, que coloca nodos sin conocer aún el diagram_type definitivo.
+export function flowNodeType(nodeType: NodeType, diagramType: DiagramType | null | undefined): string {
+    return (diagramType ? nodeTypeOverrides[diagramType]?.[nodeType] : undefined)
+        ?? nodeTypeMap[nodeType]
+        ?? 'default';
+}
+
 export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
     if (diagram.diagram_type === 'sequence') {
         return sequenceLayout(diagram);
@@ -437,6 +455,14 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
         return useCaseLayout(diagram);
     }
 
+    return dagreLayout(diagram);
+}
+
+// Layout jerárquico genérico con dagre (ERD, clases, flujo y, en general, cualquier
+// diagrama sin layout propio). Extraído de DiagramToFlow para reutilizarlo en el
+// montaje en vivo en cuanto llega la primera arista, sin depender del
+// diagram_type (que durante el streaming todavía es null).
+export function dagreLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
     const graph = new dagre.graphlib.Graph();
 
     const rankdir = 'TB';
@@ -508,9 +534,7 @@ export function DiagramToFlow(diagram: DiagramSchema): { nodes: Node[], edges: E
                 nodeType: node.node_type,
                 attributes: node.attributes,
             },
-            type: nodeTypeOverrides[diagram.diagram_type]?.[node.node_type]
-                ?? nodeTypeMap[node.node_type]
-                ?? 'default'
+            type: flowNodeType(node.node_type, diagram.diagram_type)
         } as Node;
     });
 

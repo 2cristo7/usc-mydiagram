@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { Message, ConnectionState, Degradation, DegradationCategory, AgentToolCall, AgentToolResult } from "../types";
+import type { ConnectionState, Degradation, DegradationCategory, AgentToolCall, AgentToolResult, DiagramNode, DiagramEdge } from "../types";
 import { diagramSchema } from "../types";
 import { io, Socket } from "socket.io-client";
 import { useStore } from "../store/index";
@@ -20,21 +20,6 @@ const DEGRADATION_LABELS: Record<DegradationCategory, string> = {
     structure: 'El diagrama puede estar estructuralmente incompleto',
 };
 
-// Resumen legible de un refinamiento: describe QUÉ cambió (nodos/aristas
-// añadidos, modificados, eliminados) en vez del genérico "Diagrama generado".
-function refineSummary(c: {
-    added: string[]; updated: string[]; deleted: string[];
-    addedEdges: number; deletedEdges: number;
-}): string {
-    const parts: string[] = [];
-    if (c.added.length) parts.push(`Añadidos nodos: ${c.added.join(', ')}`);
-    if (c.updated.length) parts.push(`Modificados: ${c.updated.join(', ')}`);
-    if (c.deleted.length) parts.push(`Eliminados nodos: ${c.deleted.join(', ')}`);
-    if (c.addedEdges) parts.push(`${c.addedEdges} arista${c.addedEdges > 1 ? 's' : ''} nueva${c.addedEdges > 1 ? 's' : ''}`);
-    if (c.deletedEdges) parts.push(`${c.deletedEdges} arista${c.deletedEdges > 1 ? 's' : ''} eliminada${c.deletedEdges > 1 ? 's' : ''}`);
-    return parts.length ? parts.join(' · ') : 'Sin cambios en el diagrama';
-}
-
 function degradationMessages(degradations: Degradation[]): string[] {
     return degradations.map((d) => {
         const label = DEGRADATION_LABELS[d.category] ?? 'El diagrama quedó incompleto';
@@ -43,12 +28,33 @@ function degradationMessages(degradations: Degradation[]): string[] {
     });
 }
 
+// ── Montaje en vivo: ritmo de la cola de revelado ───────────────────────────────
+// El backend puede escupir todos los nodos/aristas en pocos ms; sin un ritmo propio
+// veríamos un único snap (o una ráfaga ilegible). La cola libera UN elemento cada
+// `step` ms en ORDEN DE LLEGADA, con `step` ADAPTATIVO: reparte lo pendiente en
+// ~LIVE_TARGET_MS pero SIEMPRE deja un mínimo holgado entre elementos (LIVE_MIN_STEP)
+// para que cada nodo/arista tenga tiempo de colocarse antes del siguiente.
+const LIVE_TARGET_MS = 1500;
+const LIVE_MIN_STEP = 45;
+const LIVE_MAX_STEP = 120;
+const clampLiveStep = (ms: number) => Math.max(LIVE_MIN_STEP, Math.min(LIVE_MAX_STEP, ms));
+
+// Payload de `diagram:done` (campos que consume processDone; el resto se valida con
+// diagramSchema antes de aplicarse).
+type DoneData = {
+    diagram?: { diagram_type?: unknown; nodes?: unknown[]; edges?: unknown[] };
+    title?: string;
+    degraded?: boolean;
+    degradations?: Degradation[];
+};
+
 export function useWebSocket(url: string = 'ws://localhost:3001') {
     const {
-        addNode, addEdge, addMessage, setUiState, setPendingClarification,
+        addNode, addEdge, setUiState, setPendingClarification,
         updateNode, removeNode, removeEdge, applyDiagram,
         traceToolCall, traceToolResult, clearToolTrace,
         setGenerationPhase, clearDiagramContent, setPendingTypeChoice,
+        addVersion, setActiveOperation,
     } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
@@ -65,6 +71,20 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         added: string[]; updated: string[]; deleted: string[];
         addedEdges: number; deletedEdges: number;
     }>({ added: [], updated: [], deleted: [], addedEdges: 0, deletedEdges: 0 });
+    // ── Cola de revelado del montaje en vivo (generación) ───────────────────────
+    // Los nodos/aristas que llegan por streaming NO se aplican al canvas de inmediato:
+    // entran a una única cola en ORDEN DE LLEGADA y la "bomba" (runLivePump) los revela
+    // de uno en uno con ritmo. Así los nodos van apareciendo (liveLayout los coloca en
+    // un círculo radial) y luego las aristas cristalizan la estructura poco a poco, sin
+    // ráfaga. El `done` de la generación se aplaza (pendingDone) hasta vaciar la cola,
+    // para no pisar el montaje con el snapshot completo de golpe.
+    type RevealItem = { kind: 'node'; node: DiagramNode } | { kind: 'edge'; edge: DiagramEdge };
+    const revealQueueRef = useRef<RevealItem[]>([]);
+    const pumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const streamDoneRef = useRef(false);
+    const pendingDoneRef = useRef<DoneData | null>(null);
+    const liveActiveRef = useRef(false);
+
     // S9.2 — el socket se (re)crea al cambiar la identidad (login/logout). El token
     // vigente se lee al conectar; los refrescos de token NO recrean el socket (la
     // verificación del backend ocurre solo en el handshake).
@@ -84,6 +104,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         if (genTimeoutRef.current) clearTimeout(genTimeoutRef.current);
         genTimeoutRef.current = setTimeout(() => {
             genTimeoutRef.current = null;
+            resetLiveStream();
             setGenerationPhase('idle');
             setUiState('error');
             toast.error('La generación está tardando demasiado. Inténtalo de nuevo.');
@@ -96,6 +117,160 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             clearTimeout(genTimeoutRef.current);
             genTimeoutRef.current = null;
         }
+    };
+
+    // ── Bomba de la cola de revelado ────────────────────────────────────────────
+    // Descarta cualquier montaje en vivo en curso (cancela timer, vacía colas y
+    // resetea flags). Se llama al arrancar un run nuevo y en cualquier desenlace
+    // (error, desconexión, timeout, desmontaje).
+    const resetLiveStream = () => {
+        if (pumpTimerRef.current != null) {
+            clearTimeout(pumpTimerRef.current);
+            pumpTimerRef.current = null;
+        }
+        revealQueueRef.current = [];
+        streamDoneRef.current = false;
+        pendingDoneRef.current = null;
+        liveActiveRef.current = false;
+    };
+
+    // Arranca un montaje en vivo limpio y entra en la fase 'live'.
+    const startLiveStream = () => {
+        resetLiveStream();
+        liveActiveRef.current = true;
+        setGenerationPhase('live');
+    };
+
+    // Programa la siguiente liberación si no hay ya una pendiente.
+    const scheduleLivePump = (delay: number) => {
+        if (pumpTimerRef.current != null) return;
+        pumpTimerRef.current = setTimeout(runLivePump, delay);
+    };
+
+    // Revela UN elemento por tick en ORDEN DE LLEGADA. Para una arista exige que sus
+    // dos extremos ya estén en el canvas (en orden de llegada lo normal es que el nodo
+    // preceda a su arista; si no, se salta hacia delante hasta el primer elemento
+    // revelable). Reprograma con ritmo holgado; al vaciarse, si el `done` ya llegó,
+    // finaliza la generación.
+    const runLivePump = () => {
+        pumpTimerRef.current = null;
+        if (!liveActiveRef.current) return;
+
+        const q = revealQueueRef.current;
+        if (q.length === 0) {
+            if (streamDoneRef.current) finalizeGeneration();
+            return;
+        }
+
+        const onCanvas = new Set(useStore.getState().currentDiagram?.nodes.map((n) => n.id) ?? []);
+        const revealable = (it: RevealItem) =>
+            it.kind === 'node' || (onCanvas.has(it.edge.source) && onCanvas.has(it.edge.target));
+
+        // Primer elemento revelable. Si ninguno lo es (aristas cuyos nodos aún no han
+        // llegado) y el stream sigue vivo, esperamos; si ya terminó, soltamos el frente.
+        let idx = q.findIndex(revealable);
+        if (idx < 0) {
+            if (!streamDoneRef.current) {
+                scheduleLivePump(LIVE_MAX_STEP);
+                return;
+            }
+            idx = 0;
+        }
+
+        const [item] = q.splice(idx, 1);
+        if (item.kind === 'node') addNode(item.node);
+        else addEdge(item.edge);
+
+        const remaining = q.length;
+        if (remaining === 0) {
+            if (streamDoneRef.current) finalizeGeneration();
+            return;
+        }
+        scheduleLivePump(clampLiveStep(LIVE_TARGET_MS / remaining));
+    };
+
+    const enqueueLiveNode = (node: DiagramNode) => {
+        revealQueueRef.current.push({ kind: 'node', node });
+        scheduleLivePump(LIVE_MIN_STEP);
+    };
+    const enqueueLiveEdge = (edge: DiagramEdge) => {
+        revealQueueRef.current.push({ kind: 'edge', edge });
+        scheduleLivePump(LIVE_MIN_STEP);
+    };
+
+    // Aplica el desenlace del run: valida y reconcilia el snapshot, persiste como
+    // versión y vuelve al canvas interactivo. Compartido por el refinamiento (canvas
+    // ya interactivo) y la generación (tras drenar la cola del montaje en vivo).
+    const processDone = (data: DoneData) => {
+        if (data?.diagram) {
+            // #7 — validar el snapshot con diagramSchema antes de aplicarlo. Si falla
+            // (datos corruptos del backend) se avisa y NO se toca el canvas.
+            const parseResult = diagramSchema.safeParse({
+                title: data.title ?? '',
+                diagram_type: data.diagram.diagram_type,
+                nodes: data.diagram.nodes ?? [],
+                edges: data.diagram.edges ?? [],
+            });
+            if (!parseResult.success) {
+                toast.error('El diagrama recibido no es válido.');
+                setActiveOperation(null);
+                setGenerationPhase('idle');
+                setUiState('error');
+                return;
+            }
+            const { currentDiagram } = useStore.getState();
+            applyDiagram({
+                title: data.title ?? currentDiagram?.title ?? '',
+                diagram_type: parseResult.data.diagram_type,
+                nodes: parseResult.data.nodes,
+                edges: parseResult.data.edges,
+                // Conserva la geometría manual de los grupos a través del
+                // refinamiento (el snapshot del agente no la trae).
+                group_layout: currentDiagram?.group_layout,
+            });
+        }
+        // S10.3 — el auto-guardado tras CADA done crea una VERSIÓN del diario
+        // (POST/PATCH la devuelve). No-op sin sesión; fire-and-forget.
+        const c = refineChangesRef.current;
+        persistCurrentDiagram({
+            prompt: lastPromptRef.current,
+            origin: isRefiningRef.current ? 'refine' : 'generate',
+            instruction: lastPromptRef.current ?? null,
+            op_summary: {
+                added: c.added,
+                updated: c.updated,
+                deleted: c.deleted,
+                addedEdges: c.addedEdges,
+                deletedEdges: c.deletedEdges,
+            },
+        }).then((r) => {
+            if (r.ok && r.version) addVersion(r.version);
+            else if (!r.ok && r.error !== 'no-session') {
+                console.error('[persist] auto-guardado falló:', r.error);
+            }
+        });
+        setActiveOperation(null);
+        // Degradación parcial (S6.9): aviso por categoría, sin bloquear la UI.
+        if (data?.degraded && Array.isArray(data.degradations)) {
+            for (const text of degradationMessages(data.degradations)) {
+                toast.warning(text);
+            }
+        }
+        // Refinamiento: el canvas ya mostró los deltas en vivo. Generación: el
+        // montaje en vivo ya ensambló el diagrama (mismas posiciones que el layout
+        // final para tipos genéricos). En ambos casos pasamos directo a interactivo.
+        isRefiningRef.current = false;
+        setGenerationPhase('done');
+        setUiState('ready');
+    };
+
+    // Cierra la generación una vez drenada la cola del montaje en vivo.
+    const finalizeGeneration = () => {
+        const data = pendingDoneRef.current;
+        liveActiveRef.current = false;
+        pendingDoneRef.current = null;
+        streamDoneRef.current = false;
+        if (data) processDone(data);
     };
 
     useEffect(() => {
@@ -129,12 +304,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // S10.1 — el backend cortó la conexión por token caducado (o anomalía
             // de identidad): avisamos y deslogueamos para forzar un login limpio.
             socket.on('auth:expired', () => {
-                addMessage({
-                    id: crypto.randomUUID(),
-                    text: 'Tu sesión ha expirado. Vuelve a iniciar sesión.',
-                    sender: 'system',
-                    timestamp: new Date(),
-                });
+                toast.error('Tu sesión ha expirado. Vuelve a iniciar sesión.');
+                setActiveOperation(null);
                 setUiState('error');
                 void signOut();
             });
@@ -156,12 +327,15 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 if (stored) socket.emit('llm:set_transient_key', { provider: stored.provider, api_key: stored.key });
             });
 
+            // Montaje en vivo: los nodos/aristas NO se aplican al instante, se encolan
+            // y la bomba (runLivePump) los libera con ritmo para que el diagrama se
+            // monte en tiempo real (nube radial → cristalización dagre por arista).
             socket.on('diagram:node_ready', (node) => {
-                addNode(node);
+                enqueueLiveNode(node);
             });
 
             socket.on('diagram:edge_ready', (edge) => {
-                addEdge(edge);
+                enqueueLiveEdge(edge);
             });
 
             // S7.5 — el agente decidió invocar una tool (aún no ha corrido):
@@ -216,86 +390,26 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 if (data?.id) traceToolResult(data.id, isError ? 'error' : 'ok');
             });
 
-            socket.on('diagram:done', (data) => {
+            socket.on('diagram:done', (data: DoneData) => {
                 // #2 — desenlace válido: cancelar el timeout de generación.
                 cancelGenTimeout();
 
-                // S7.5 — reconciliación incondicional: el done de un refinamiento
-                // trae el snapshot completo del workspace (la verdad) y se aplica
-                // SIEMPRE; si los eventos en vivo ya dejaron el canvas idéntico,
-                // la guarda de idempotencia de applyDiagram evita el re-render.
-                if (data?.diagram) {
-                    // #7 — validar el snapshot con diagramSchema antes de aplicarlo.
-                    // Si la validación falla (p. ej. el backend envió datos corruptos)
-                    // se avisa al usuario y NO se toca el canvas (evita estado roto).
-                    const parseResult = diagramSchema.safeParse({
-                        title: data.title ?? '',
-                        diagram_type: data.diagram.diagram_type,
-                        nodes: data.diagram.nodes ?? [],
-                        edges: data.diagram.edges ?? [],
-                    });
-                    if (!parseResult.success) {
-                        toast.error('El diagrama recibido no es válido.');
-                        setGenerationPhase('idle');
-                        setUiState('error');
-                        return;
-                    }
-                    const { currentDiagram } = useStore.getState();
-                    applyDiagram({
-                        title: data.title ?? currentDiagram?.title ?? '',
-                        diagram_type: parseResult.data.diagram_type,
-                        nodes: parseResult.data.nodes,
-                        edges: parseResult.data.edges,
-                    });
-                }
-                addMessage({
-                    id: crypto.randomUUID(),
-                    text: isRefiningRef.current
-                        ? `Diagrama actualizado — ${refineSummary(refineChangesRef.current)}`
-                        : `Diagrama generado: ${data?.title ?? 'sin título'}`,
-                    sender: 'system',
-                    timestamp: new Date(),
-                });
-                // S9.3 — auto-guardado tras CADA done (generación y cada
-                // refinamiento). persistCurrentDiagram es no-op si no hay sesión
-                // ("login solo para guardar") y serializa POST→PATCH; fire-and-
-                // forget para no bloquear la UI, solo se loguea el fallo.
-                persistCurrentDiagram(lastPromptRef.current).then((r) => {
-                    if (!r.ok && r.error !== 'no-session') {
-                        console.error('[persist] auto-guardado falló:', r.error);
-                    }
-                });
-                // Degradación parcial (S6.9): el diagrama es usable pero quedó algo
-                // sin resolver → un aviso de chat por categoría, sin bloquear la UI.
-                if (data?.degraded && Array.isArray(data.degradations)) {
-                    for (const text of degradationMessages(data.degradations)) {
-                        addMessage({
-                            id: crypto.randomUUID(),
-                            text,
-                            sender: 'system',
-                            timestamp: new Date(),
-                        });
-                    }
-                }
-                // Refinamiento: no hubo staging ni fila almacén; el canvas ya mostró
-                // los deltas en vivo. Saltamos la animación de ensamblaje y volvemos
-                // directos a interactivo para no re-disparar un re-layout completo.
-                if (isRefiningRef.current) {
-                    isRefiningRef.current = false;
-                    setGenerationPhase('done');
-                    setUiState('ready');
+                // Refinamiento (canvas ya interactivo) o generación cuyo montaje en
+                // vivo ya terminó (o nunca arrancó): aplicamos el desenlace al instante.
+                if (isRefiningRef.current || !liveActiveRef.current) {
+                    processDone(data);
                     return;
                 }
-                // Animación de ensamblaje: tras ~1 s de que se ve la fila completa en
-                // el almacén, se dispara la transición a las posiciones de layout final.
-                // El CSS de DiagramCanvas añade 'transition: transform 0.6s ease' a los
-                // nodos React Flow SOLO durante 'assembling', de modo que el simple
-                // cambio de posición se anima automáticamente.
-                setGenerationPhase('assembling');
-                setTimeout(() => {
-                    setGenerationPhase('done');
-                    setUiState('ready');
-                }, 800);
+
+                // Generación aún montándose: NO aplicamos el snapshot ahora (taparía
+                // el montaje en vivo de golpe). Lo guardamos y dejamos que la bomba
+                // finalice cuando drene la cola. Si ya no queda nada por drenar y la
+                // bomba está parada, finalizamos directamente.
+                pendingDoneRef.current = data;
+                streamDoneRef.current = true;
+                if (pumpTimerRef.current == null && revealQueueRef.current.length === 0) {
+                    finalizeGeneration();
+                }
             });
 
             // S7.4 — el agente pausó pidiendo aclaración: la pregunta entra al
@@ -305,12 +419,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             socket.on('agent:clarification', (data) => {
                 // #2 — desenlace válido: cancelar el timeout de generación.
                 cancelGenTimeout();
-                addMessage({
-                    id: crypto.randomUUID(),
-                    text: data?.question ?? '¿Puedes aclarar tu petición?',
-                    sender: 'system',
-                    timestamp: new Date(),
-                });
+                // La pregunta ya no es un "mensaje de chat": el panel la renderiza
+                // desde pendingClarification (banner de aclaración pendiente).
                 setPendingClarification({
                     thread_id: data?.thread_id,
                     question: data?.question ?? '',
@@ -330,12 +440,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 const options: { label: string; value: string }[] = Array.isArray(data?.options)
                     ? data.options
                     : [];
-                addMessage({
-                    id: crypto.randomUUID(),
-                    text: question,
-                    sender: 'system',
-                    timestamp: new Date(),
-                });
+                // La pregunta de tipo la renderiza el panel desde pendingTypeChoice.
                 setPendingTypeChoice({ question, options });
                 setUiState('awaiting_clarification');
             });
@@ -354,17 +459,17 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                         detail: data.error ?? 'Error del modelo de lenguaje.',
                         provider: data.provider,
                     });
+                    resetLiveStream();
+                    setActiveOperation(null);
                     setGenerationPhase('idle');
                     setUiState('error');
                     return;
                 }
 
-                addMessage({
-                    id: crypto.randomUUID(),
-                    text: data?.error ?? 'Error generando el diagrama',
-                    sender: 'system',
-                    timestamp: new Date(),
-                });
+                // Un error no es una operación → no va al diario; toast efímero.
+                toast.error(data?.error ?? 'Error generando el diagrama');
+                resetLiveStream();
+                setActiveOperation(null);
                 setGenerationPhase('idle');
                 setUiState('error');
             });
@@ -415,6 +520,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
             socket.on('disconnect', (reason) => {
                 setConnectionState('disconnected');
+                console.log(`WebSocket disconnected — ${reason}`);
                 // El cierre lo provocó el propio cliente (logout / cleanup del
                 // efecto al cambiar de identidad): no es un fallo, no hay nada que
                 // avisar ni que marcar como error.
@@ -426,15 +532,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 // #2 — la desconexión interrumpió la generación: cancelar timeout
                 // (evitar doble toast/reset si el timer ya disparó antes).
                 cancelGenTimeout();
-                addMessage({
-                    id: crypto.randomUUID(),
-                    text: 'Conexión perdida durante la generación. Inténtalo de nuevo.',
-                    sender: 'system',
-                    timestamp: new Date(),
-                });
-                // #5 — toast complementario al mensaje de chat: visible aunque el
-                // panel de chat esté minimizado o fuera del viewport.
-                toast.error('Conexión perdida durante la generación.');
+                // Caída de conexión: aviso efímero (toast), no una entrada del diario.
+                toast.error('Conexión perdida durante la generación. Inténtalo de nuevo.');
+                resetLiveStream();
+                setActiveOperation(null);
                 setGenerationPhase('idle');
                 setUiState('error');
             });
@@ -461,6 +562,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         return () => {
             // #2 — limpiar el timeout de generación al desmontar / recrear el socket.
             cancelGenTimeout();
+            // Limpiar cualquier montaje en vivo en curso (timer de la bomba + colas).
+            resetLiveStream();
             // S10.3b — el socket muere: el emisor transitorio ya no es válido.
             useLlmSettingsStore.getState().registerTransientEmitter(null);
             authUnsub?.();
@@ -475,20 +578,15 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     const sendMessage = (text: string) => {
         if (!text.trim()) return;
 
-        // Añadir mensaje del usuario al estado
-        const userMessage: Message = {
-            id: crypto.randomUUID(),
-            text,
-            sender: 'user',
-            timestamp: new Date(),
-        };
-        addMessage(userMessage);
+        // El comando entra como operación EN VUELO (se pinta como tarjeta "en
+        // progreso"); al terminar se materializa como versión del diario.
+        setActiveOperation(text);
 
         // #3 — guard de conexión: si el socket no existe o está desconectado,
-        // el emit se perdería en silencio y el spinner quedaría colgado. El mensaje
-        // ya se añadió al chat (correcto), pero NO entramos en 'generating'.
+        // el emit se perdería en silencio y el spinner quedaría colgado.
         if (!socketRef.current?.connected) {
             toast.error('Sin conexión con el servidor. Reintenta en unos segundos.');
+            setActiveOperation(null);
             return;
         }
 
@@ -529,7 +627,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // tipo: undefined ⇒ el agente clasifica (no inventamos un valor "auto").
             setLastGenerationType(selectedDiagramType);
             setUiState('generating');
-            setGenerationPhase('staging');
+            // Arranca el montaje en vivo (fase 'live' + cola de revelado limpia).
+            startLiveStream();
             // #2 — arrancar timeout ANTES de emitir.
             startGenTimeout();
             socketRef.current.emit('message:send', {
@@ -552,22 +651,18 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             return;
         }
 
-        addMessage({
-            id: crypto.randomUUID(),
-            text: 'Regenerando el diagrama…',
-            sender: 'system',
-            timestamp: new Date(),
-        });
+        setActiveOperation('Regenerar diagrama');
         clearToolTrace();
         lastPromptRef.current = prompt;
         isRefiningRef.current = false;
         // Limpiar el canvas ANTES de emitir: los nodos/aristas viejos desaparecen
-        // inmediatamente; los nuevos poblarán el almacén desde cero vía staging.
+        // inmediatamente; los nuevos montarán el diagrama desde cero en vivo.
         // El id/title/diagram_type de currentDiagram se conservan para que
         // applyDiagram reconcilie sobre el MISMO diagrama al llegar el done.
         clearDiagramContent();
         setUiState('generating');
-        setGenerationPhase('staging');
+        // Arranca el montaje en vivo (fase 'live' + cola de revelado limpia).
+        startLiveStream();
         // #2 — arrancar timeout ANTES de emitir.
         startGenTimeout();
         // S10.2 — conserva el tipo forzado del diagrama original (o auto si null).
@@ -581,7 +676,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // respuesta viaja con el thread_id para reanudar ESA ejecución pausada.
     const sendClarificationAnswer = (answer: string) => {
         if (!answer.trim()) return;
-        const { pendingClarification, addMessage, setPendingClarification, setUiState } = useStore.getState();
+        const { pendingClarification, setPendingClarification, setUiState } = useStore.getState();
         if (!pendingClarification) return;
 
         // #3 — guard de conexión: si el socket no está disponible, no entrar en
@@ -591,12 +686,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             return;
         }
 
-        addMessage({
-            id: crypto.randomUUID(),
-            text: answer,
-            sender: 'user',
-            timestamp: new Date(),
-        });
+        // La respuesta continúa la operación en vuelo (no es una entrada aparte).
         setPendingClarification(null);
         setUiState('generating');
         // #2 — arrancar timeout: la clarificación reanuda el agente, que puede
@@ -613,12 +703,13 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // tipo elegido, sin añadir un mensaje de usuario duplicado. Limpia la elección
     // pendiente y reactiva el estado de generación.
     const chooseDiagramType = (diagramTypeValue: string) => {
-        const { messages, setPendingTypeChoice, setSelectedDiagramType,
+        const { setPendingTypeChoice, setSelectedDiagramType,
                 setUiState, setLastGenerationType, setLastGenerationPrompt,
-                setCurrentDiagramId } = useStore.getState();
+                setCurrentDiagramId, lastGenerationPrompt } = useStore.getState();
 
-        // Recuperar el último mensaje del usuario como prompt original
-        const originalPrompt = [...messages].reverse().find((m) => m.sender === 'user')?.text;
+        // El prompt original es el último enviado (la generación que disparó la
+        // pregunta de tipo). Ya no se rastrea por el log de mensajes.
+        const originalPrompt = lastPromptRef.current ?? lastGenerationPrompt ?? undefined;
         if (!originalPrompt) return;
 
         // #3 — guard de conexión antes de entrar en 'generating'.
@@ -641,10 +732,11 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         lastPromptRef.current = originalPrompt;
         isRefiningRef.current = false;
 
-        // Limpiar el canvas: la nueva generación arranca desde staging.
+        // Limpiar el canvas: la nueva generación se monta en vivo desde cero.
         clearDiagramContent();
         setUiState('generating');
-        setGenerationPhase('staging');
+        // Arranca el montaje en vivo (fase 'live' + cola de revelado limpia).
+        startLiveStream();
         // #2 — arrancar timeout ANTES de emitir.
         startGenTimeout();
 

@@ -87,19 +87,29 @@ p {
   margin: 0;
 }
 
-/* ── Animación de ensamblaje del diagrama ──────────────────────────────────────
-   Durante la fase 'assembling', el contenedor del canvas lleva la clase
-   'is-assembling'. React Flow mueve los nodos actualizando su transform inline;
-   al añadir esta transición, el cambio de posición se anima automáticamente.
-   Se activa SOLO en ese instante para no interferir con el arrastre normal.
+/* ── Montaje EN VIVO del diagrama (fase 'live') ─────────────────────────────────
+   Durante la generación por streaming el contenedor del canvas lleva la clase
+   'is-live'. El diagrama se teje en tiempo real con su layout REAL (mindmap radial,
+   ERD/clases con dagre…) según la cola de revelado va soltando aristas (cada arista
+   trae a sus nodos). React Flow mueve los nodos actualizando su transform inline; la
+   transición convierte cada recálculo de layout en un deslizamiento suave (glide) en
+   vez de un salto. Cada nodo/arista nuevo entra con un fundido breve.
    ---------------------------------------------------------------------- */
-.is-assembling .react-flow__node {
-  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1) !important;
+.is-live .react-flow__node {
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  /* Aparición: el nodo recién montado entra con un fundido (solo opacity → no
+     interfiere con el transform que lo posiciona). */
+  animation: liveNodeIn 0.35s ease both;
 }
 
-/* Fade-in de las aristas reales al ensamblarse */
-.is-assembling .react-flow__edge {
-  animation: edgeFadeIn 0.5s ease 0.3s both;
+/* Fade-in de las aristas a medida que van tejiendo el diagrama. */
+.is-live .react-flow__edge {
+  animation: edgeFadeIn 0.4s ease both;
+}
+
+@keyframes liveNodeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 @keyframes edgeFadeIn {
@@ -117,6 +127,30 @@ p {
    ---------------------------------------------------------------------- */
 .animate-layout .react-flow__node {
   transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* ----------------------------------------------------------------------
+   Animación de navegación entre versiones (goToVersion): el canvas añade la
+   clase .animate-nav durante ~400ms. Los nodos del diagrama destino "vuelan" a
+   sus posiciones (glide del transform, sin flash); los que APARECEN entran con
+   fundido (.rf-enter) y los que DESAPARECEN salen con fundido (.rf-leave) antes
+   de desmontarse. Solo se anima opacity en la entrada/salida: tocar transform
+   pelearía con el translate inline que posiciona cada nodo.
+   (Duración debe coincidir con NAV_ANIM_MS en DiagramCanvas.tsx.)
+   ---------------------------------------------------------------------- */
+.animate-nav .react-flow__node {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.animate-nav .react-flow__node.rf-enter {
+  animation: liveNodeIn 0.4s ease both;
+}
+.animate-nav .react-flow__node.rf-leave {
+  animation: navNodeOut 0.35s ease both;
+  pointer-events: none;
+}
+@keyframes navNodeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
 }
 
 /* Puntos de conexión: uno centrado en cada lado del nodo. Ocultos por defecto;
@@ -145,6 +179,16 @@ p {
 /* Snap highlight when dragging a new edge over a target node */
 .react-flow__node.snap-target {
   box-shadow: 0 0 0 3px var(--color-accent);
+}
+
+/* Las etiquetas de arista deben quedar SIEMPRE por encima de las líneas. React
+   Flow eleva el z-index del SVG de una arista cuando sus nodos están anidados en
+   un grupo (z = parentZ+1) o seleccionados (z = 1000) — ver getElevatedEdgeZIndex.
+   La capa de etiquetas (edgelabel-renderer) no lleva z-index, así que esas
+   aristas elevadas la pisaban: la línea cortaba el texto. Elevamos la capa por
+   encima de cualquier arista (incluido el +1000 de selección). */
+.react-flow__edgelabel-renderer {
+  z-index: 1001;
 }
 
 /* ---------------------------------------------------------------------------

@@ -28,11 +28,10 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
     textareaRef.current?.focus()
   }, [promptFocusNonce])
 
-  // El minimapa (footprint ~140px abajo a la derecha) solo se renderiza en las
-  // fases 'assembling' y 'done'; durante el streaming ('staging') no existe. Por
-  // eso reservamos su hueco siguiendo la fase, no la mera existencia de
-  // currentDiagram (que se puebla antes, con los node_ready del streaming).
-  const minimapVisible = generationPhase === 'assembling' || generationPhase === 'done'
+  // El minimapa (footprint ~140px abajo a la derecha) se renderiza durante el
+  // montaje en vivo ('live') y en interactivo ('done'). Reservamos su hueco
+  // siguiendo la fase, no la mera existencia de currentDiagram.
+  const minimapVisible = generationPhase === 'live' || generationPhase === 'done'
 
   const disabled = uiState === 'generating'
 
