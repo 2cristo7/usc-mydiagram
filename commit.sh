@@ -13,10 +13,34 @@
 # Formato de cada bloque en COMMITS.pending:
 #
 #   --- commit ---
-#   files: ruta/uno ruta/dos        (rutas separadas por espacios, SIN espacios en los nombres)
+#   files: ruta/uno ruta/dos        (rutas separadas por espacios y/o comas, SIN espacios en los nombres)
 #   asunto del commit
 #   cuerpo opcional, una o varias líneas
 #   --- end ---
+#
+# COMMIT PARCIAL DE ARCHIVO (opción 2 — trocear por hunks). Si un mismo archivo
+# debe repartirse entre varios commits, el bloque puede incluir un PATCH: solo se
+# stagean (git apply --cached) los hunks de ese patch, no el archivo entero. El
+# patch es un `git diff` (contexto contra HEAD) recortado a los hunks del bloque:
+#
+#   --- commit ---
+#   files: ruta/uno ruta/dos        (sigue listando los archivos que toca, para el
+#   asunto del commit                pathspec y la detección de "ya hecho")
+#   cuerpo opcional
+#   --- patch ---
+#   diff --git a/ruta/uno b/ruta/uno
+#   @@ ... @@
+#    contexto
+#   -vieja
+#   +nueva
+#   --- endpatch ---
+#   --- end ---
+#
+# Reglas del patch: los hunks de TODOS los bloques que tocan un archivo deben
+# particionar su diff (sin solaparse y sin dejar huecos), o algún cambio se
+# quedará sin confirmar. Un bloque CON patch confirma solo el índice (no usa
+# pathspec, para no arrastrar el archivo entero). Un bloque SIN patch stagea los
+# archivos completos (comportamiento clásico).
 #
 # REGLA INVIOLABLE: este runner NUNCA añade la línea
 #   Co-Authored-By: Claude ...   ni  "Generated with Claude Code"
@@ -67,19 +91,33 @@ fi
 #    1 si FALLA y debe permanecer en la cola. ─────────────────────────────────────
 process_block() {
   local raw="$1"
-  local files="" message="" state="start" l
+  local files="" message="" patch="" state="start" l
 
   while IFS= read -r l; do
     case "$state" in
       start) [[ "$l" == "--- commit ---" ]] && state="files" ;;
       files)
         if [[ "$l" == files:* ]]; then
-          files="${l#files:}"; files="${files# }"; state="msg"
+          files="${l#files:}"; files="${files# }"
+          # Tolera rutas separadas por comas y/o espacios: las comas se
+          # normalizan a espacios para el word-splitting (los nombres no
+          # llevan espacios por norma).
+          files="${files//,/ }"
+          state="msg"
         fi
         ;;
       msg)
+        [[ "$l" == "--- patch ---" ]] && { state="patch"; continue; }
         [[ "$l" == "--- end ---" ]] && break
         message+="$l"$'\n'
+        ;;
+      patch)
+        [[ "$l" == "--- endpatch ---" ]] && { state="endpatch"; continue; }
+        [[ "$l" == "--- end ---" ]] && break
+        patch+="$l"$'\n'
+        ;;
+      endpatch)
+        [[ "$l" == "--- end ---" ]] && break
         ;;
     esac
   done <<< "$raw"
@@ -113,6 +151,31 @@ process_block() {
   if git -C "$ROOT" log --pretty=%s | grep -Fxq "$subject"; then
     echo "↷ ya existe en git log: $subject"
     return 0
+  fi
+
+  if [[ -n "$patch" ]]; then
+    # Commit PARCIAL: stagea solo los hunks del patch en el índice. --recount deja
+    # que git recompute los conteos de línea (tolera el desfase si un commit
+    # previous de este mismo run ya aplicó otros hunks del mismo archivo).
+    if ! printf '%s' "$patch" | git -C "$ROOT" apply --cached --recount 2>/tmp/commit_apply_err; then
+      echo "✗ '$subject': el patch no aplica ($(cat /tmp/commit_apply_err)). Se mantiene."
+      return 1
+    fi
+    # ¿El patch no aportó nada al índice? (ya estaba) → resuelto.
+    if git -C "$ROOT" diff --cached --quiet; then
+      echo "↷ sin cambios que confirmar: $subject"
+      return 0
+    fi
+    # Confirma SOLO el índice (sin pathspec: con `-- $files`, git re-stagearía el
+    # archivo entero desde el working tree y se llevaría hunks de otros bloques).
+    if printf '%s\n' "$message" | git -C "$ROOT" commit -q -F -; then
+      echo "✓ $subject"
+      return 0
+    else
+      echo "✗ '$subject': fallo en git commit. Se mantiene."
+      git -C "$ROOT" reset -q 2>/dev/null || true
+      return 1
+    fi
   fi
 
   # Stagea solo los archivos del bloque.
