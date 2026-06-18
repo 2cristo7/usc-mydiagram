@@ -21,10 +21,14 @@ vi.mock('jose', () => ({
 // devuelve el propio builder; es thenable (await builder → result) para el GET de
 // lista, y single/maybeSingle resuelven el result configurado por test.
 let result: { data: unknown; error: unknown } = { data: null, error: null }
-let calls: Record<string, unknown[][]>
+// Acumula las llamadas a TODOS los builders de la petición (cada `.from()` crea
+// uno nuevo). Desde S10.3 una escritura golpea dos tablas (diagrams + el diario
+// diagram_versions), así que `calls` no se reinicia por builder sino por test
+// (beforeEach): calls.insert[0] sigue siendo el INSERT del diagrama, [1] el de la
+// versión. Se resetea en beforeEach.
+let calls: Record<string, unknown[][]> = {}
 
 function makeBuilder() {
-  calls = {}
   const record = (name: string) => (...args: unknown[]) => {
     ;(calls[name] ||= []).push(args)
     return builder
@@ -37,6 +41,7 @@ function makeBuilder() {
     is: record('is'),
     not: record('not'),
     order: record('order'),
+    limit: record('limit'),
     single: vi.fn(() => Promise.resolve(result)),
     maybeSingle: vi.fn(() => Promise.resolve(result)),
     then: (resolve: (r: typeof result) => unknown) => resolve(result),
@@ -69,6 +74,7 @@ function authOk() {
 beforeEach(() => {
   vi.clearAllMocks()
   result = { data: null, error: null }
+  calls = {}
 })
 
 describe('gate de autenticación (requireAuth en router.use)', () => {
@@ -111,7 +117,9 @@ describe('POST /diagrams (INSERT)', () => {
       .set(VALID)
       .send({ diagram: sampleDiagram, prompt: 'crea un blog' })
     expect(res.status).toBe(201)
-    expect(res.body).toEqual({ id: 'new-id', title: 'Blog' })
+    // El body lleva la metadata del diagrama + la versión inicial del diario.
+    expect(res.body.id).toBe('new-id')
+    expect(res.body.title).toBe('Blog')
     const inserted = calls.insert[0][0] as Record<string, unknown>
     expect(inserted.user_id).toBe('user-123')
     expect(inserted.prompt).toBe('crea un blog')
@@ -203,5 +211,57 @@ describe('PATCH /diagrams/:id (UPDATE)', () => {
     await request(app).patch('/diagrams/abc').set(VALID).send({ diagram: sampleDiagram, prompt: 'otro' })
     const updated = calls.update[0][0] as Record<string, unknown>
     expect('prompt' in updated).toBe(false)
+  })
+
+  it('cada PATCH anota una versión en el diario', async () => {
+    result = { data: { id: 'abc', title: 'Blog' }, error: null }
+    await request(app)
+      .patch('/diagrams/abc')
+      .set(VALID)
+      .send({ diagram: sampleDiagram, version: { origin: 'refine', instruction: 'añade Carrito' } })
+    // El diagrama se modifica por UPDATE (calls.update); el único INSERT es la versión.
+    const version = calls.insert[0][0] as Record<string, unknown>
+    expect(version.diagram_id).toBe('abc')
+    expect(version.user_id).toBe('user-123')
+    expect(version.origin).toBe('refine')
+    expect(version.instruction).toBe('añade Carrito')
+  })
+
+  it('sin `version` el guardado cae a origin manual_edit (edición a mano)', async () => {
+    result = { data: { id: 'abc', title: 'Blog' }, error: null }
+    await request(app).patch('/diagrams/abc').set(VALID).send({ diagram: sampleDiagram })
+    const version = calls.insert[0][0] as Record<string, unknown>
+    expect(version.origin).toBe('manual_edit')
+  })
+})
+
+describe('diario de versiones (S10.3)', () => {
+  beforeEach(authOk)
+
+  it('GET /:id/versions lista metadata por seq, sin filtrar por user_id (RLS)', async () => {
+    result = { data: [{ id: 'v1', seq: 1, origin: 'generate' }], error: null }
+    const res = await request(app).get('/diagrams/abc/versions').set(VALID)
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual([{ id: 'v1', seq: 1, origin: 'generate' }])
+    expect(calls.eq[0]).toEqual(['diagram_id', 'abc'])
+    expect(calls.eq.every((c) => c[0] !== 'user_id')).toBe(true)
+    expect(calls.order[0]).toEqual(['seq', { ascending: true }])
+    // Metadata sin el snapshot pesado.
+    expect(calls.select[0][0]).not.toMatch(/data/)
+  })
+
+  it('GET /:id/versions/:vid devuelve el snapshot completo (incluye data)', async () => {
+    result = { data: { id: 'v1', seq: 1, data: sampleDiagram }, error: null }
+    const res = await request(app).get('/diagrams/abc/versions/v1').set(VALID)
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual(sampleDiagram)
+    expect(calls.eq[0]).toEqual(['id', 'v1'])
+    expect(calls.eq[1]).toEqual(['diagram_id', 'abc'])
+  })
+
+  it('404 si la versión no existe (RLS → 0 filas)', async () => {
+    result = { data: null, error: null }
+    const res = await request(app).get('/diagrams/abc/versions/zzz').set(VALID)
+    expect(res.status).toBe(404)
   })
 })

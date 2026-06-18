@@ -41,6 +41,18 @@ router.get('/export', async (req: AuthedRequest, res: Response) => {
     return
   }
 
+  // Diario de versiones: el historial de operaciones (subsume la antigua columna
+  // `messages`). La RLS lo acota al propio usuario; orden cronológico por diagrama.
+  const { data: versions, error: verErr } = await supabase
+    .from('diagram_versions')
+    .select('*')
+    .order('diagram_id', { ascending: true })
+    .order('seq', { ascending: true })
+  if (verErr) {
+    res.status(500).json({ error: verErr.message })
+    return
+  }
+
   // Config LLM: el RPC ya excluye las keys (solo saved_providers). Array vacío si
   // nunca configuró nada.
   const { data: llmRows, error: llmErr } = await supabase.rpc('get_llm_config')
@@ -59,6 +71,7 @@ router.get('/export', async (req: AuthedRequest, res: Response) => {
     },
     llm_config,
     diagrams: diagrams ?? [],
+    diagram_versions: versions ?? [],
     // Transparencia: la caché global de generaciones (generation_cache) NO tiene
     // user_id y, por diseño, es compartida y anonimizable; no forma parte de los
     // datos personales exportables de una cuenta concreta.

@@ -14,6 +14,18 @@ import { supabaseForUser } from './supabase'
 
 const TITLE_FALLBACK = 'Diagrama sin título'
 
+// Metadatos de la OPERACIÓN que produjo este estado del diagrama. Cada guardado
+// (de contenido) es una versión en el diario; `version` describe su naturaleza.
+// Tolerante: un guardado sin `version` cae a 'manual_edit' (edición a mano).
+interface VersionMeta {
+  origin?: 'generate' | 'refine' | 'manual_edit' | 'restore'
+  instruction?: string | null
+  op_summary?: unknown
+  // Versión de la que se deriva (el cliente la conoce: es su posición actual en
+  // el árbol). null = raíz. Permite reconstruir el árbol y ordenar las ramas.
+  parent_id?: string | null
+}
+
 interface DiagramPayload {
   diagram?: {
     title?: string | null
@@ -22,9 +34,15 @@ interface DiagramPayload {
     edges?: unknown[]
   }
   prompt?: string | null
-  // Conversación del chat que originó/refinó el diagrama. Opcional y tolerante:
-  // un cliente sin actualizar (o una generación anónima) la omite → log vacío.
-  messages?: unknown[]
+  version?: VersionMeta
+}
+
+const VALID_ORIGINS = ['generate', 'refine', 'manual_edit', 'restore'] as const
+type Origin = (typeof VALID_ORIGINS)[number]
+
+function originOf(payload: DiagramPayload): Origin {
+  const o = payload.version?.origin
+  return o && (VALID_ORIGINS as readonly string[]).includes(o) ? (o as Origin) : 'manual_edit'
 }
 
 // La forma mínima que exige el CHECK de la tabla (objeto con nodes[]/edges[]) y
@@ -56,9 +74,49 @@ function columns(payload: DiagramPayload, withPrompt = true) {
     diagram_type: d.diagram_type,
     ...(withPrompt ? { prompt: payload.prompt ?? null } : {}),
     data: d,
-    // El CHECK diagrams_messages_is_array exige un array: si no llega, log vacío.
-    messages: Array.isArray(payload.messages) ? payload.messages : [],
   }
+}
+
+// Siguiente seq del diario de un diagrama (max+1; 1 si no hay versiones). La RLS
+// acota el SELECT al propio usuario, así que no se filtra por user_id a mano.
+async function nextSeq(
+  supabase: ReturnType<typeof supabaseForUser>,
+  diagramId: string,
+): Promise<number> {
+  const { data } = await supabase
+    .from('diagram_versions')
+    .select('seq')
+    .eq('diagram_id', diagramId)
+    .order('seq', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return (data?.seq ?? 0) + 1
+}
+
+// Inserta una versión (snapshot inmutable) en el diario del diagrama. Devuelve la
+// metadata de la versión creada (sin el data, que el cliente ya tiene). El WITH
+// CHECK de la RLS exige user_id = auth.uid().
+async function insertVersion(
+  supabase: ReturnType<typeof supabaseForUser>,
+  userId: string,
+  diagramId: string,
+  payload: DiagramPayload,
+) {
+  const seq = await nextSeq(supabase, diagramId)
+  return supabase
+    .from('diagram_versions')
+    .insert({
+      diagram_id: diagramId,
+      user_id: userId,
+      seq,
+      data: payload.diagram,
+      origin: originOf(payload),
+      instruction: payload.version?.instruction ?? null,
+      op_summary: payload.version?.op_summary ?? null,
+      parent_version_id: payload.version?.parent_id ?? null,
+    })
+    .select('id, seq, origin, instruction, op_summary, parent_version_id, created_at')
+    .single()
 }
 
 const router = Router()
@@ -139,7 +197,15 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
     res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
     return
   }
-  res.status(201).json(data)
+  // Primera versión del diario (seq 1). El origin viene del cliente (normalmente
+  // 'generate'); si no, manual_edit. Un fallo aquí no debe perder el diagrama ya
+  // creado: se loguea y se devuelve igual (el diario quedará sin la v1, recuperable
+  // en el siguiente guardado).
+  const { data: version, error: vErr } = await insertVersion(
+    supabase, req.userId!, data.id, req.body,
+  )
+  if (vErr) console.error('[diagrams] error al crear versión inicial:', vErr)
+  res.status(201).json({ ...data, version: version ?? null })
 })
 
 // Guardados sucesivos: UPDATE de un diagrama ya existente. La RLS impide tocar
@@ -164,6 +230,52 @@ router.patch('/:id', async (req: AuthedRequest, res: Response) => {
   }
   if (!data) {
     res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  // El HEAD (diagrams.data) ya quedó actualizado; ahora se añade la versión al
+  // diario. Si falla, el HEAD es correcto pero el diario pierde un punto: se
+  // loguea sin tumbar el guardado (el autosave no debe romperse por el diario).
+  const { data: version, error: vErr } = await insertVersion(
+    supabase, req.userId!, String(req.params.id), req.body,
+  )
+  if (vErr) console.error('[diagrams] error al versionar:', vErr)
+  res.json({ ...data, version: version ?? null })
+})
+
+// Diario de versiones de un diagrama: metadata ordenada por seq (sin el `data`,
+// que se trae al navegar a una versión concreta). La RLS acota al propio usuario.
+router.get('/:id/versions', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagram_versions')
+    .select('id, seq, origin, instruction, op_summary, parent_version_id, created_at')
+    .eq('diagram_id', req.params.id)
+    .order('seq', { ascending: true })
+  if (error) {
+    console.error('[diagrams] error al listar versiones:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
+    return
+  }
+  res.json(data)
+})
+
+// Una versión completa (incluye data) para previsualizarla/cargarla al canvas al
+// navegar el diario. La RLS hace que una versión ajena devuelva 0 filas → 404.
+router.get('/:id/versions/:vid', async (req: AuthedRequest, res: Response) => {
+  const supabase = supabaseForUser(req.accessToken!)
+  const { data, error } = await supabase
+    .from('diagram_versions')
+    .select('*')
+    .eq('id', req.params.vid)
+    .eq('diagram_id', req.params.id)
+    .maybeSingle()
+  if (error) {
+    console.error('[diagrams] error al obtener versión:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
+    return
+  }
+  if (!data) {
+    res.status(404).json({ error: 'Versión no encontrada' })
     return
   }
   res.json(data)
