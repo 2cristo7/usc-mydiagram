@@ -286,8 +286,8 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
     // llm:response/llm:error los registra createInternalLlmRouter directamente
     // en el socket (socket.on) y los limpia al resolverse; aquí solo hacemos
     // cleanup de emergencia para el caso de desconexión inesperada.
-    socket.on('disconnect', () => {
-      console.log('Cliente desconectado del WebSocket')
+    socket.on('disconnect', (reason) => {
+      console.log(`Cliente desconectado del WebSocket — ${reason}`)
       for (const [request_id, pending] of pendingLlmRequests) {
         pendingLlmRequests.delete(request_id)
         clearTimeout(pending.timer)
