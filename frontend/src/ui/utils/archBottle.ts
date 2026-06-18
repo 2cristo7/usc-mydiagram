@@ -77,6 +77,29 @@ export function archBottlePolygonForNode(node: Node): Pt[] {
   return archBottlePolygon(w, h)
 }
 
+// Caja envolvente (bounding box) de la silueta botella en ROOT-LOCAL, a partir
+// del tamaño de la caja de texto (Wt×Ht). Es el footprint REAL del nodo (icono +
+// texto), no solo el icono 72×72 que mide React Flow. El ruteo de aristas lo usa
+// como obstáculo y para elegir lados, de modo que las líneas rodeen el texto en
+// vez de cruzarlo. Sin texto medido → la caja del icono.
+export function archFootprintLocalBounds(
+  Wt: number,
+  Ht: number,
+): { left: number; right: number; top: number; bottom: number } {
+  const IB = ARCH_ICON_BOX
+  if (Wt <= 0 || Ht <= 0) return { left: 0, right: IB, top: 0, bottom: IB }
+  const cx = IB / 2
+  const TW = Wt + 2 * ARCH_PAD
+  const TH = Ht + 2 * ARCH_PAD
+  const ty1 = ARCH_ICON_VIS + ARCH_GAP + TH
+  return {
+    left: Math.min(0, cx - TW / 2),
+    right: Math.max(IB, cx + TW / 2),
+    top: 0,
+    bottom: Math.max(IB, ty1),
+  }
+}
+
 // Intersección del rayo `origin + t·dir` (t>0) con el polígono. Con `origin`
 // dentro del polígono, devuelve el primer cruce de frontera hacia fuera (el
 // punto de la silueta por el que sale el rayo). Si no cruza, devuelve `origin`.

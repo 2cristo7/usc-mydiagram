@@ -88,6 +88,12 @@ export function EditableEdge({
   // (ruteo direccional con codo perpendicular en los extremos), de modo que los
   // handles caen siempre exactamente sobre la línea. Curva/recta no tienen modelo
   // de segmentos: trazan directamente entre extremos y waypoints.
+  // Para la curva radial pasamos el LADO de salida/entrada de cada extremo (lo da el
+  // anclaje flotante), así las manijas del bezier siguen la dirección del árbol en
+  // vez de combarse en horizontal.
+  const srcSide = srcFloating?.position as 'left' | 'right' | 'top' | 'bottom' | undefined
+  const tgtSide = tgtFloating?.position as 'left' | 'right' | 'top' | 'bottom' | undefined
+
   const [edgePath, labelX, labelY] =
     shape === 'elbow'
       ? getWaypointPath(
@@ -96,7 +102,7 @@ export function EditableEdge({
           corners.slice(1, -1),
           'elbow'
         )
-      : getWaypointPath(srcPt, tgtPt, waypoints, shape)
+      : getWaypointPath(srcPt, tgtPt, waypoints, shape, srcSide, tgtSide)
 
   const strokeDasharray =
     strokeStyle === 'dashed' ? '8 4' :

@@ -1,14 +1,65 @@
 type Point = { x: number; y: number };
+type Side = 'left' | 'right' | 'top' | 'bottom';
 
 export function getWaypointPath(
   source: Point,
   target: Point,
   waypoints: Point[],
-  shape: 'curved' | 'elbow' | 'straight'
+  shape: 'curved' | 'elbow' | 'straight' | 'radial',
+  srcSide?: Side,
+  tgtSide?: Side
 ): [path: string, labelX: number, labelY: number] {
   if (shape === 'straight') return buildStraight(source, target, waypoints);
   if (shape === 'elbow') return buildElbow(source, target, waypoints);
+  // 'radial': bezier con manijas orientadas al lado de salida del nodo (como el
+  // getBezierPath de React Flow). Solo sin waypoints; con waypoints cae a la curva
+  // Catmull-Rom estándar (buildCurved), que ya pasa por los puntos intermedios.
+  if (shape === 'radial' && waypoints.length === 0 && srcSide && tgtSide) {
+    return buildRadial(source, target, srcSide, tgtSide);
+  }
   return buildCurved(source, target, waypoints);
+}
+
+// Offset de la manija según la distancia con signo (idéntico a React Flow): si los
+// nodos están "de cara", crece con la mitad de la distancia; si están cruzados,
+// usa una raíz para no exagerar el lazo.
+function controlOffset(distance: number, curvature = 0.25): number {
+  if (distance >= 0) return 0.5 * distance;
+  return curvature * 25 * Math.sqrt(-distance);
+}
+
+function controlPoint(side: Side, x1: number, y1: number, x2: number, y2: number): Point {
+  switch (side) {
+    case 'left': return { x: x1 - controlOffset(x1 - x2), y: y1 };
+    case 'right': return { x: x1 + controlOffset(x2 - x1), y: y1 };
+    case 'top': return { x: x1, y: y1 - controlOffset(y1 - y2) };
+    case 'bottom': return { x: x1, y: y1 + controlOffset(y2 - y1) };
+  }
+}
+
+// Devuelve los puntos de control del bezier radial (también lo usa el layout para
+// detectar cruces con la MISMA geometría que se dibuja).
+export function radialControlPoints(
+  source: Point,
+  target: Point,
+  srcSide: Side,
+  tgtSide: Side
+): [Point, Point] {
+  const c1 = controlPoint(srcSide, source.x, source.y, target.x, target.y);
+  const c2 = controlPoint(tgtSide, target.x, target.y, source.x, source.y);
+  return [c1, c2];
+}
+
+function buildRadial(
+  source: Point,
+  target: Point,
+  srcSide: Side,
+  tgtSide: Side
+): [string, number, number] {
+  const [c1, c2] = radialControlPoints(source, target, srcSide, tgtSide);
+  const d = `M ${source.x} ${source.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${target.x} ${target.y}`;
+  const [lx, ly] = bezierMid(source, c1, c2, target);
+  return [d, lx, ly];
 }
 
 // ---------------------------------------------------------------------------

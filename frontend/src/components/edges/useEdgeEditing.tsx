@@ -11,6 +11,7 @@ import { useUiStore } from '../../store/ui'
 import { beginHistoryInteraction, endHistoryInteraction } from '../../store/historyManager'
 import { beginDragCursor, endDragCursor } from '../../ui/utils/dragCursor'
 import { getFloatingAnchor } from '../../ui/utils/getFloatingAnchor'
+import { isArchBottle } from '../../ui/utils/archBottle'
 import { getAnchorPoint, projectToNodePerimeter, anchorToPosition } from '../../ui/utils/getNodeAnchor'
 import { getElbowCorners } from '../../ui/utils/getWaypointPath'
 import { projectOntoPath } from '../../ui/utils/getPathProjection'
@@ -19,6 +20,11 @@ import type { EdgeVisualData } from '../../types'
 
 type Point = { x: number; y: number }
 type Axis = 'x' | 'y'
+
+// Tipos de nodo que son contenedores (cajas que envuelven a otros). Son nodos
+// sintéticos del layout, no entidades reales: una arista nunca debe anclarse a
+// ellos. Debe coincidir con los CONTAINER_TYPES del ruteo en DiagramCanvas.
+const CONTAINER_NODE_TYPES = new Set<string | undefined>(['architectureGroup', 'useCaseSystem'])
 
 // Umbral (px de pantalla) para distinguir un clic de un arrastre.
 const DRAG_THRESHOLD = 4
@@ -80,15 +86,42 @@ export function useEdgeEditing(args: {
   // El anclaje fijo (deslizado por el usuario sobre el borde) tiene prioridad
   // sobre el extremo por defecto. Un anclaje fijo NO se snappea (lo apartaría
   // del borde del nodo).
-  const srcPt = sourceAnchor && sourceNode
+  let srcPt = sourceAnchor && sourceNode
     ? getAnchorPoint(sourceNode as never, sourceAnchor)
     : defaultSrcPt
-  const tgtPt = targetAnchor && targetNode
+  let tgtPt = targetAnchor && targetNode
     ? getAnchorPoint(targetNode as never, targetAnchor)
     : defaultTgtPt
 
-  const srcPositionOverride: Position | undefined = sourceAnchor ? anchorToPosition(sourceAnchor) : undefined
-  const tgtPositionOverride: Position | undefined = targetAnchor ? anchorToPosition(targetAnchor) : undefined
+  let srcPositionOverride: Position | undefined = sourceAnchor ? anchorToPosition(sourceAnchor) : undefined
+  let tgtPositionOverride: Position | undefined = targetAnchor ? anchorToPosition(targetAnchor) : undefined
+
+  // Coherencia anclaje ↔ ruta en nodos "botella" (archIcon): si la arista trae
+  // waypoints cuya APROXIMACIÓN entra por un lado distinto al del anclaje fijo
+  // (p. ej. un anclaje persistido "arriba" pero la ruta recalculada llega por la
+  // izquierda), el punto de enganche queda en un lado y el último tramo en otro →
+  // la flecha apunta hacia FUERA o dibuja un gancho. Cuando detectamos ese
+  // conflicto, re-anclamos el extremo HACIA el waypoint adyacente (intersección
+  // con la silueta), de modo que enganche y aproximación coincidan: entrada
+  // perpendicular y hacia dentro, y enganche lateral si la ruta llega lateral
+  // (lo más natural). Solo en archIcon: en el resto respetamos el anclaje del
+  // usuario tal cual.
+  if (waypoints.length) {
+    if (sourceNode && isArchBottle(sourceNode as never)) {
+      const a = bottleAnchorToward(sourceNode as never, waypoints[0])
+      if (a.position !== srcPositionOverride) {
+        srcPt = { x: a.x, y: a.y }
+        srcPositionOverride = a.position
+      }
+    }
+    if (targetNode && isArchBottle(targetNode as never)) {
+      const a = bottleAnchorToward(targetNode as never, waypoints[waypoints.length - 1])
+      if (a.position !== tgtPositionOverride) {
+        tgtPt = { x: a.x, y: a.y }
+        tgtPositionOverride = a.position
+      }
+    }
+  }
 
   // Lado efectivo de salida/entrada. Prioridad: anclaje fijo del usuario > lado
   // por props (ArchitectureEdge, vía ELK) > lado derivado del propio extremo
@@ -507,10 +540,25 @@ export function useEdgeEditing(args: {
       const ownIdRef = which === 'source' ? sourceRef : targetRef
       const fixedIdRef = which === 'source' ? targetRef : sourceRef
 
+      // Resuelve el nodo bajo el puntero para reconectar, IGNORANDO los nodos
+      // contenedor (grupos de arquitectura, sistema de casos de uso): son nodos
+      // sintéticos del layout, no entidades reales del diagrama. Reconectar una
+      // arista a su id corrompía el modelo (source/target apuntando a un id que no
+      // existe en diagram.nodes) y disparaba un re-layout que tiraba nodos fuera de
+      // pantalla — el "el nodo desaparece". Devuelve el primer nodo real apilado
+      // bajo el cursor (un hijo del grupo, si lo hay), o null.
       const resolveHoveredNode = (clientX: number, clientY: number) => {
         const els = document.elementsFromPoint(clientX, clientY)
-        const nodeEl = els.find((el) => el.classList.contains('react-flow__node'))
-        return nodeEl?.getAttribute('data-id') ?? null
+        const { nodeLookup } = storeApi.getState()
+        for (const el of els) {
+          if (!el.classList.contains('react-flow__node')) continue
+          const nodeId = el.getAttribute('data-id')
+          if (!nodeId) continue
+          const node = nodeLookup.get(nodeId)
+          if (node && CONTAINER_NODE_TYPES.has(node.type)) continue
+          return nodeId
+        }
+        return null
       }
 
       const onMove = (ev: PointerEvent) => {
@@ -787,6 +835,15 @@ export function useEdgeEditing(args: {
     handlePathDoubleClick,
     handleLabelPointerDown,
   }
+}
+
+// Punto de enganche sobre la silueta del nodo en la dirección de `pt` (un punto
+// de flujo, típicamente el waypoint adyacente). Reutiliza el anclaje flotante
+// (rayo centro→objetivo ∩ silueta) con un "otro nodo" sintético colocado en `pt`,
+// así el extremo se pega al lado por el que la arista realmente sale/llega.
+function bottleAnchorToward(node: ReturnType<typeof useInternalNode>, pt: Point) {
+  const fake = { position: pt, measured: { width: 0, height: 0 } }
+  return getFloatingAnchor(node as never, fake as never)
 }
 
 // Longitud del codo perpendicular con que un extremo anclado a un lado abandona
