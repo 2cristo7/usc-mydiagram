@@ -1,5 +1,6 @@
 import { test, expect, describe, vi } from 'vitest';
-import { diagramFilename, getRenderedNodeBounds, getRenderedEdges, unionRects } from '../ui/utils/download';
+import { diagramFilename, getRenderedNodeBounds, getRenderedEdges, drawArrowMarker, unionRects } from '../ui/utils/download';
+import type { ArrowMarker } from '../ui/utils/download';
 
 // S8.3 — pieza pura del export (PNG y JSON comparten el nombre de fichero). El
 // render del PNG (canvas + html-to-image) no es testeable en jsdom —no rasteriza—,
@@ -397,5 +398,60 @@ describe('getRenderedEdges', () => {
         const vp = document.createElement('div');
         for (let i = 0; i < 4; i++) appendEdge(vp, `M ${280 + i * 10} 230 L ${i * 100} 210`, { stroke: '#b1b1b7' });
         expect(getRenderedEdges(vp)).toHaveLength(4);
+    });
+
+    test('jsdom no rasteriza SVG → markers vacío (sin getTotalLength)', () => {
+        // getPathMarkers cae a [] cuando getTotalLength no existe (jsdom). Aunque
+        // no se calculen, el campo debe estar presente para no romper el caller.
+        const vp = document.createElement('div');
+        appendEdge(vp, 'M 0 0 L 100 0', { stroke: '#111' });
+        expect(getRenderedEdges(vp)[0].markers).toEqual([]);
+    });
+});
+
+// drawArrowMarker es la pieza que reconstruye las puntas de flecha en el canvas
+// del export (los <marker> SVG no se rasterizan). Se valida contra un ctx mock:
+// la geometría exacta del trazado es lo que en producción dibuja el triángulo.
+describe('drawArrowMarker', () => {
+    function mockCtx() {
+        return {
+            save: vi.fn(), restore: vi.fn(), translate: vi.fn(), rotate: vi.fn(),
+            beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(),
+            stroke: vi.fn(), fill: vi.fn(),
+            lineWidth: 0, lineJoin: '', strokeStyle: '', fillStyle: '',
+        };
+    }
+
+    test('punta abierta (#arrow): traza la «V» sin relleno, con el ink color', () => {
+        const ctx = mockCtx();
+        const marker: ArrowMarker = { x: 100, y: 50, angle: 0, id: 'arrow' };
+        drawArrowMarker(ctx as never, marker, '#111111', '#ffffff');
+        expect(ctx.translate).toHaveBeenCalledWith(100, 50);
+        expect(ctx.rotate).toHaveBeenCalledWith(0);
+        expect(ctx.moveTo).toHaveBeenCalledWith(-8, -4);
+        expect(ctx.lineTo).toHaveBeenCalledWith(0, 0);
+        expect(ctx.lineTo).toHaveBeenCalledWith(-8, 4);
+        expect(ctx.fill).not.toHaveBeenCalled();
+        expect(ctx.stroke).toHaveBeenCalled();
+        expect(ctx.strokeStyle).toBe('#111111');
+    });
+
+    test('punta hueca (#arrowHollow): triángulo cerrado, relleno con surface', () => {
+        const ctx = mockCtx();
+        const marker: ArrowMarker = { x: 0, y: 0, angle: Math.PI, id: 'arrowHollow' };
+        drawArrowMarker(ctx as never, marker, '#111111', '#ffffff');
+        expect(ctx.moveTo).toHaveBeenCalledWith(-12, -6);
+        expect(ctx.lineTo).toHaveBeenCalledWith(-12, 6);
+        expect(ctx.closePath).toHaveBeenCalled();
+        expect(ctx.fill).toHaveBeenCalled();
+        expect(ctx.fillStyle).toBe('#ffffff');
+        expect(ctx.stroke).toHaveBeenCalled();
+    });
+
+    test('id desconocido cae al shape de #arrow', () => {
+        const ctx = mockCtx();
+        drawArrowMarker(ctx as never, { x: 0, y: 0, angle: 0, id: 'desconocido' }, '#000', '#fff');
+        expect(ctx.moveTo).toHaveBeenCalledWith(-8, -4);
+        expect(ctx.fill).not.toHaveBeenCalled();
     });
 });

@@ -122,6 +122,17 @@ export function getRenderedEdgeBounds(viewportEl: HTMLElement): Rect | null {
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+/** Punta de flecha de una arista, ya resuelta a coordenadas de flujo. */
+export interface ArrowMarker {
+    /** Vértice donde se apoya la punta (extremo del path). */
+    x: number;
+    y: number;
+    /** Ángulo (rad) hacia el que apunta la flecha, ya en sentido «hacia afuera». */
+    angle: number;
+    /** Id del marker SVG (`arrow` / `arrowReverse` / `arrowHollow`). */
+    id: string;
+}
+
 export interface EdgeStroke {
     /** Comando `d` del path, en coordenadas de flujo. */
     d: string;
@@ -129,6 +140,101 @@ export interface EdgeStroke {
     strokeWidth: number;
     /** Patrón de guiones (`dashed`/`dotted`), ya parseado a números; `[]` si es continuo. */
     dash: number[];
+    /** Puntas de flecha (markerStart/markerEnd) que el path lleva, ya geolocalizadas. */
+    markers: ArrowMarker[];
+}
+
+// Extrae el id de un `url(#id)` de una propiedad CSS marker-start/-end. `none` o
+// vacío → null.
+function parseMarkerId(value: string | undefined): string | null {
+    if (!value || value === 'none') return null;
+    const m = value.match(/url\(["']?#([^"')]+)["']?\)/);
+    return m ? m[1] : null;
+}
+
+/**
+ * Calcula las puntas de flecha de un path a partir de su geometría real
+ * (`getPointAtLength`), leyendo qué markers tiene de su estilo computado.
+ *
+ * Por qué hace falta: el export redibuja las aristas NATIVAMENTE en el canvas
+ * (Safari no rasteriza el <svg> de las aristas dentro del foreignObject de
+ * html-to-image). Ese redibujado solo copiaba el TRAZO del path; los markers
+ * (`url(#arrow)`, etc.) son `<marker>` SVG resueltos por el navegador y nunca se
+ * pintaban → las puntas de flecha desaparecían de la imagen. Aquí derivamos el
+ * vértice y la orientación de cada punta para reconstruirla en el canvas.
+ *
+ * El ángulo se calcula con la tangente del path en el extremo: para el markerEnd
+ * apunta «hacia afuera» en el sentido de avance; para el markerStart se invierte
+ * (auto-start-reverse), apuntando hacia afuera del nodo origen.
+ *
+ * `getPointAtLength`/`getTotalLength` no existen en jsdom → si fallan, se
+ * devuelve `[]` (los markers no se cubren en tests unitarios, igual que getBBox).
+ */
+function getPathMarkers(path: SVGPathElement, cs: CSSStyleDeclaration): ArrowMarker[] {
+    const startId = parseMarkerId(cs.markerStart);
+    const endId = parseMarkerId(cs.markerEnd);
+    if (!startId && !endId) return [];
+    let total: number;
+    try {
+        total = path.getTotalLength();
+    } catch {
+        return []; // jsdom u otros entornos sin layout SVG
+    }
+    if (!isFinite(total) || total === 0) return [];
+    const markers: ArrowMarker[] = [];
+    // Pequeño desplazamiento sobre el path para estimar la tangente en el extremo.
+    const eps = Math.min(1, total);
+    if (endId) {
+        const tip = path.getPointAtLength(total);
+        const prev = path.getPointAtLength(total - eps);
+        markers.push({ x: tip.x, y: tip.y, angle: Math.atan2(tip.y - prev.y, tip.x - prev.x), id: endId });
+    }
+    if (startId) {
+        const tip = path.getPointAtLength(0);
+        const next = path.getPointAtLength(eps);
+        // Invertido: apunta hacia afuera del nodo origen (auto-start-reverse).
+        markers.push({ x: tip.x, y: tip.y, angle: Math.atan2(tip.y - next.y, tip.x - next.x), id: startId });
+    }
+    return markers;
+}
+
+// Geometría de cada punta en coordenadas de flujo, RELATIVA al vértice (que cae
+// en el origen tras trasladar/rotar el canvas). Replica los <marker> de
+// EdgeMarkers.tsx: la punta abierta (#arrow/#arrowReverse) es una «V» sin
+// relleno; la hueca (#arrowHollow) un triángulo relleno con el color del fondo.
+const MARKER_SHAPES: Record<string, { fill: boolean; pts: [number, number][] }> = {
+    arrow: { fill: false, pts: [[-8, -4], [0, 0], [-8, 4]] },
+    arrowReverse: { fill: false, pts: [[-8, -4], [0, 0], [-8, 4]] },
+    arrowHollow: { fill: true, pts: [[-12, -6], [0, 0], [-12, 6]] },
+};
+
+/**
+ * Dibuja una punta de flecha en el canvas (coordenadas de flujo; el caller ya
+ * dejó el contexto trasladado/escalado al sistema del diagrama). `inkColor` es el
+ * trazo de la punta y `surfaceColor` el relleno de la hueca (fondo del diagrama).
+ */
+export function drawArrowMarker(
+    ctx: CanvasRenderingContext2D,
+    marker: ArrowMarker,
+    inkColor: string,
+    surfaceColor: string,
+): void {
+    const shape = MARKER_SHAPES[marker.id] ?? MARKER_SHAPES.arrow;
+    ctx.save();
+    ctx.translate(marker.x, marker.y);
+    ctx.rotate(marker.angle);
+    ctx.beginPath();
+    shape.pts.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = inkColor;
+    if (shape.fill) {
+        ctx.closePath();
+        ctx.fillStyle = surfaceColor;
+        ctx.fill();
+    }
+    ctx.stroke();
+    ctx.restore();
 }
 
 /**
@@ -177,6 +283,7 @@ export function getRenderedEdges(viewportEl: HTMLElement): EdgeStroke[] {
                     dasharray && dasharray !== 'none'
                         ? dasharray.split(/[\s,]+/).map(parseFloat).filter((n) => !isNaN(n))
                         : [],
+                markers: getPathMarkers(path, cs),
             };
         })
         .filter((e) => e.d && isVisibleStroke(e.stroke));

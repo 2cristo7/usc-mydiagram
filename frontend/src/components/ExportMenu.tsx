@@ -11,6 +11,7 @@ import {
   getRenderedNodeBounds,
   getRenderedEdgeBounds,
   getRenderedEdges,
+  drawArrowMarker,
   unionRects,
   loadImage,
 } from '../ui/utils/download'
@@ -92,16 +93,29 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
       ctx.scale(PIXEL_RATIO, PIXEL_RATIO)
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, imageWidth, imageHeight)
+      // Colores de las puntas de flecha (los <marker> SVG usan estas variables:
+      // trazo --color-ink, relleno de la hueca --color-surface). Se resuelven una
+      // vez desde el root para reproducirlos nativamente en el canvas.
+      const rootStyle = getComputedStyle(document.documentElement)
+      const inkColor = rootStyle.getPropertyValue('--color-ink').trim() || '#111111'
+      const surfaceColor = rootStyle.getPropertyValue('--color-surface').trim() || '#ffffff'
       ctx.save()
       ctx.translate(offsetX, offsetY)
       ctx.scale(zoom, zoom)
-      for (const edge of getRenderedEdges(viewportEl)) {
+      const edges = getRenderedEdges(viewportEl)
+      for (const edge of edges) {
         ctx.strokeStyle = edge.stroke
         ctx.lineWidth = edge.strokeWidth
         ctx.setLineDash(edge.dash)
         ctx.stroke(new Path2D(edge.d))
       }
+      // Las puntas se pintan con trazo continuo, sin heredar el dash de la línea.
       ctx.setLineDash([])
+      for (const edge of edges) {
+        for (const marker of edge.markers) {
+          drawArrowMarker(ctx, marker, inkColor, surfaceColor)
+        }
+      }
       ctx.restore()
       ctx.drawImage(nodesImg, 0, 0, imageWidth, imageHeight)
       triggerDownload(
