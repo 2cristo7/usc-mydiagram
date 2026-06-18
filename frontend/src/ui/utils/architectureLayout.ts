@@ -106,12 +106,15 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
 
     if (groupH > maxGroupH) maxGroupH = groupH
 
+    // Override manual: si el usuario redimensionó/movió el contenedor, su geometría
+    // guardada (group_layout) gana al cálculo automático.
+    const ov = diagram.group_layout?.[containerId]
     rfNodes.push({
       id: containerId,
       type: 'architectureGroup',
-      position: { x: xOffset, y: 0 },
+      position: ov ? { x: ov.x, y: ov.y } : { x: xOffset, y: 0 },
       data: { label: groupName },
-      style: { width: groupW, height: groupH },
+      style: ov ? { width: ov.width, height: ov.height } : { width: groupW, height: groupH },
     } as Node)
 
     let yChild = GROUP_HEADER_H + GROUP_PADDING
@@ -336,15 +339,21 @@ export async function architectureLayoutElk(
         | ElkNodeResult
         | undefined
 
+      // Override manual (group_layout) gana a la geometría que calculó ELK.
+      const ov = diagram.group_layout?.[containerId]
       rfNodes.push({
         id: containerId,
         type: 'architectureGroup',
-        position: { x: containerPos?.x ?? 0, y: containerPos?.y ?? 0 },
+        position: ov
+          ? { x: ov.x, y: ov.y }
+          : { x: containerPos?.x ?? 0, y: containerPos?.y ?? 0 },
         data: { label: groupName },
-        style: {
-          width: elkContainer?.width ?? NODE_W + GROUP_PADDING * 2,
-          height: elkContainer?.height ?? NODE_H + GROUP_HEADER_H + GROUP_PADDING * 2,
-        },
+        style: ov
+          ? { width: ov.width, height: ov.height }
+          : {
+              width: elkContainer?.width ?? NODE_W + GROUP_PADDING * 2,
+              height: elkContainer?.height ?? NODE_H + GROUP_HEADER_H + GROUP_PADDING * 2,
+            },
       } as Node)
 
       const children = nodeIds.map((id) => nodeById.get(id)).filter(Boolean) as typeof diagram.nodes
@@ -388,14 +397,25 @@ export async function architectureLayoutElk(
       } as Node)
     }
 
+    // IMPORTANTE: mismas aristas que el layout síncrono — type 'default'
+    // (EditableEdge) y shape 'elbow'. El tipo 'architecture' NO está registrado en
+    // edgeTypes, así que React Flow lo pintaba con un fallback SIN la lógica de codo
+    // (el "stub" perpendicular que garantiza que la flecha entre recta al nodo) →
+    // flechas apuntando hacia fuera. Con 'default' + 'elbow' el extremo siempre
+    // aterriza perpendicular sobre el nodo.
     const rfEdges: Edge[] = diagram.edges.map((edge) => ({
       id: edge.id,
       source: edge.source,
       target: edge.target,
       sourceHandle: edge.sourceHandle ?? null,
       targetHandle: edge.targetHandle ?? null,
-      data: { label: edge.label ?? '', ...(edge.data ?? {}), edge_type: edge.edge_type },
-      type: 'architecture',
+      data: {
+        label: edge.label ?? '',
+        shape: 'elbow' as const,
+        strokeStyle: (edge.edge_type ?? 'calls') === 'calls' ? ('normal' as const) : ('dashed' as const),
+        ...(edge.data ?? {}),
+      },
+      type: 'default',
     }))
 
     return { nodes: rfNodes, edges: rfEdges }
