@@ -27,6 +27,113 @@ function makeSimpleMindmap(): DiagramSchema {
   }
 }
 
+// Reconstruye el tamaño estimado del nodo igual que el layout, para comprobar AABBs.
+function estSize(label: string, role: string): { w: number; h: number } {
+  const charW = role === 'leaf' ? 6.4 : role === 'branch' ? 7.6 : 9
+  const padX = role === 'leaf' ? 24 : role === 'branch' ? 34 : 48
+  const h = role === 'leaf' ? 28 : role === 'branch' ? 40 : 48
+  const minW = role === 'root' ? 120 : 60
+  return { w: Math.max(minW, label.length * charW + padX), h }
+}
+
+describe('mindmapLayout — sin solapamientos (regresión visual)', () => {
+  // Mapa denso con etiquetas largas y casi verticales (reproduce el caso reportado:
+  // ramas con muchas hojas de texto largo que se pisaban arriba/abajo).
+  function makeDenseMindmap(): DiagramSchema {
+    const branches: Record<string, string[]> = {
+      Metabolismo: ['Fosforilación Oxidativa', 'Cadena de Transporte de Electrones', 'Ciclo de Krebs', 'Glucólisis', 'Anabolismo', 'Catabolismo'],
+      'Biología Molecular': ['Replicación del ADN', 'Transcripción', 'Traducción'],
+      'Estructura y Señalización Celular': ['Membranas Biológicas', 'Transporte Transmembrana', 'Transducción de Señales'],
+      Biomoléculas: ['Carbohidratos', 'Lípidos', 'Ácidos Nucleicos'],
+      Enzimología: ['Regulación e Inhibición', 'Coenzimas', 'Cinética Enzimática', 'Estructura y Función'],
+      Proteínas: ['Aminoácidos'],
+    }
+    const nodes: DiagramSchema['nodes'] = [{ id: 'root', label: 'Bioquímica General', node_type: 'topic', attributes: [] }]
+    const edges: DiagramSchema['edges'] = []
+    let i = 0
+    for (const [branch, leaves] of Object.entries(branches)) {
+      const bId = `b${i++}`
+      nodes.push({ id: bId, label: branch, node_type: 'topic', attributes: [] })
+      edges.push({ id: `e${bId}`, source: 'root', target: bId, label: '', edge_type: 'association' })
+      leaves.forEach((leaf, j) => {
+        const lId = `${bId}_l${j}`
+        nodes.push({ id: lId, label: leaf, node_type: 'topic', attributes: [] })
+        edges.push({ id: `e${lId}`, source: bId, target: lId, label: '', edge_type: 'association' })
+      })
+    }
+    return { title: 'Denso', diagram_type: 'mindmap', nodes, edges }
+  }
+
+  it('ningún par de nodos solapa su caja delimitadora', () => {
+    const { nodes } = mindmapLayout(makeDenseMindmap())
+    const boxes = nodes.map((n) => {
+      const { w, h } = estSize(n.data.label as string, n.data.role as string)
+      return { id: n.id, cx: n.position.x, cy: n.position.y, w, h }
+    })
+    const overlaps: string[] = []
+    for (let a = 0; a < boxes.length; a++) {
+      for (let b = a + 1; b < boxes.length; b++) {
+        const A = boxes[a], B = boxes[b]
+        const dx = Math.abs(A.cx - B.cx)
+        const dy = Math.abs(A.cy - B.cy)
+        // Margen pequeño: no exigimos el hueco completo, solo que las cajas no se crucen
+        if (dx < (A.w + B.w) / 2 - 4 && dy < (A.h + B.h) / 2 - 4) {
+          overlaps.push(`${A.id} ∩ ${B.id}`)
+        }
+      }
+    }
+    expect(overlaps).toEqual([])
+  })
+
+  it('ningún edge cruza por encima de un nodo no incidente', () => {
+    const { nodes, edges } = mindmapLayout(makeDenseMindmap())
+    const pos = new Map(nodes.map((n) => [n.id, n.position]))
+    const box = new Map(
+      nodes.map((n) => [n.id, estSize(n.data.label as string, n.data.role as string)]),
+    )
+    // ¿El bezier RADIAL del edge cruza la caja? Muestrea con los mismos puntos de
+    // control que el render (manijas según el lado de salida de cada nodo).
+    const off = (d: number, c = 0.25) => (d >= 0 ? 0.5 * d : c * 25 * Math.sqrt(-d))
+    const ctrl = (side: string, x1: number, y1: number, x2: number, y2: number) =>
+      side === 'left' ? { x: x1 - off(x1 - x2), y: y1 }
+      : side === 'right' ? { x: x1 + off(x2 - x1), y: y1 }
+      : side === 'top' ? { x: x1, y: y1 - off(y1 - y2) }
+      : { x: x1, y: y1 + off(y2 - y1) }
+    const sideOf = (fx: number, fy: number, fw: number, fh: number, tx: number, ty: number) =>
+      Math.abs(tx - fx) / (fw / 2) > Math.abs(ty - fy) / (fh / 2)
+        ? (tx - fx > 0 ? 'right' : 'left')
+        : (ty - fy > 0 ? 'bottom' : 'top')
+    const crosses = (
+      p0: { x: number; y: number }, sa: { w: number; h: number },
+      p1: { x: number; y: number }, sb: { w: number; h: number },
+      c: { x: number; y: number }, w: number, h: number,
+    ) => {
+      const c1 = ctrl(sideOf(p0.x, p0.y, sa.w, sa.h, p1.x, p1.y), p0.x, p0.y, p1.x, p1.y)
+      const c2 = ctrl(sideOf(p1.x, p1.y, sb.w, sb.h, p0.x, p0.y), p1.x, p1.y, p0.x, p0.y)
+      const xmin = c.x - w / 2, xmax = c.x + w / 2, ymin = c.y - h / 2, ymax = c.y + h / 2
+      for (let i = 1; i < 28; i++) {
+        const t = i / 28, u = 1 - t
+        const bx = u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p1.x
+        const by = u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p1.y
+        if (bx >= xmin && bx <= xmax && by >= ymin && by <= ymax) return true
+      }
+      return false
+    }
+    const offenders: string[] = []
+    for (const e of edges) {
+      const p0 = pos.get(e.source)!, p1 = pos.get(e.target)!
+      const sa = box.get(e.source)!, sb = box.get(e.target)!
+      for (const n of nodes) {
+        if (n.id === e.source || n.id === e.target) continue
+        const s = box.get(n.id)!
+        // margen negativo de 2px: solo señalamos cruces reales, no roces de borde
+        if (crosses(p0, sa, p1, sb, n.position, s.w - 4, s.h - 4)) offenders.push(`${e.id} ✕ ${n.id}`)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+})
+
 describe('mindmapLayout — raíz centrada', () => {
   it('la raíz se coloca en (0,0)', () => {
     const { nodes } = mindmapLayout(makeSimpleMindmap())
@@ -157,11 +264,11 @@ describe('mindmapLayout — tipos de aristas', () => {
     })
   })
 
-  it('las ramas (association) llevan forma curva, color y grosor en data', () => {
+  it('las ramas (association) llevan forma radial, color y grosor en data', () => {
     const { edges } = mindmapLayout(makeSimpleMindmap())
     edges.forEach((e) => {
       const data = e.data as Record<string, unknown>
-      expect(data.shape).toBe('curved')
+      expect(data.shape).toBe('radial')
       expect(data.strokeColor).toBeTruthy()
       expect(typeof data.strokeWidth).toBe('number')
       expect(data.targetArrow).toBe(false)
