@@ -286,6 +286,19 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
   // ¿Hay una key NUEVA escrita y bien formada para un proveedor comercial?
   const typedKey = !isOllama(provider) && apiKey.trim() ? apiKey.trim() : undefined
 
+  // ¿El formulario difiere de la config ya guardada? Si la selección coincide con
+  // la actual (mismo proveedor, transporte, modelos y base_url) y no se ha escrito
+  // una key nueva, no hay nada que guardar → el botón se desactiva.
+  const formBaseUrl = transport === 'direct' && baseUrl.trim() ? baseUrl.trim() : ''
+  const isDirty =
+    !config ||
+    Boolean(typedKey) ||
+    provider !== config.provider ||
+    transport !== config.transport ||
+    resolvedFast.trim() !== config.model_fast ||
+    resolvedCapable.trim() !== config.model_capable ||
+    formBaseUrl !== (config.base_url ?? '')
+
   // Valida modelos, presencia de key y formato. Devuelve false (y fija el error)
   // si algo no cuadra; true si se puede guardar.
   function validate(): boolean {
@@ -402,7 +415,7 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
         aria-modal="true"
         aria-label="Configuración del modelo de lenguaje"
         onMouseDown={(e) => e.stopPropagation()}
-        className="relative w-[440px] max-w-[95vw] bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] shadow-[var(--shadow-brutal-lg)] p-6 flex flex-col gap-5 max-h-[90vh] overflow-y-auto scrollbar-brutal"
+        className="relative w-[520px] max-w-[95vw] bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] shadow-[var(--shadow-brutal-lg)] p-6 flex flex-col gap-5 max-h-[90vh] overflow-y-auto scrollbar-brutal"
       >
         {/* Close button */}
         <button
@@ -608,7 +621,7 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
         <Button
           variant="primary"
           onClick={handleSaveClick}
-          disabled={loading || !hasUsableKey}
+          disabled={loading || !hasUsableKey || !isDirty}
           className="w-full justify-center"
         >
           {loading ? 'Guardando…' : 'Guardar configuración'}
@@ -631,7 +644,7 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
                   onClick={() => handleDeleteKey(p.value)}
                   disabled={deletingProvider !== null || loading}
                   aria-label={`Borrar API key guardada de ${p.label}`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border-[2px] border-[var(--color-danger)] text-[var(--color-danger)] rounded-[var(--radius)] shadow-[var(--shadow-brutal)] transition-all duration-75 hover:translate-x-[-2px] hover:translate-y-[-2px] hover:bg-[var(--color-danger)] hover:text-white hover:shadow-[var(--shadow-brutal-lg)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="group flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border-[2px] border-[var(--color-ink)] bg-[var(--color-surface)] text-[var(--color-danger)] rounded-[var(--radius)] shadow-[var(--shadow-brutal)] transition-all duration-75 hover:translate-x-[-2px] hover:translate-y-[-2px] hover:bg-[var(--color-danger)] hover:text-white hover:shadow-[6px_6px_0_0_var(--color-ink)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:bg-[var(--color-surface)] disabled:hover:text-[var(--color-danger)] disabled:hover:shadow-[var(--shadow-brutal)] whitespace-nowrap"
                 >
                   <Trash2 size={13} /> {deletingProvider === p.value ? 'Borrando…' : 'Borrar key'}
                 </button>

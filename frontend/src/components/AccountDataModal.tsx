@@ -89,7 +89,7 @@ export function AccountDataModal({ open, onClose }: AccountDataModalProps) {
         aria-modal="true"
         aria-label="Mis datos y privacidad"
         onMouseDown={(e) => e.stopPropagation()}
-        className="relative w-[440px] max-w-[92vw] bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] shadow-[var(--shadow-brutal-lg)] p-6 flex flex-col gap-5"
+        className="relative w-[520px] max-w-[92vw] bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] shadow-[var(--shadow-brutal-lg)] p-6 flex flex-col gap-5"
       >
         <button
           onClick={() => !busy && onClose()}

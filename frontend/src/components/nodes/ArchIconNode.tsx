@@ -139,12 +139,20 @@ function GatewayIcon() {
 }
 
 function PersonIcon() {
+  // Actor/usuario: cabeza + busto cerrado (hombros redondeados que rematan en la
+  // base con una línea horizontal), proporciones equilibradas y trazo continuo.
   return (
     <svg viewBox="0 0 56 56" fill="none">
       {/* cabeza */}
-      <circle cx="28" cy="16" r="10" stroke={INK} strokeWidth={SW} />
-      {/* hombros / cuerpo */}
-      <path d="M8 50 C8 36 48 36 48 50" stroke={INK} strokeWidth={SW} fill="none" strokeLinecap="round" />
+      <circle cx="28" cy="17" r="8.5" stroke={INK} strokeWidth={SW} />
+      {/* busto: hombros redondeados que cierran en la base */}
+      <path
+        d="M13 47 C13 36 18 31 28 31 C38 31 43 36 43 47 Z"
+        stroke={INK}
+        strokeWidth={SW}
+        fill="none"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
