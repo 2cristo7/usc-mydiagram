@@ -331,7 +331,7 @@ def _stream_router(*, system, user, tier=None, max_tokens=None):
 async def _fake_call_llm(*, system, user, tier=None, max_tokens=None):
     if "'yes' or 'no'" in system:
         return "yes"
-    if "one of these values" in system:
+    if "diagram type classifier" in system:
         return "flowchart"
     return "Conseguir leche"
 

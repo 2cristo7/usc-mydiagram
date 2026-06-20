@@ -50,7 +50,7 @@ def _stream_router(*, system, user, tier=None, max_tokens=None):
 async def _fake_call_llm_accept(*, system, user, tier=None, max_tokens=None):
     if "'yes' or 'no'" in system:        # guard
         return "yes"
-    if "one of these values" in system:  # classify tipo
+    if "diagram type classifier" in system:  # classify tipo
         return "flowchart"
     return "Mi Flowchart"                 # classify título
 

@@ -7,10 +7,11 @@ devolver un valor del enum) y otra para el `title`. Lo que se cubre:
 - el título se devuelve tal cual (stripped).
 El LLM se mockea con side_effect (primera llamada = tipo, segunda = título).
 
-S10.3 — Desambiguación de tipo UML: cuando el LLM devuelve el centinela
-`ambiguous_uml`, classify emite el evento `type_clarification` por la queue,
-activa `needs_type_clarification=True` y NO asigna diagram_type ni title.
-El grafo corta a END limpiamente; classify_outcome no emite done/error.
+S10.3 (generalizada) — Desambiguación de tipo: cuando la petición encaja con
+VARIOS tipos, el LLM devuelve los candidatos separados por comas; classify emite
+el evento `type_clarification` por la queue (una opción por candidato), activa
+`needs_type_clarification=True` y NO asigna diagram_type ni title. El grafo corta
+a END limpiamente; classify_outcome no emite done/error.
 """
 import asyncio
 import pytest
@@ -117,7 +118,7 @@ async def test_classify_runs_type_and_title_concurrently():
     title_started = asyncio.Event()
 
     async def fake_call_llm(*, system, **_):
-        if "Reply with exactly one of these values" in system:  # llamada de tipo
+        if "diagram type classifier" in system:  # llamada de tipo
             await asyncio.wait_for(title_started.wait(), timeout=1.0)
             return "flowchart"
         title_started.set()  # llamada de título
@@ -162,19 +163,19 @@ async def test_classify_use_case_is_valid_enum_value():
 
 
 # ---------------------------------------------------------------------------
-# S10.3 — Desambiguación de tipo UML
+# S10.3 — Desambiguación de tipo (generalizada a cualquier conjunto de tipos)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_classify_generic_uml_prompt_emits_clarification_event():
-    """Un prompt genérico UML hace que el LLM devuelva el centinela y classify
-    emite el evento `type_clarification` por la queue (S10.3)."""
+async def test_classify_ambiguous_prompt_emits_clarification_event():
+    """Cuando el LLM devuelve varios tipos candidatos separados por comas, classify
+    emite el evento `type_clarification` con una opción por candidato (S10.3)."""
     queue: asyncio.Queue = asyncio.Queue()
     classify = make_classify(queue=queue)
 
-    # El LLM devuelve el centinela; el título NO se usa (las dos llamadas corren
-    # en paralelo y el gather devuelve ambas, pero solo usamos la del tipo).
-    mock = AsyncMock(side_effect=["ambiguous_uml", "UML Diagram"])
+    # El LLM devuelve dos candidatos; el título NO se usa (las dos llamadas corren
+    # en paralelo y el gather devuelve ambas, pero solo importa la del tipo).
+    mock = AsyncMock(side_effect=["sequence,use_case", "UML Diagram"])
     with patch("nodes.classify.call_llm", new=mock):
         result = await classify({"prompt": "hazme un diagrama UML", "diagram_type": None})
 
@@ -183,14 +184,46 @@ async def test_classify_generic_uml_prompt_emits_clarification_event():
     assert "diagram_type" not in result
     assert "title" not in result
 
-    # El evento de clarificación debe estar en la queue.
+    # El evento de clarificación debe estar en la queue, con una opción por candidato.
     assert not queue.empty()
     event = queue.get_nowait()
     assert event["_type"] == "type_clarification"
-    assert event["question"] == "¿Qué tipo de diagrama UML quieres?"
     options_values = [o["value"] for o in event["options"]]
-    assert "sequence" in options_values
-    assert "use_case" in options_values
+    assert options_values == ["sequence", "use_case"]
+    # Cada opción lleva su etiqueta legible.
+    assert all(o["label"] for o in event["options"])
+
+
+@pytest.mark.asyncio
+async def test_classify_ambiguous_three_candidates():
+    """La desambiguación no se limita a dos tipos: tres candidatos válidos
+    producen tres opciones, deduplicadas y en orden (S10.3 generalizada)."""
+    queue: asyncio.Queue = asyncio.Queue()
+    classify = make_classify(queue=queue)
+
+    # Incluye un valor inválido ('foo') y un duplicado ('erd') que deben filtrarse.
+    mock = AsyncMock(side_effect=["erd, flowchart , foo, erd, mindmap", "Algo"])
+    with patch("nodes.classify.call_llm", new=mock):
+        result = await classify({"prompt": "algo difuso", "diagram_type": None})
+
+    assert result.get("needs_type_clarification") is True
+    event = queue.get_nowait()
+    assert [o["value"] for o in event["options"]] == ["erd", "flowchart", "mindmap"]
+
+
+@pytest.mark.asyncio
+async def test_classify_single_unrecognized_type_falls_back_to_erd():
+    """Un único valor no reconocido NO dispara pregunta: cae al fallback erd."""
+    queue: asyncio.Queue = asyncio.Queue()
+    classify = make_classify(queue=queue)
+
+    mock = AsyncMock(side_effect=["nonsense", "Algo"])
+    with patch("nodes.classify.call_llm", new=mock):
+        result = await classify({"prompt": "algo raro", "diagram_type": None})
+
+    assert result.get("needs_type_clarification") is False
+    assert result["diagram_type"] == DiagramType.ERD
+    assert queue.empty() or queue.get_nowait()["_type"] == "diagram_type"
 
 
 @pytest.mark.asyncio
@@ -224,7 +257,10 @@ async def test_classify_explicit_sequence_prompt_does_not_trigger_clarification(
     assert result.get("needs_type_clarification") is False
     assert result["diagram_type"] == DiagramType.SEQUENCE
     assert result["title"] == "Sistema de Login"
-    # No debe haber evento en la queue.
+    # El único evento en la queue es el puente del tipo (diagram_type), nunca una
+    # clarificación.
+    event = queue.get_nowait()
+    assert event["_type"] == "diagram_type" and event["diagram_type"] == "sequence"
     assert queue.empty()
 
 
@@ -244,6 +280,8 @@ async def test_classify_explicit_use_case_prompt_does_not_trigger_clarification(
 
     assert result.get("needs_type_clarification") is False
     assert result["diagram_type"] == DiagramType.USE_CASE
+    event = queue.get_nowait()
+    assert event["_type"] == "diagram_type" and event["diagram_type"] == "use_case"
     assert queue.empty()
 
 
@@ -261,20 +299,22 @@ async def test_classify_preset_type_never_triggers_clarification():
     with patch("nodes.classify.call_llm", new=mock):
         result = await classify(state)
 
-    # Tipo respetado, sin pregunta, sin evento en queue.
+    # Tipo respetado, sin pregunta. El único evento es el puente del tipo.
     assert result["diagram_type"] == DiagramType.SEQUENCE
     assert result.get("needs_type_clarification") is False
+    event = queue.get_nowait()
+    assert event["_type"] == "diagram_type" and event["diagram_type"] == "sequence"
     assert queue.empty()
     assert mock.await_count == 1  # solo el título
 
 
 @pytest.mark.asyncio
 async def test_classify_clarification_no_queue_does_not_crash():
-    """Si queue es None (modo sin stream, como en tests unitarios), el centinela
-    no debe lanzar excepción: simplemente no emite nada."""
+    """Si queue es None (modo sin stream, como en tests unitarios), la rama de
+    ambigüedad no debe lanzar excepción: simplemente no emite nada."""
     classify = make_classify(queue=None)
 
-    mock = AsyncMock(side_effect=["ambiguous_uml", "UML Diagram"])
+    mock = AsyncMock(side_effect=["sequence,use_case", "UML Diagram"])
     with patch("nodes.classify.call_llm", new=mock):
         result = await classify({"prompt": "diagrama UML genérico", "diagram_type": None})
 

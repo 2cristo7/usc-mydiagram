@@ -4,9 +4,17 @@ from state import DiagramState
 from llm import call_llm
 from schemas import DiagramType
 
-# Centinela que el LLM devuelve cuando el usuario pide un diagrama UML/de
-# comportamiento de forma GENÉRICA sin especificar secuencia vs casos de uso.
-_AMBIGUOUS_UML = "ambiguous_uml"
+# Etiquetas legibles por tipo, para construir las opciones de la pregunta de
+# desambiguación. El frontend puede sustituirlas por las suyas, pero el agente
+# manda labels usables por si acaso. Deriva del MISMO enum que el contrato.
+_TYPE_LABELS: dict[str, str] = {
+    DiagramType.ERD.value:          "Entidad-Relación",
+    DiagramType.SEQUENCE.value:     "Diagrama de secuencia",
+    DiagramType.FLOWCHART.value:    "Diagrama de flujo",
+    DiagramType.ARCHITECTURE.value: "Arquitectura",
+    DiagramType.MINDMAP.value:      "Mapa mental",
+    DiagramType.USE_CASE.value:     "Casos de uso",
+}
 
 
 def make_classify(queue: asyncio.Queue | None = None):
@@ -32,35 +40,36 @@ def make_classify(queue: asyncio.Queue | None = None):
         # paralelizar sin un fan-out/fan-in explícito en LangGraph (decisión 10.2 P1,
         # reabierta).
         #
-        # S10.3 — Desambiguación: si el LLM devuelve el centinela `ambiguous_uml` en
-        # modo automático, NO generamos título ni continuamos. Emitimos el evento
-        # `type_clarification` por la queue y activamos el flag `needs_type_clarification`.
-        # El grafo corta a END limpiamente (route_after_classify). Nunca se pregunta si
-        # el tipo viene preseleccionado (el usuario ya eligió).
+        # S10.3 (reabierta) — Desambiguación GENERALIZADA: el clasificador ya no se
+        # limita al par secuencia/casos de uso. Si la petición encaja por igual con
+        # VARIOS tipos, el LLM devuelve los candidatos (2-4) separados por comas; en
+        # ese caso NO generamos título ni continuamos: emitimos `type_clarification`
+        # por la queue con UNA opción por candidato (el usuario ve exactamente entre
+        # qué tipos está la duda) y activamos `needs_type_clarification`. El grafo
+        # corta a END limpiamente (route_after_classify). Nunca se pregunta si el tipo
+        # viene preseleccionado (el usuario ya eligió).
         preset = state.get("diagram_type")
         runtime = state.get("llm")
         rt_kwargs = {"runtime": runtime} if runtime is not None else {}
         valid_types = [t.value for t in DiagramType]
-        # El sistema de tipo incluye el centinela para que el LLM pueda indicar
-        # ambigüedad sin forzar una clasificación errónea.
-        valid_types_with_sentinel = valid_types + [_AMBIGUOUS_UML]
 
         async def classify_type() -> str:
-            """Devuelve un valor del enum O el centinela `ambiguous_uml`."""
+            """Devuelve UN valor del enum, o VARIOS separados por comas si hay
+            ambigüedad real entre tipos. El parseo posterior decide si preguntar."""
             llm_response_type = await call_llm(
                 system=(
                     f"You are a diagram type classifier. "
-                    f"Reply with exactly one of these values, no explanation: {valid_types_with_sentinel}. "
-                    f"Use '{_AMBIGUOUS_UML}' ONLY when the user asks for a generic UML or behavioral diagram "
-                    f"without specifying whether they want a sequence diagram or a use case diagram "
-                    f"(e.g. 'make a UML diagram', 'a behavioral diagram', 'diagrama UML'). "
-                    f"If the prompt mentions sequences/interactions/messages between objects/actors, "
-                    f"use 'sequence'. If it mentions actors, goals, system boundaries or use cases, "
-                    f"use 'use_case'. Only use '{_AMBIGUOUS_UML}' when the intent is truly ambiguous."
+                    f"The valid diagram types are: {valid_types}. "
+                    f"Pick the SINGLE type that best matches the user's request and reply "
+                    f"with exactly that value, no explanation. "
+                    f"ONLY if the request genuinely fits several types equally well and you "
+                    f"truly cannot decide, reply with the 2 to 4 candidate values separated "
+                    f"by commas (e.g. 'sequence,use_case'). Prefer a single type whenever "
+                    f"possible; use multiple values only for real ambiguity."
                 ),
                 user=state["prompt"],
                 tier="fast",
-                max_tokens=10,
+                max_tokens=20,
                 **rt_kwargs,
             )
             return llm_response_type.strip().lower()
@@ -78,35 +87,63 @@ def make_classify(queue: asyncio.Queue | None = None):
         if preset is not None:
             # Tipo preseleccionado por el usuario → solo generamos título, nunca preguntamos.
             diagram_title_str = await generate_title()
+            _emit_type(queue, preset, diagram_title_str)
             return {"diagram_type": preset, "title": diagram_title_str, "needs_type_clarification": False}
 
         # Modo automático: lanzamos tipo y título en paralelo.
         raw_type, diagram_title_str = await asyncio.gather(classify_type(), generate_title())
 
-        # Rama de ambigüedad UML (S10.3).
-        if raw_type == _AMBIGUOUS_UML:
-            # Emitimos el evento de clarificación por la queue del stream.
+        # Parseo de candidatos: el LLM puede devolver uno o varios valores (coma o
+        # punto y coma). Nos quedamos con los reconocidos, sin duplicar y en orden.
+        candidates: list[str] = []
+        for piece in raw_type.replace(";", ",").split(","):
+            t = piece.strip().lower()
+            if t in valid_types and t not in candidates:
+                candidates.append(t)
+
+        # Rama de ambigüedad GENERALIZADA (S10.3 reabierta): 2+ candidatos válidos →
+        # preguntar CUÁLES, con una opción por candidato.
+        if len(candidates) >= 2:
             if queue is not None:
                 await queue.put({
                     "_type": "type_clarification",
-                    "question": "¿Qué tipo de diagrama UML quieres?",
+                    "question": "Tu petición encaja con varios tipos de diagrama. ¿Cuál quieres?",
                     "options": [
-                        {"label": "Diagrama de secuencia", "value": "sequence"},
-                        {"label": "Diagrama de casos de uso", "value": "use_case"},
+                        {"label": _TYPE_LABELS[t], "value": t}
+                        for t in candidates
                     ],
                 })
             # NO asignamos diagram_type ni title: el grafo corta a END limpiamente.
             return {"needs_type_clarification": True}
 
-        # Clasificación normal: validar y aplicar fallback si no se reconoce.
-        if raw_type not in valid_types:
+        # Un único candidato (o ninguno reconocido → fallback a erd).
+        if not candidates:
             print(f"Warning: LLM returned unrecognized diagram type '{raw_type}'. Defaulting to 'erd'.")
-            raw_type = "erd"
-
+        resolved_type = DiagramType(candidates[0] if candidates else "erd")
+        _emit_type(queue, resolved_type, diagram_title_str)
         return {
-            "diagram_type": DiagramType(raw_type),
+            "diagram_type": resolved_type,
             "title": diagram_title_str,
             "needs_type_clarification": False,
         }
 
     return classify
+
+
+def _emit_type(queue: asyncio.Queue | None, diagram_type: DiagramType, title: str) -> None:
+    """Puente del tipo de diagrama al frontend (S10.3).
+
+    El tipo se decide aquí, ANTES de que se streamee el primer nodo. Sin este
+    puente el frontend no lo conoce hasta el `done` final, así que en modo
+    automático monta el diagrama en vivo con el layout genérico y luego "flashea"
+    al tipo real. Emitiendo el tipo en cuanto se resuelve, el montaje en vivo usa
+    ya el layout correcto (mindmap radial, ERD…) y el header muestra título+tipo
+    desde el principio. Los eventos incrementales node/edge NO llevan diagram_type
+    (ver outcome.py); este evento es el único canal incremental del tipo.
+    """
+    if queue is not None:
+        queue.put_nowait({
+            "_type": "diagram_type",
+            "diagram_type": diagram_type.value,
+            "title": title,
+        })
