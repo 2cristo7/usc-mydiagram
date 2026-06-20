@@ -184,6 +184,25 @@ export const groupLayoutSchema = z.record(
     z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
 );
 
+// S10.4 — Fragmentos combinados de un diagrama de secuencia (UML CombinedFragment).
+// Espejo Zod del Pydantic del agente (schemas.py · Fragment/FragmentOperand). Un
+// fragmento no es nodo ni arista: envuelve un rango ORDENADO de mensajes (edge ids)
+// con semántica de control de flujo. `alt` tiene ≥2 operandos (if/else); el resto,
+// uno. Anida por referencia explícita (child_fragment_ids), no por contención.
+export const fragmentKindSchema = z.enum(['alt', 'opt', 'loop', 'par']);
+
+export const fragmentOperandSchema = z.object({
+    guard: z.string().default(''),
+    message_ids: z.array(z.string()).default([]),
+    child_fragment_ids: z.array(z.string()).default([]),
+});
+
+export const fragmentSchema = z.object({
+    id: z.string(),
+    kind: fragmentKindSchema,
+    operands: z.array(fragmentOperandSchema).default([]),
+});
+
 export const diagramSchema = z.object({
     title: z.string(),
     diagram_type: diagramTypeSchema,
@@ -192,6 +211,11 @@ export const diagramSchema = z.object({
     // Override de geometría de los contenedores de grupo (arquitectura). Opcional:
     // un diagrama sin grupos o sin resize manual no lo lleva.
     group_layout: groupLayoutSchema.optional(),
+    // S10.4 — fragmentos combinados (solo secuencia). Opcional como group_layout (no
+    // default []): un diagrama sin fragmentos —cualquier tipo no-secuencia, o una
+    // secuencia sin condicionales— NO lleva el campo, así el round-trip export→import
+    // es idéntico y no se contamina el contrato de los demás tipos.
+    fragments: z.array(fragmentSchema).optional(),
 });
 
 // Schema del IMPORT: la estructura válida + integridad referencial. Una arista cuyo
@@ -227,6 +251,9 @@ export type NodeType = z.infer<typeof nodeTypeSchema>;
 export type EdgeType = z.infer<typeof edgeTypeSchema>;
 export type DiagramNode = z.infer<typeof diagramNodeSchema>;
 export type DiagramEdge = z.infer<typeof diagramEdgeSchema>;
+export type FragmentKind = z.infer<typeof fragmentKindSchema>;
+export type FragmentOperand = z.infer<typeof fragmentOperandSchema>;
+export type Fragment = z.infer<typeof fragmentSchema>;
 
 // S10.3 — tipos de relación admitidos por cada tipo de diagrama, con etiqueta
 // legible y orden de presentación. Fuente ÚNICA del selector "Tipo de relación"

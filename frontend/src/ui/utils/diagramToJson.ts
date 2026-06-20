@@ -1,4 +1,4 @@
-import type { DiagramSchema, DiagramNode, DiagramEdge, DiagramType } from "../../types";
+import type { DiagramSchema, DiagramNode, DiagramEdge, DiagramType, Fragment } from "../../types";
 
 // S7.1 — Representación compacta del diagrama que se envía al agente al refinar.
 // El DiagramSchema ya carece de coordenadas (dagre las recalcula en cada render
@@ -19,6 +19,9 @@ export interface CompactDiagram {
     diagram_type: DiagramType;
     nodes: DiagramNode[];
     edges: DiagramEdge[];
+    // S10.4 — fragmentos combinados (solo secuencia). Viajan al refinar para que el
+    // agente los conserve. Se omite cuando no hay ninguno (resto de tipos).
+    fragments?: Fragment[];
 }
 
 export function diagramToJson(diagram: DiagramSchema): CompactDiagram {
@@ -31,5 +34,8 @@ export function diagramToJson(diagram: DiagramSchema): CompactDiagram {
         // Se stripea `data` (visual-only: waypoints, forma, flechas…) por la misma
         // razón que `position`: no es parte del contrato Pydantic del agente.
         edges: diagram.edges.map(({ data: _data, ...rest }) => rest as DiagramEdge),
+        // Los fragmentos no llevan datos visuales que stripear (su geometría se
+        // recalcula en el layout); van tal cual si los hay.
+        ...(diagram.fragments?.length ? { fragments: diagram.fragments } : {}),
     };
 }

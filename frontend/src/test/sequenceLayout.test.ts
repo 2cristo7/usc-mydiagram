@@ -145,3 +145,86 @@ describe('sequenceLayout', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// S10.4 — Fragmentos combinados (alt/opt/loop/par) con anidamiento
+// ---------------------------------------------------------------------------
+
+// Cuatro mensajes para poder envolver un subconjunto y dejar otros fuera.
+function fragDiagram(fragments?: DiagramSchema['fragments']): DiagramSchema {
+  return {
+    title: 'Login',
+    diagram_type: 'sequence',
+    nodes: [
+      { id: 'a', label: 'Usuario',  node_type: 'actor', attributes: [] },
+      { id: 'b', label: 'Servicio', node_type: 'actor', attributes: [] },
+      { id: 'c', label: 'BD',       node_type: 'actor', attributes: [] },
+    ],
+    edges: [
+      { id: 'e1', source: 'a', target: 'b', label: 'login()', edge_type: 'sequence' },
+      { id: 'e2', source: 'b', target: 'c', label: 'buscar',  edge_type: 'sequence' },
+      { id: 'e3', source: 'b', target: 'a', label: 'ok',      edge_type: 'sequence' },
+      { id: 'e4', source: 'b', target: 'a', label: 'error',   edge_type: 'sequence' },
+    ],
+    fragments,
+  }
+}
+
+const msgY = (edges: ReturnType<typeof sequenceLayout>['edges'], id: string) =>
+  (edges.find((e) => e.id === id)!.data as { y: number }).y
+
+describe('sequenceLayout — fragmentos combinados (S10.4)', () => {
+  it('sin fragmentos no emite ningún marco (compatibilidad)', () => {
+    const { nodes } = sequenceLayout(fragDiagram())
+    expect(nodes.some((n) => n.type === 'sequenceFragment')).toBe(false)
+  })
+
+  it('un alt reserva cabecera, empuja los mensajes contenidos y crea divisor de operando', () => {
+    const noFrag = sequenceLayout(fragDiagram())
+    const withFrag = sequenceLayout(
+      fragDiagram([
+        {
+          id: 'f1',
+          kind: 'alt',
+          operands: [
+            { guard: '[válido]', message_ids: ['e3'], child_fragment_ids: [] },
+            { guard: '[else]',   message_ids: ['e4'], child_fragment_ids: [] },
+          ],
+        },
+      ]),
+    )
+    // e1 (antes del fragmento) no se mueve; e3 (dentro) baja por la banda de cabecera.
+    expect(msgY(withFrag.edges, 'e1')).toBe(msgY(noFrag.edges, 'e1'))
+    expect(msgY(withFrag.edges, 'e3')).toBeGreaterThan(msgY(noFrag.edges, 'e3'))
+
+    const frame = withFrag.nodes.find((n) => n.type === 'sequenceFragment')!
+    expect(frame).toBeTruthy()
+    expect((frame.data as { kind: string }).kind).toBe('alt')
+    const ops = (frame.data as { operands: { topOffset: number }[] }).operands
+    expect(ops).toHaveLength(2)
+    expect(ops[1].topOffset).toBeGreaterThan(ops[0].topOffset) // segundo operando → divisor
+    expect(frame.position.y).toBeLessThan(msgY(withFrag.edges, 'e3')) // el marco envuelve e3
+  })
+
+  it('fragmentos anidados: el hijo abre por debajo del padre y queda más estrecho', () => {
+    const { nodes } = sequenceLayout(
+      fragDiagram([
+        { id: 'outer', kind: 'loop', operands: [{ guard: '[3x]', message_ids: ['e2'], child_fragment_ids: ['inner'] }] },
+        { id: 'inner', kind: 'opt',  operands: [{ guard: '[hay]', message_ids: ['e3'], child_fragment_ids: [] }] },
+      ]),
+    )
+    const outer = nodes.find((n) => n.id === 'frag-outer')!
+    const inner = nodes.find((n) => n.id === 'frag-inner')!
+    expect(inner.position.y).toBeGreaterThan(outer.position.y)
+    expect((inner.style as { width: number }).width).toBeLessThan((outer.style as { width: number }).width)
+  })
+
+  it('un fragmento que referencia un mensaje inexistente no se renderiza', () => {
+    const { nodes } = sequenceLayout(
+      fragDiagram([
+        { id: 'fx', kind: 'opt', operands: [{ guard: '[?]', message_ids: ['nope'], child_fragment_ids: [] }] },
+      ]),
+    )
+    expect(nodes.some((n) => n.type === 'sequenceFragment')).toBe(false)
+  })
+})
