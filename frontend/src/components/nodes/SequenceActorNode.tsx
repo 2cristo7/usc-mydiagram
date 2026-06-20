@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import { useInlineEdit } from '../../hooks/useInlineEdit'
 import { useStore } from '../../store'
+import { ACTOR_W } from '../../ui/utils/sequenceLayout'
 
 type ActorData = { label: string }
 type ActorNodeType = Node<ActorData, 'sequenceActor'>
@@ -15,8 +16,13 @@ export function SequenceActorNode({ data, id, selected }: NodeProps<ActorNodeTyp
   })
 
   return (
+    // Ancho fijo (ACTOR_W) con la caja centrada: garantiza que el centro de la
+    // caja caiga en ACTOR_CX_OFFSET, justo sobre la lifeline (que sale del centro
+    // de su arista inferior). Etiquetas largas desbordan simétricamente y siguen
+    // centradas sobre la línea.
     <div
       className={`flex flex-col items-center ${containerProps.className}`}
+      style={{ width: ACTOR_W }}
       onDoubleClick={containerProps.onDoubleClick}
     >
       <div className="bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] px-4 py-2 text-sm font-semibold text-[var(--color-ink)] text-center min-w-[80px]">
