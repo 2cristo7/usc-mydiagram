@@ -42,10 +42,11 @@ export function absPos(node: Node): { x: number; y: number } {
   return internals?.positionAbsolute ?? node.position
 }
 
-// Un nodo de decisión se dibuja como un rombo inscrito en su caja (cuadrado
-// rotado 45°), así que sus vértices tocan los puntos medios de los lados de la
-// caja y sus aristas son diagonales. Intersecar con la caja dejaría el extremo
-// en los triángulos vacíos de las esquinas; hay que intersecar con el rombo.
+// Un nodo de decisión se dibuja como un rombo inscrito en su caja (vértices en
+// los puntos medios de los lados; diagonal mayor horizontal, no es un cuadrado),
+// así que sus aristas son diagonales. Intersecar con la caja dejaría el extremo
+// en los triángulos vacíos de las esquinas; hay que intersecar con el rombo
+// |X|/w + |Y|/h = 1, válido para cualquier relación ancho/alto.
 function isDiamond(node: Node): boolean {
   return (node.data as { nodeType?: string } | undefined)?.nodeType === 'decision'
 }
