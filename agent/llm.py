@@ -1,9 +1,12 @@
+import ipaddress
 import json
 import os
+import socket
 import httpx
 
 from pydantic import BaseModel
 from typing import Optional
+from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------
 # Excepción pública para fallos del LLM
@@ -65,6 +68,83 @@ async def _strip_think(stream):
             yield out
     if not in_think and buf:
         yield buf
+
+
+# ---------------------------------------------------------------------------
+# Saneado a array JSON para el parser ijson de extract_nodes/edges/fragments
+# ---------------------------------------------------------------------------
+
+class JsonArrayStream:
+    """Envuelve un stream de texto del LLM y reemite SOLO el array JSON de nivel
+    superior: descarta lo que venga ANTES del primer '[' (prosa, una disculpa del
+    modelo, una valla ```json…) y todo lo que venga DESPUÉS del ']' que lo cierra.
+
+    Motivo: extract_nodes/edges/fragments alimentan los chunks CRUDOS a ijson, que
+    aborta con «lexical error: invalid char in json text» en cuanto ve un carácter
+    no-JSON. Los modelos locales (qwen3) a menudo envuelven el array en
+    explicaciones o vallas markdown, así que un solo carácter de prosa al principio
+    tiraba abajo todo el parseo y el diagrama salía vacío aunque el JSON estuviera
+    ahí. Este filtro lo recupera.
+
+    Rastrea la profundidad de '['/'{' respetando las cadenas (un '[' o '"' dentro
+    de un string NO cuenta), de modo que recorta el cierre exacto del array aunque
+    el modelo siga escribiendo texto a continuación. El estado persiste entre
+    chunks: tolera arrays partidos en cualquier punto (incluso a mitad de cadena).
+
+    `found` queda en True si se llegó a ver el '[' de apertura. False ⇒ el modelo
+    no devolvió ningún array (rechazo o prosa pura): el llamante lo trata como
+    «cero elementos» sin que ijson haya tenido que fallar.
+
+    Limitación conocida: si aparece un '[' suelto en la prosa ANTES del array real
+    (p. ej. "el diagrama [borrador]: [...]"), empezaría a capturar ahí y el parseo
+    fallaría igual. Los prompts exigen array JSON puro, así que el caso real es
+    prosa/valla sin corchetes sueltos; se asume ese riesgo a cambio de simplicidad.
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+        self.found = False
+
+    async def __aiter__(self):
+        depth = 0
+        in_string = False
+        escape = False
+        done = False
+        async for content in self._stream:
+            if done:
+                # El array de nivel superior ya cerró: seguimos consumiendo el
+                # stream hasta agotarlo (cierre limpio de la conexión) sin emitir.
+                continue
+            out = []
+            for ch in content:
+                if not self.found:
+                    if ch == "[":
+                        self.found = True
+                        depth = 1
+                        out.append(ch)
+                    # cualquier carácter previo al array (prosa, ```json) se descarta
+                    continue
+                out.append(ch)
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == "\\":
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+                if ch == '"':
+                    in_string = True
+                elif ch in "[{":
+                    depth += 1
+                elif ch in "]}":
+                    depth -= 1
+                    if depth == 0:
+                        done = True
+                        break
+            if out:
+                yield "".join(out)
+
 
 # ---------------------------------------------------------------------------
 # Backends (raw HTTP, sin LangChain)
@@ -465,6 +545,52 @@ class BrowserBackend:
 # LLMConfig — configuración por petición (opcional; None → env-based)
 # ---------------------------------------------------------------------------
 
+def _validate_user_base_url(raw: str) -> str:
+    """Valida una `base_url` SUMINISTRADA POR EL USUARIO antes de que el agente la
+    use como destino de una petición HTTP (mitigación SSRF).
+
+    El agente corre en la red interna; sin esta comprobación un usuario autenticado
+    podría apuntar `base_url` a `http://169.254.169.254/...` (metadatos del cloud) o
+    a servicios internos y forzar al agente a hacerles la petición desde dentro.
+    Por eso solo se permiten URLs http/https hacia hosts PÚBLICOS: resolvemos el
+    host y rechazamos cualquier IP loopback/privada/link-local/reservada.
+
+    Si el operador necesita un Ollama en una IP privada, lo configura por env
+    (`OLLAMA_URL`, valor de confianza), nunca por la `base_url` de un usuario.
+
+    Limitación conocida: validamos la IP resuelta pero no la fijamos para la
+    petición posterior, así que un DNS-rebinding determinado podría sortearlo.
+    Para el alcance actual es defensa suficiente; el resolve-then-pin queda como
+    endurecimiento pendiente.
+    """
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        raise LLMError("La URL del servidor LLM no es válida.")
+
+    if parsed.scheme not in ("http", "https"):
+        raise LLMError("La URL del servidor LLM debe usar http o https.")
+
+    host = parsed.hostname
+    if not host:
+        raise LLMError("La URL del servidor LLM no tiene host.")
+
+    try:
+        infos = socket.getaddrinfo(host, parsed.port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise LLMError(f"No se pudo resolver el host del servidor LLM: {host}")
+
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise LLMError(
+                "La URL del servidor LLM apunta a una dirección interna no permitida."
+            )
+
+    return raw
+
+
 class LLMConfig(BaseModel):
     """Configuración LLM por petición. Si ausente/None en el body → comportamiento
     histórico basado en env vars (LLM_PROFILE). Todos los campos son opcionales
@@ -512,7 +638,10 @@ class LLMRuntime:
                     )
                 return BrowserBackend(model=model, proxy_session=cfg.proxy_session)
             # direct o "api" por compatibilidad
-            url = cfg.base_url or os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+            if cfg.base_url:
+                url = _validate_user_base_url(cfg.base_url)
+            else:
+                url = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
             return OllamaBackend(model=model, url=url)
 
         if cfg.provider == "openai":
@@ -637,7 +766,10 @@ def get_chat_model(tier: str = "capable", llm_config: Optional[LLMConfig] = None
 
         if llm_config.provider == "ollama":
             from langchain_ollama import ChatOllama
-            url = llm_config.base_url or os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+            if llm_config.base_url:
+                url = _validate_user_base_url(llm_config.base_url)
+            else:
+                url = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
             base_url = url.split("/api/")[0]
             return ChatOllama(model=model, base_url=base_url, temperature=0,
                               reasoning=False, num_ctx=8192)

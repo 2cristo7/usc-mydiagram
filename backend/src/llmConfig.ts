@@ -28,6 +28,37 @@ const DEFAULT_CONFIG = {
 
 const COMMERCIAL_PROVIDERS = ['openai', 'anthropic', 'gemini']
 
+// Rechaza una base_url de usuario que apunte (de forma evidente) a un host interno.
+// Es la primera línea anti-SSRF: el agente, que es quien hace la petición, resuelve
+// el DNS y vuelve a validar; aquí bloqueamos los vectores literales obvios (IPs
+// privadas, loopback, link-local/metadatos del cloud) y damos feedback inmediato.
+// Solo se permite http(s); un Ollama interno legítimo se configura por env, no aquí.
+function isUnsafeLlmBaseUrl(raw: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return true
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true
+
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (host === 'localhost' || host.endsWith('.localhost')) return true
+  if (host === '::1' || host === '::') return true // IPv6 loopback / unspecified
+
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (m) {
+    const a = Number(m[1])
+    const b = Number(m[2])
+    if (a === 0 || a === 127) return true // this-host / loopback
+    if (a === 10) return true // privado
+    if (a === 169 && b === 254) return true // link-local (metadatos del cloud)
+    if (a === 172 && b >= 16 && b <= 31) return true // privado
+    if (a === 192 && b === 168) return true // privado
+  }
+  return false
+}
+
 const router = Router()
 router.use(requireAuth)
 
@@ -56,6 +87,13 @@ router.put('/', async (req: AuthedRequest, res: Response) => {
   if (!provider || !transport || model_fast === undefined || model_capable === undefined) {
     res.status(400).json({ error: 'Faltan campos obligatorios: provider, transport, model_fast, model_capable' })
     return
+  }
+
+  if (base_url != null && base_url !== '') {
+    if (typeof base_url !== 'string' || isUnsafeLlmBaseUrl(base_url)) {
+      res.status(400).json({ error: 'base_url no válida: debe ser una URL http(s) hacia un host público.' })
+      return
+    }
   }
 
   const supabase = supabaseForUser(req.accessToken!)

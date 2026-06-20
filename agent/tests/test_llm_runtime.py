@@ -77,19 +77,48 @@ def test_runtime_gemini_config_picks_gemini_backend():
     assert backend.api_key == "AIza-test"
 
 
-def test_runtime_ollama_direct_picks_ollama_backend():
+def test_runtime_ollama_direct_accepts_public_base_url(monkeypatch):
+    """Una base_url pública válida selecciona OllamaBackend (DNS mockeado para no
+    depender de la red en tests)."""
+    import llm as llm_mod
+    monkeypatch.setattr(
+        llm_mod.socket, "getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 11434))],
+    )
     cfg = LLMConfig(
         provider="ollama",
         transport="direct",
         model_fast="qwen3:1.7b",
         model_capable="qwen3:8b",
-        base_url="http://localhost:11434/api/chat",
+        base_url="http://ollama.example.com:11434/api/chat",
     )
     runtime = LLMRuntime(config=cfg)
     backend = runtime._backend_for("capable")
     assert isinstance(backend, OllamaBackend)
     assert backend.model == "qwen3:8b"
-    assert backend.url == "http://localhost:11434/api/chat"
+    assert backend.url == "http://ollama.example.com:11434/api/chat"
+
+
+def test_runtime_ollama_direct_rejects_internal_base_url():
+    """Mitigación SSRF: una base_url de usuario hacia un host interno (loopback,
+    privada, link-local…) se rechaza con LLMError antes de construir el backend."""
+    for bad in (
+        "http://localhost:11434/api/chat",
+        "http://127.0.0.1:11434/api/chat",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.0.0.5:11434/api/chat",
+        "file:///etc/passwd",
+    ):
+        cfg = LLMConfig(
+            provider="ollama",
+            transport="direct",
+            model_fast="qwen3:1.7b",
+            model_capable="qwen3:8b",
+            base_url=bad,
+        )
+        runtime = LLMRuntime(config=cfg)
+        with pytest.raises(LLMError):
+            runtime._backend_for("capable")
 
 
 def test_runtime_ollama_browser_picks_browser_backend():
