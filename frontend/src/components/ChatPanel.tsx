@@ -69,10 +69,15 @@ function summaryText(s: OpSummary | null): string {
 
 function OperationCard({
   version,
+  ordinal,
   isCurrent,
   onRestore,
 }: {
   version: VersionMeta
+  // Número visible de la operación: su posición (1-based) entre las operaciones
+  // del agente, NO el seq global en BD. El seq cuenta también las ediciones
+  // manuales (ocultas de esta lista), así que usarlo dejaría huecos ("1" → "6").
+  ordinal: number
   isCurrent: boolean
   onRestore: () => void
 }) {
@@ -97,7 +102,7 @@ function OperationCard({
       <div className="flex items-center gap-2.5 px-2.5 pt-2 pb-1.5">
         {/* Número de versión bien visible: el usuario sabe por dónde va */}
         <span className="text-2xl font-black leading-none tabular-nums text-[var(--color-ink)] flex-shrink-0">
-          {version.seq}
+          {ordinal}
         </span>
         <div className="flex items-center gap-1.5 min-w-0">
           <Icon size={14} className="text-[var(--color-accent)] flex-shrink-0" />
@@ -138,11 +143,13 @@ function OperationCard({
         onClick={onRestore}
         disabled={isCurrent}
         className="group w-full flex items-center justify-center gap-1.5 px-2.5 py-2 border-t-2 border-[var(--color-ink)] text-[11px] font-bold transition-colors
-          disabled:opacity-40 disabled:cursor-default disabled:bg-[var(--color-bg)] disabled:text-[var(--color-ink)]/50
-          bg-[var(--color-bg)] text-[var(--color-ink)] hover:bg-[var(--color-accent)] hover:text-white"
+          disabled:cursor-default disabled:bg-[var(--color-bg)] disabled:text-[var(--color-accent)]
+          bg-[var(--color-accent)] text-white hover:brightness-110"
       >
-        <Undo2 size={12} />
-        {isCurrent ? 'Versión actual' : 'Volver a esta versión'}
+        <span className={`flex items-center gap-1.5 transition-transform ${isCurrent ? '' : 'group-hover:scale-110'}`}>
+          {!isCurrent && <Undo2 size={12} />}
+          {isCurrent ? 'Versión actual' : 'Volver a esta versión'}
+        </span>
       </button>
     </div>
   )
@@ -166,6 +173,16 @@ export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelPro
   // posición de navegación: la lista solo se reordena al refinar/generar, no al
   // moverte por el histórico. Las ediciones manuales no se listan.
   const operations = orderByTree(versions, headVersionId).filter((v) => v.origin !== 'manual_edit')
+
+  // Numeración visible 1..N de las operaciones por orden CRONOLÓGICO (seq), no por
+  // el orden de pintado de orderByTree (que sube las ramas muertas). Así la N-ésima
+  // operación que hizo el usuario muestra "N" aunque haya ediciones manuales (que
+  // consumen seq pero no se listan) o ramas abandonadas de por medio.
+  const ordinalById = new Map(
+    [...operations]
+      .sort((a, b) => a.seq - b.seq)
+      .map((v, i) => [v.id, i + 1]),
+  )
 
   // El scroll baja al fondo cuando se crea una versión nueva (reorden) o entra una
   // operación en vuelo; navegar no fuerza el scroll (la lista no se reordena).
@@ -201,6 +218,7 @@ export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelPro
           <OperationCard
             key={v.id}
             version={v}
+            ordinal={ordinalById.get(v.id) ?? 0}
             isCurrent={v.seq === currentVersionSeq}
             onRestore={() => restoreVersion(v)}
           />
