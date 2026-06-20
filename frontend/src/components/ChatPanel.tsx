@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAutoAnimate } from '@formkit/auto-animate/react'
-import { ChevronDown, Sparkles, Wand2, RotateCcw, Undo2 } from 'lucide-react'
+import { ChevronDown, Sparkles, Wand2, RotateCcw, Undo2, Copy, Check } from 'lucide-react'
 import { ToolTray } from './ToolTray'
 import { TypeChoiceButtons } from './TypeChoiceButtons'
 import type { ConnectionState, VersionMeta, VersionOrigin, OpSummary } from '../types'
 import { useStore } from '../store/index'
 import { useHistoryNav } from '../hooks/useHistoryNav'
 import { EmptyState, Spinner } from '../ui/primitives'
+import { toast } from '../store/toast'
 
 interface ChatPanelProps {
   connectionState: ConnectionState
@@ -91,6 +92,26 @@ function OperationCard({
     if (el && !open) setOverflows(el.scrollWidth > el.clientWidth)
   }, [version.instruction, open])
 
+  // Feedback de copia: el icono pasa a ✓ durante ~1.5s y vuelve a Copy. Inline,
+  // sin toast de éxito, para no apilar avisos al copiar varios prompts seguidos.
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => () => {
+    if (copyTimer.current) clearTimeout(copyTimer.current)
+  }, [])
+
+  const handleCopy = async () => {
+    if (!version.instruction) return
+    try {
+      await navigator.clipboard.writeText(version.instruction)
+      setCopied(true)
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error('No se pudo copiar el prompt')
+    }
+  }
+
   const meta = ORIGIN_META[version.origin]
   const Icon = meta.icon
   const receipt = summaryText(version.op_summary)
@@ -115,27 +136,43 @@ function OperationCard({
         )}
       </div>
 
-      {/* ── Sección 2: prompt (con desplegable si no cabe en la línea) ─────── */}
+      {/* ── Sección 2: prompt (desplegable si no cabe) + copiar ──────────────
+          El toggle y el botón de copiar son HERMANOS, no anidados: un <button>
+          dentro de otro es HTML inválido. El copiar va pegado al texto que copia. */}
       {version.instruction && (
-        <button
-          onClick={() => expandable && setOpen((o) => !o)}
-          className={`w-full flex items-start gap-1.5 px-2.5 pb-2 text-left ${expandable ? 'cursor-pointer' : 'cursor-default'}`}
-        >
-          <p
-            ref={textRef}
-            className={`flex-1 min-w-0 text-xs text-[var(--color-ink)] ${
-              open ? 'whitespace-pre-wrap break-words max-h-40 overflow-y-auto scrollbar-brutal' : 'truncate'
-            }`}
+        <div className="flex items-start gap-1 px-2.5 pb-2">
+          <button
+            onClick={() => expandable && setOpen((o) => !o)}
+            className={`flex-1 min-w-0 flex items-start gap-1.5 text-left ${expandable ? 'cursor-pointer' : 'cursor-default'}`}
           >
-            {version.instruction}
-          </p>
-          {expandable && (
-            <ChevronDown
-              size={14}
-              className={`flex-shrink-0 mt-0.5 text-[var(--color-ink)]/40 transition-transform ${open ? 'rotate-180' : ''}`}
-            />
-          )}
-        </button>
+            <p
+              ref={textRef}
+              className={`flex-1 min-w-0 text-xs text-[var(--color-ink)] ${
+                open ? 'whitespace-pre-wrap break-words max-h-40 overflow-y-auto scrollbar-brutal' : 'truncate'
+              }`}
+            >
+              {version.instruction}
+            </p>
+            {expandable && (
+              <ChevronDown
+                size={14}
+                className={`flex-shrink-0 mt-0.5 text-[var(--color-ink)]/40 transition-transform ${open ? 'rotate-180' : ''}`}
+              />
+            )}
+          </button>
+          <button
+            onClick={handleCopy}
+            title={copied ? 'Copiado' : 'Copiar prompt'}
+            aria-label="Copiar prompt"
+            className="flex-shrink-0 mt-0.5 p-0.5 rounded text-[var(--color-ink)]/40 hover:text-[var(--color-accent)] transition-colors"
+          >
+            {copied ? (
+              <Check size={14} className="text-[var(--color-accent-3)]" />
+            ) : (
+              <Copy size={14} />
+            )}
+          </button>
+        </div>
       )}
 
       {/* ── Sección 3: botón (con hover) ──────────────────────────────────── */}
