@@ -32,13 +32,13 @@ export function Menu({ trigger, items }: MenuProps) {
     <div ref={menuRef} className="relative inline-block">
       <div onClick={() => setOpen(!open)}>{trigger}</div>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] bg-[var(--color-surface)] shadow-[var(--shadow-brutal)]">
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[260px] w-max border-[3px] border-[var(--color-ink)] rounded-[var(--radius)] bg-[var(--color-surface)] shadow-[var(--shadow-brutal)]">
           {items.map((item, i) => (
             <button
               key={i}
               disabled={item.disabled}
               onClick={() => { item.onClick(); setOpen(false) }}
-              className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-[var(--color-accent)]/10 disabled:opacity-50 disabled:pointer-events-none text-[var(--color-ink)]"
+              className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 whitespace-nowrap hover:bg-[var(--color-accent)]/10 disabled:opacity-50 disabled:pointer-events-none text-[var(--color-ink)]"
             >
               {item.icon}
               {item.label}

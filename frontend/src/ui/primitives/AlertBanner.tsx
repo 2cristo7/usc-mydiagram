@@ -4,7 +4,8 @@ type AlertVariant = 'error' | 'warning' | 'info'
 
 interface AlertBannerProps {
   message: string
-  onDismiss: () => void
+  // Opcional: si no se pasa, el banner no muestra la X de cierre (aviso fijo).
+  onDismiss?: () => void
   variant?: AlertVariant
   // Acción opcional (botón) a la izquierda del cierre, p. ej. "Abrir configuración".
   action?: { label: string; onClick: () => void }
@@ -50,19 +51,21 @@ export function AlertBanner({ message, onDismiss, variant = 'error', action }: A
           {action.label}
         </button>
       )}
-      <button
-        onClick={onDismiss}
-        aria-label="Cerrar alerta"
-        className={`
-          shrink-0 flex h-6 w-6 items-center justify-center
-          border-[2px] ${styles.border} rounded-[var(--radius)]
-          transition-all duration-75
-          hover:translate-x-[-1px] hover:translate-y-[-1px]
-          active:translate-x-[1px] active:translate-y-[1px]
-        `}
-      >
-        <X size={12} />
-      </button>
+      {onDismiss && (
+        <button
+          onClick={onDismiss}
+          aria-label="Cerrar alerta"
+          className={`
+            shrink-0 flex h-6 w-6 items-center justify-center
+            border-[2px] ${styles.border} rounded-[var(--radius)]
+            transition-all duration-75
+            hover:translate-x-[-1px] hover:translate-y-[-1px]
+            active:translate-x-[1px] active:translate-y-[1px]
+          `}
+        >
+          <X size={12} />
+        </button>
+      )}
     </div>
   )
 }

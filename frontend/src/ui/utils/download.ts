@@ -320,3 +320,17 @@ export function triggerJsonDownload(data: unknown, filename: string): void {
     const href = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
     triggerDownload(href, filename);
 }
+
+/**
+ * Descarga texto plano (Mermaid, XML de draw.io, JSON de Excalidraw…) con el MIME
+ * indicado. Generaliza triggerJsonDownload para los formatos de export del registry
+ * (ui/utils/formats). Data URL por la misma razón: sin object URLs que revocar.
+ */
+export function triggerTextDownload(
+    content: string,
+    filename: string,
+    mime = 'text/plain',
+): void {
+    const href = `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
+    triggerDownload(href, filename);
+}

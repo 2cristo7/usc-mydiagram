@@ -1,13 +1,12 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { Download, Upload, RefreshCw } from 'lucide-react'
 import { toPng } from 'html-to-image'
 import { useStore } from '../store/index'
-import { diagramImportSchema } from '../types'
 import { Button, Menu, Spinner } from '../ui/primitives'
 import {
   diagramFilename,
   triggerDownload,
-  triggerJsonDownload,
+  triggerTextDownload,
   getRenderedNodeBounds,
   getRenderedEdgeBounds,
   getRenderedEdges,
@@ -15,8 +14,9 @@ import {
   unionRects,
   loadImage,
 } from '../ui/utils/download'
-import { persistCurrentDiagram } from '../lib/api'
+import { exportFormats } from '../ui/utils/formats'
 import { toast } from '../store/toast'
+import { ImportDiagramModal } from './ImportDiagramModal'
 
 const IMAGE_PADDING = 40
 // Tope del lado mayor de la imagen (en px de flujo, antes de PIXEL_RATIO).
@@ -35,13 +35,12 @@ interface ExportMenuProps {
 export function ExportMenu({ onRegenerate }: ExportMenuProps) {
   const uiState = useStore((s) => s.uiState)
   const currentDiagram = useStore((s) => s.currentDiagram)
-  const importDiagram = useStore((s) => s.importDiagram)
   const lastGenerationPrompt = useStore((s) => s.lastGenerationPrompt)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  // El rasterizado a PNG (diagramas grandes, hasta 4096px) y el import+guardado
-  // pueden tardar; bloqueamos la acción y mostramos carga mientras corren.
+  // El rasterizado a PNG (diagramas grandes, hasta 4096px) puede tardar;
+  // bloqueamos la acción y mostramos carga mientras corre.
   const [exporting, setExporting] = useState(false)
-  const [importing, setImporting] = useState(false)
+  // El import vive ahora en su propio modal multiformato (ImportDiagramModal).
+  const [importOpen, setImportOpen] = useState(false)
 
   // No hay botón "Guardar": toda edición del canvas autoguarda sola (debounce en
   // el store) y los cambios de la IA persisten en el done. Aquí solo quedan
@@ -130,38 +129,37 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
     }
   }
 
-  function handleExportJson() {
+  // Exporta el diagrama actual a un formato de TEXTO del registry (native .mdia,
+  // Mermaid, draw.io, Excalidraw). El PNG NO pasa por aquí: es binario/canvas.
+  function handleExportText(fmtId: string) {
     if (!currentDiagram) return
-    triggerJsonDownload(currentDiagram, diagramFilename(currentDiagram.title, 'mdia'))
+    const fmt = exportFormats().find((f) => f.id === fmtId)
+    if (!fmt || !fmt.toContent) return
+    triggerTextDownload(
+      fmt.toContent(currentDiagram),
+      diagramFilename(currentDiagram.title, fmt.extension),
+      fmt.id === 'native' ? 'application/json' : 'text/plain',
+    )
   }
 
-  async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-    setImporting(true)
-    try {
-      const parsed = diagramImportSchema.safeParse(JSON.parse(await file.text()))
-      if (!parsed.success) {
-        toast.error('El archivo no es un diagrama MydIAgram válido.')
-        return
-      }
-      // Importar como diagrama NUEVO: no sobreescribe la sesión viva, arranca
-      // una limpia con el contenido importado (currentDiagramId null → POST).
-      importDiagram(parsed.data)
-      // Guardado automático como fila nueva en BD. Sin sesión, doSave devuelve
-      // 'no-session' y el diagrama queda importado pero sin persistir.
-      const r = await persistCurrentDiagram()
-      if (!r.ok && r.error !== 'no-session') {
-        // El diagrama ya está en el canvas; el fallo es solo de persistencia.
-        toast.warning(`Diagrama importado, pero no se pudo guardar: ${r.error}`)
-      }
-    } catch {
-      toast.error('No se pudo leer el archivo: no es un JSON válido.')
-    } finally {
-      setImporting(false)
-    }
-  }
+  // Items del menú: PNG (binario, fijo) + un item por cada formato de texto
+  // exportable del registry. Así añadir un formato nuevo lo añade al menú solo.
+  const exportItems = [
+    {
+      label: exporting ? 'Exportando PNG…' : 'Exportar PNG',
+      icon: exporting ? <Spinner size={14} label="Exportando" /> : <Download size={14} />,
+      onClick: handleExportPng,
+      disabled: !canExport || exporting,
+    },
+    ...exportFormats()
+      .filter((f) => f.toContent)
+      .map((f) => ({
+        label: `Exportar ${f.label}`,
+        icon: <Download size={14} />,
+        onClick: () => handleExportText(f.id),
+        disabled: !canExport || exporting,
+      })),
+  ]
 
   return (
     <div className="flex items-center gap-1.5">
@@ -186,38 +184,19 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
             {exporting ? <Spinner size={14} label="Exportando" /> : <Download size={14} />}
           </Button>
         }
-        items={[
-          {
-            label: exporting ? 'Exportando PNG…' : 'Exportar PNG',
-            icon: exporting ? <Spinner size={14} label="Exportando" /> : <Download size={14} />,
-            onClick: handleExportPng,
-            disabled: !canExport || exporting,
-          },
-          {
-            label: 'Exportar .mdia',
-            icon: <Download size={14} />,
-            onClick: handleExportJson,
-            disabled: !canExport || exporting,
-          },
-        ]}
+        items={exportItems}
       />
       <Button
         variant="secondary"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={!canImport || importing}
+        onClick={() => setImportOpen(true)}
+        disabled={!canImport}
         title="Importar diagrama"
-        aria-label="Importar diagrama (.mdia o .json)"
+        aria-label="Importar diagrama"
         className="text-xs p-1.5 flex items-center"
       >
-        {importing ? <Spinner size={14} label="Importando" /> : <Upload size={14} />}
+        <Upload size={14} />
       </Button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".mdia,application/json,.json"
-        onChange={handleImportFile}
-        className="hidden"
-      />
+      <ImportDiagramModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   )
 }
