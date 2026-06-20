@@ -1,6 +1,6 @@
 import type { DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry, PendingTypeChoice, VersionMeta } from "../types";
 import { create } from "zustand";
-import { persistCurrentDiagram } from "../lib/api";
+import { persistCurrentDiagram, renameDiagram } from "../lib/api";
 import { toast } from "./toast";
 
 // Fase de animación de generación por streaming.
@@ -153,6 +153,16 @@ interface DiagramStore {
     streamingTitle: string | null;
     setStreamingType: (type: DiagramType | null, title: string | null) => void;
     setCurrentDiagram: (diagram: DiagramSchema) => void;
+    // Actualiza SOLO el título del diagrama vivo en memoria, sin persistir. Lo usa
+    // el renombrado desde el historial para reflejar el cambio en el header cuando
+    // el diagrama renombrado es justo el que está abierto (la persistencia ya la
+    // hace el propio flujo del historial vía renameDiagram).
+    setCurrentTitle: (title: string) => void;
+    // Renombra el diagrama abierto: actualiza el título en memoria (el header
+    // reacciona al instante) y persiste. Con id en BD → endpoint dedicado sin
+    // crear versión; sin id (diagrama recién generado/importado aún sin guardar) →
+    // schedulePersist, y el primer POST llevará ya el título nuevo.
+    renameCurrentDiagram: (title: string) => void;
     updateNode(id: string, changes: Partial<DiagramNode>): void;
     // Persiste la posición del nodo tras un drag. Actualiza DiagramNode.position
     // en el store (nodes[] y currentDiagram.nodes[]) y dispara guardado en BD.
@@ -292,6 +302,24 @@ export const useStore = create<Store>()((set) => ({
         edges: diagram.edges,
         trashedDiagram: null,
      }),
+     setCurrentTitle: (title) => set((state) =>
+        state.currentDiagram ? { currentDiagram: { ...state.currentDiagram, title } } : {}
+     ),
+     renameCurrentDiagram: (title) => {
+        set((state) =>
+            state.currentDiagram ? { currentDiagram: { ...state.currentDiagram, title } } : {}
+        )
+        const { currentDiagram, currentDiagramId } = useStore.getState()
+        if (!currentDiagram) return
+        if (currentDiagramId) {
+            renameDiagram(currentDiagramId, title).catch(() => {
+                toast.error('No se pudo renombrar el diagrama.')
+            })
+        } else {
+            // Diagrama aún sin guardar: el autosave lo persistirá con el título nuevo.
+            schedulePersist()
+        }
+     },
      updateNode: (id, changes) => {
         set((state) => ({
             nodes: state.nodes.map(node => node.id === id ? { ...node, ...changes } : node),

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { LogIn, SearchX, Inbox, Trash2, Plus } from 'lucide-react'
 import { Drawer, Badge, Spinner, EmptyState } from '../ui/primitives'
 import { useUiStore } from '../store/ui'
@@ -8,6 +8,7 @@ import {
   getDiagram,
   listVersions,
   deleteDiagram,
+  renameDiagram,
   listTrash,
   restoreDiagram,
   deleteDiagramPermanent,
@@ -46,6 +47,7 @@ export function HistoryDrawer() {
   const markCurrentTrashed = useStore((s) => s.markCurrentTrashed)
   const newDiagram = useStore((s) => s.newDiagram)
   const currentDiagramId = useStore((s) => s.currentDiagramId)
+  const setCurrentTitle = useStore((s) => s.setCurrentTitle)
 
   const [items, setItems] = useState<DiagramMeta[]>([])
   const [loading, setLoading] = useState(false)
@@ -61,6 +63,15 @@ export function HistoryDrawer() {
 
   // Menú contextual (clic derecho). null = cerrado.
   const [menu, setMenu] = useState<Menu | null>(null)
+
+  // Renombrado inline desde el historial. renamingId = tarjeta en edición (null =
+  // ninguna); renameValue es el borrador del nuevo título.
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  // Cerrar el input (Enter/Escape) lo desmonta y dispara su `blur`, que reentraría
+  // en finishRename. El flag garantiza que cada edición se resuelve una sola vez
+  // (y que un Escape no acabe confirmando vía el blur posterior).
+  const renameFinishedRef = useRef(false)
 
   // id del diagrama cuya carga está en curso (clic en una tarjeta): muestra
   // spinner en esa tarjeta y bloquea más clics mientras llega del servidor.
@@ -181,6 +192,39 @@ export function HistoryDrawer() {
       // por qué volvió (sin él, la UI parece errática).
       toast.error('No se pudo eliminar el diagrama.')
       setItems(prev)
+    }
+  }
+
+  // Arranca la edición inline de un título desde el menú contextual.
+  function startRename(id: string) {
+    const item = items.find((it) => it.id === id)
+    setMenu(null)
+    renameFinishedRef.current = false
+    setRenameValue(item?.title ?? '')
+    setRenamingId(id)
+  }
+
+  // Cierra la edición. Con commit=true confirma el renombrado: optimista (cambia
+  // la tarjeta al instante y, si es el diagrama abierto, también el header) y se
+  // revierte si la petición falla. Con commit=false (Escape) solo cancela.
+  async function finishRename(id: string, commit: boolean) {
+    if (renameFinishedRef.current) return
+    renameFinishedRef.current = true
+    const next = renameValue.trim()
+    const original = items.find((it) => it.id === id)?.title
+    setRenamingId(null)
+    if (!commit || !next || next === original) return
+    setItems((list) => list.map((it) => (it.id === id ? { ...it, title: next } : it)))
+    if (currentDiagramId === id) setCurrentTitle(next)
+    try {
+      await renameDiagram(id, next)
+    } catch (e) {
+      console.error('[HistoryDrawer] error renombrando diagrama:', e)
+      toast.error('No se pudo renombrar el diagrama.')
+      setItems((list) =>
+        list.map((it) => (it.id === id ? { ...it, title: original ?? it.title } : it)),
+      )
+      if (currentDiagramId === id && original) setCurrentTitle(original)
     }
   }
 
@@ -392,39 +436,88 @@ export function HistoryDrawer() {
               )}
               {!loading &&
                 !error &&
-                filtered.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => loadDiagram(item.id)}
-                    disabled={loadingId !== null}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setMenu({ id: item.id, x: e.clientX, y: e.clientY, kind: 'active' })
-                    }}
-                    className="w-full text-left px-4 py-3 border-b border-[var(--color-ink)]/20 hover:bg-[var(--color-accent)]/10 active:bg-[var(--color-accent)]/20 disabled:cursor-default disabled:hover:bg-transparent"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 min-w-0">
-                        <span className="block text-sm font-semibold text-[var(--color-ink)] break-words">
-                          {item.title}
-                        </span>
-                        <span className="mt-1 block text-xs text-[var(--color-ink)]/50">
-                          {new Date(item.updated_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                      {loadingId === item.id ? (
-                        <Spinner size={16} label="Cargando diagrama" className="shrink-0" />
-                      ) : (
+                filtered.map((item) =>
+                  renamingId === item.id ? (
+                    // En edición la tarjeta deja de ser un botón: así clicar el input
+                    // no abre el diagrama. Enter/blur confirma, Escape cancela.
+                    <div
+                      key={item.id}
+                      className="px-4 py-3 border-b border-[var(--color-ink)]/20"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <textarea
+                            // El nombre puede ser largo: textarea para que envuelva
+                            // a varias líneas (como la tarjeta). El ref autoajusta la
+                            // altura al contenido en cada render (mount + tecleo).
+                            ref={(el) => {
+                              if (!el) return
+                              el.style.height = 'auto'
+                              el.style.height = `${el.scrollHeight}px`
+                            }}
+                            autoFocus
+                            rows={1}
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onFocus={(e) => e.target.select()}
+                            onBlur={() => finishRename(item.id, true)}
+                            onKeyDown={(e) => {
+                              // Enter confirma (el título es una sola cadena, sin
+                              // saltos de línea); Escape cancela.
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                finishRename(item.id, true)
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault()
+                                finishRename(item.id, false)
+                              }
+                            }}
+                            placeholder="Nombre del diagrama"
+                            className="block w-full resize-none overflow-hidden border-[3px] border-[var(--color-ink)] bg-[var(--color-bg)] px-1.5 py-0.5 text-sm font-semibold leading-snug text-[var(--color-ink)] break-words focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                          />
+                        </div>
                         <Badge
                           color={BADGE_COLORS[item.diagram_type] ?? 'var(--color-accent)'}
                           className="shrink-0 text-white"
                         >
                           {TYPE_LABELS[item.diagram_type] ?? item.diagram_type}
                         </Badge>
-                      )}
+                      </div>
                     </div>
-                  </button>
-                ))}
+                  ) : (
+                    <button
+                      key={item.id}
+                      onClick={() => loadDiagram(item.id)}
+                      disabled={loadingId !== null}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        setMenu({ id: item.id, x: e.clientX, y: e.clientY, kind: 'active' })
+                      }}
+                      className="w-full text-left px-4 py-3 border-b border-[var(--color-ink)]/20 hover:bg-[var(--color-accent)]/10 active:bg-[var(--color-accent)]/20 disabled:cursor-default disabled:hover:bg-transparent"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <span className="block text-sm font-semibold text-[var(--color-ink)] break-words">
+                            {item.title}
+                          </span>
+                          <span className="mt-1 block text-xs text-[var(--color-ink)]/50">
+                            {new Date(item.updated_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        {loadingId === item.id ? (
+                          <Spinner size={16} label="Cargando diagrama" className="shrink-0" />
+                        ) : (
+                          <Badge
+                            color={BADGE_COLORS[item.diagram_type] ?? 'var(--color-accent)'}
+                            className="shrink-0 text-white"
+                          >
+                            {TYPE_LABELS[item.diagram_type] ?? item.diagram_type}
+                          </Badge>
+                        )}
+                      </div>
+                    </button>
+                  ),
+                )}
             </div>
             {/* Pie: acceso a la papelera */}
             <button
@@ -444,12 +537,20 @@ export function HistoryDrawer() {
           onClick={(e) => e.stopPropagation()}
         >
           {menu.kind === 'active' ? (
-            <button
-              onClick={() => handleDelete(menu.id)}
-              className="block w-full px-4 py-2 text-left text-sm font-semibold text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10"
-            >
-              Eliminar
-            </button>
+            <>
+              <button
+                onClick={() => startRename(menu.id)}
+                className="block w-full px-4 py-2 text-left text-sm font-semibold text-[var(--color-ink)] hover:bg-[var(--color-accent)]/10"
+              >
+                Renombrar
+              </button>
+              <button
+                onClick={() => handleDelete(menu.id)}
+                className="block w-full px-4 py-2 text-left text-sm font-semibold text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10"
+              >
+                Eliminar
+              </button>
+            </>
           ) : (
             <>
               <button

@@ -242,6 +242,53 @@ router.patch('/:id', async (req: AuthedRequest, res: Response) => {
   res.json({ ...data, version: version ?? null })
 })
 
+// Renombrar: cambia SOLO el título, sin crear versión en el diario (un nombre es
+// metadato, no un cambio estructural). El título vive duplicado —columna `title`
+// (la lee el historial) y `data.title` del JSON (lo lee el header al cargar)— así
+// que se actualizan AMBOS o al recargar reaparecería el nombre viejo. Read-modify-
+// write porque el cliente Supabase no expone jsonb_set en .update(); la RLS acota
+// la lectura y la escritura al propio usuario.
+router.patch('/:id/rename', async (req: AuthedRequest, res: Response) => {
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : ''
+  if (!title) {
+    res.status(400).json({ error: 'El título no puede estar vacío' })
+    return
+  }
+  const supabase = supabaseForUser(req.accessToken!)
+  // Traemos el data actual para sincronizar data.title sin pisar el resto del JSON.
+  const { data: row, error: readErr } = await supabase
+    .from('diagrams')
+    .select('data')
+    .eq('id', req.params.id)
+    .maybeSingle()
+  if (readErr) {
+    console.error('[diagrams] error al leer para renombrar:', readErr)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
+    return
+  }
+  if (!row) {
+    res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  const newData = { ...((row.data as Record<string, unknown>) ?? {}), title }
+  const { data, error } = await supabase
+    .from('diagrams')
+    .update({ title, data: newData })
+    .eq('id', req.params.id)
+    .select('id, title, diagram_type, created_at, updated_at')
+    .maybeSingle()
+  if (error) {
+    console.error('[diagrams] error al renombrar diagrama:', error)
+    res.status(500).json({ error: 'Error interno del servidor. Inténtalo de nuevo.' })
+    return
+  }
+  if (!data) {
+    res.status(404).json({ error: 'Diagrama no encontrado' })
+    return
+  }
+  res.json(data)
+})
+
 // Diario de versiones de un diagrama: metadata ordenada por seq (sin el `data`,
 // que se trae al navegar a una versión concreta). La RLS acota al propio usuario.
 router.get('/:id/versions', async (req: AuthedRequest, res: Response) => {

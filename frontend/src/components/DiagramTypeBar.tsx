@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../store/index'
 import type { DiagramType } from '../types'
 import { DIAGRAM_TYPE_OPTIONS } from '../types'
@@ -76,6 +76,47 @@ function SessionTitle() {
   const selectedDiagramType = useStore((s) => s.selectedDiagramType)
   const streamingType = useStore((s) => s.streamingType)
   const streamingTitle = useStore((s) => s.streamingTitle)
+  const uiState = useStore((s) => s.uiState)
+  const renameCurrentDiagram = useStore((s) => s.renameCurrentDiagram)
+
+  // Edición inline del título (doble clic). Solo cuando hay un diagrama vivo y la
+  // sesión está en reposo: durante la generación el título lo manda el streaming.
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const editable = currentDiagram !== null && uiState === 'ready'
+
+  // Cerrar el input (Enter/Escape) lo desmonta y eso dispara su `blur`, que
+  // volvería a entrar en finish(). El flag garantiza que cada edición se resuelve
+  // una sola vez (y que un Escape no acabe confirmando vía el blur posterior).
+  const finishedRef = useRef(false)
+
+  // Ancho del input ceñido al texto: un <span> espejo invisible con la MISMA
+  // tipografía mide el ancho real del borrador y se lo trasladamos al input en
+  // cada carácter (mucho más fiel que `ch`, que ignora el ancho real de cada glifo).
+  const [inputW, setInputW] = useState(0)
+  const mirrorRef = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    // +22px ≈ padding (12) + borde (6) + holgura del cursor; box-border ya incluye
+    // padding/borde en el width, así que basta sumar la holgura sobre el texto.
+    if (editing && mirrorRef.current) setInputW(mirrorRef.current.offsetWidth + 22)
+  }, [editing, draft])
+
+  function startEdit() {
+    if (!editable) return
+    finishedRef.current = false
+    setDraft(currentDiagram?.title ?? '')
+    setEditing(true)
+  }
+  function finishEdit(commit: boolean) {
+    if (finishedRef.current) return
+    finishedRef.current = true
+    setEditing(false)
+    if (!commit) return
+    const next = draft.trim()
+    if (next && next !== (currentDiagram?.title ?? '').trim()) {
+      renameCurrentDiagram(next)
+    }
+  }
 
   // El tipo real (del diagrama) manda; si aún no llegó, el resuelto por el agente
   // durante el streaming (diagram:type_ready) y, en último término, el
@@ -94,7 +135,8 @@ function SessionTitle() {
 
   // Auto-ajuste: el título largo envuelve a varias líneas y la fuente se reduce
   // hasta caber en el alto disponible. La key reproduce la animación de entrada.
-  const { ref: fitRef } = useFitText(mainText, !!subtitle)
+  // `editing` fuerza un reajuste al volver del modo edición (el <span> remonta).
+  const { ref: fitRef } = useFitText(mainText, !!subtitle, editing)
 
   return (
     <div className="flex h-full items-center gap-2.5 pl-0.5">
@@ -109,12 +151,45 @@ function SessionTitle() {
         </span>
       )}
       <div key={mainText} className="animate-title-swap flex h-full min-w-0 flex-1 flex-col justify-center overflow-hidden">
-        <span
-          ref={fitRef}
-          className={`block font-bold leading-[1.12] break-words ${isPlaceholder ? 'animate-pulse text-[var(--color-ink)]/50' : 'text-[var(--color-ink)]'}`}
-        >
-          {mainText}
-        </span>
+        {editing ? (
+          <>
+            <span
+              ref={mirrorRef}
+              aria-hidden
+              className="invisible absolute -z-10 whitespace-pre text-lg font-bold leading-tight"
+            >
+              {draft || 'Nombre del diagrama'}
+            </span>
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              onBlur={() => finishEdit(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  finishEdit(true)
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  finishEdit(false)
+                }
+              }}
+              placeholder="Nombre del diagrama"
+              style={{ width: inputW || undefined }}
+              className="box-border block max-w-full border-[3px] border-[var(--color-ink)] bg-[var(--color-bg)] px-1.5 py-0.5 text-lg font-bold leading-tight text-[var(--color-ink)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            />
+          </>
+        ) : (
+          <span
+            ref={fitRef}
+            onDoubleClick={startEdit}
+            title={editable ? 'Doble clic para renombrar' : undefined}
+            className={`block font-bold leading-[1.12] break-words ${editable ? 'cursor-text' : ''} ${isPlaceholder ? 'animate-pulse text-[var(--color-ink)]/50' : 'text-[var(--color-ink)]'}`}
+          >
+            {mainText}
+          </span>
+        )}
         {subtitle && (
           <span className="mt-0.5 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">
             {subtitle}
@@ -131,12 +206,14 @@ function SessionTitle() {
 const MAX_FONT = 18 // px (~text-lg)
 const MIN_FONT = 11 // px
 
-function useFitText(text: string, hasSubtitle: boolean) {
+function useFitText(text: string, hasSubtitle: boolean, editing: boolean) {
   const ref = useRef<HTMLSpanElement>(null)
 
   useLayoutEffect(() => {
     const el = ref.current
     const col = el?.parentElement
+    // En modo edición el <span> no está montado; al volver, el cambio de `editing`
+    // re-dispara el efecto y reajusta la fuente del span recién remontado.
     if (!el || !col) return
 
     const fit = () => {
@@ -160,7 +237,7 @@ function useFitText(text: string, hasSubtitle: boolean) {
     const ro = new ResizeObserver(fit)
     ro.observe(col)
     return () => ro.disconnect()
-  }, [text, hasSubtitle])
+  }, [text, hasSubtitle, editing])
 
   return { ref }
 }

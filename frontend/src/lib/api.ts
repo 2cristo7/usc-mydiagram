@@ -153,6 +153,24 @@ export async function getDiagram(id: string): Promise<DiagramRow> {
   return res.json()
 }
 
+// Renombrar: cambia solo el título (columna + data.title), sin crear versión en
+// el diario. Sirve igual para el diagrama abierto y para uno del historial que no
+// está cargado en el canvas. Devuelve la metadata actualizada.
+export async function renameDiagram(id: string, title: string): Promise<DiagramMeta> {
+  const headers = authHeaders()
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetch(`${API_URL}/diagrams/${id}/rename`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail.error ?? `No se pudo renombrar el diagrama (HTTP ${res.status})`)
+  }
+  return res.json()
+}
+
 // Borrado suave: mueve el diagrama a la papelera.
 export async function deleteDiagram(id: string): Promise<void> {
   const headers = authHeaders()
