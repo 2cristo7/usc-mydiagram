@@ -74,12 +74,16 @@ function Layer({
 function SessionTitle() {
   const currentDiagram = useStore((s) => s.currentDiagram)
   const selectedDiagramType = useStore((s) => s.selectedDiagramType)
+  const streamingType = useStore((s) => s.streamingType)
+  const streamingTitle = useStore((s) => s.streamingTitle)
 
-  // El tipo real (del diagrama) manda; si aún no llegó, el preseleccionado en la
-  // UI. En Auto sin respuesta ambos son null → todavía no sabemos el tipo.
-  const resolvedType = currentDiagram?.diagram_type ?? selectedDiagramType ?? null
+  // El tipo real (del diagrama) manda; si aún no llegó, el resuelto por el agente
+  // durante el streaming (diagram:type_ready) y, en último término, el
+  // preseleccionado en la UI. En Auto, el puente de streaming es lo que evita el
+  // placeholder "Generando…" hasta el done.
+  const resolvedType = currentDiagram?.diagram_type ?? streamingType ?? selectedDiagramType ?? null
   const typeLabel = resolvedType ? TYPE_LABELS[resolvedType] : null
-  const title = currentDiagram?.title?.trim() ?? ''
+  const title = (currentDiagram?.title?.trim() || streamingTitle?.trim()) ?? ''
 
   // Texto principal: el título real si existe; si no, el tipo es el protagonista;
   // y en Auto sin respuesta, el placeholder de carga. El tipo solo es subtítulo

@@ -42,7 +42,7 @@ const clampLiveStep = (ms: number) => Math.max(LIVE_MIN_STEP, Math.min(LIVE_MAX_
 // Payload de `diagram:done` (campos que consume processDone; el resto se valida con
 // diagramSchema antes de aplicarse).
 type DoneData = {
-    diagram?: { diagram_type?: unknown; nodes?: unknown[]; edges?: unknown[] };
+    diagram?: { diagram_type?: unknown; nodes?: unknown[]; edges?: unknown[]; fragments?: unknown[] };
     title?: string;
     degraded?: boolean;
     degradations?: Degradation[];
@@ -54,7 +54,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         updateNode, removeNode, removeEdge, applyDiagram,
         traceToolCall, traceToolResult, clearToolTrace,
         setGenerationPhase, clearDiagramContent, setPendingTypeChoice,
-        addVersion, setActiveOperation,
+        addVersion, setActiveOperation, setStreamingType,
     } = useStore();
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const socketRef = useRef<Socket | null>(null);
@@ -132,6 +132,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         streamDoneRef.current = false;
         pendingDoneRef.current = null;
         liveActiveRef.current = false;
+        // El tipo/título del streaming pertenecen al run que se descarta.
+        setStreamingType(null, null);
     };
 
     // Arranca un montaje en vivo limpio y entra en la fase 'live'.
@@ -210,6 +212,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 diagram_type: data.diagram.diagram_type,
                 nodes: data.diagram.nodes ?? [],
                 edges: data.diagram.edges ?? [],
+                // S10.4 — fragmentos combinados (solo secuencia; ausente en el resto,
+                // el schema lo deja undefined y no contamina otros tipos).
+                fragments: data.diagram.fragments,
             });
             if (!parseResult.success) {
                 toast.error('El diagrama recibido no es válido.');
@@ -224,6 +229,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 diagram_type: parseResult.data.diagram_type,
                 nodes: parseResult.data.nodes,
                 edges: parseResult.data.edges,
+                // S10.4 — fragmentos del snapshot. Si el agente no los devolvió en un
+                // refinamiento (las tools aún no los reconstruyen), se conservan los
+                // previos para no perderlos en una edición que no tocaba la estructura.
+                fragments: parseResult.data.fragments?.length
+                    ? parseResult.data.fragments
+                    : currentDiagram?.fragments,
                 // Conserva la geometría manual de los grupos a través del
                 // refinamiento (el snapshot del agente no la trae).
                 group_layout: currentDiagram?.group_layout,
@@ -270,6 +281,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         liveActiveRef.current = false;
         pendingDoneRef.current = null;
         streamDoneRef.current = false;
+        // El done reconcilia el tipo/título definitivos en currentDiagram; el puente
+        // de streaming ya cumplió su papel.
+        setStreamingType(null, null);
         if (data) processDone(data);
     };
 
@@ -336,6 +350,20 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
             socket.on('diagram:edge_ready', (edge) => {
                 enqueueLiveEdge(edge);
+            });
+
+            // S10.3 — el agente resolvió el tipo de diagrama (en classify, ANTES del
+            // primer nodo). Lo guardamos para que el montaje en vivo use el layout
+            // correcto desde el principio y el header muestre título+tipo, en vez de
+            // montar genérico y "flashear" al tipo real en el done. Solo aplica a la
+            // generación en vivo: el refinamiento no entra en fase 'live' y conserva
+            // su propio tipo/título.
+            socket.on('diagram:type_ready', (data: { diagram_type?: unknown; title?: unknown }) => {
+                if (!liveActiveRef.current) return;
+                const parsed = diagramSchema.shape.diagram_type.safeParse(data?.diagram_type);
+                const type = parsed.success ? parsed.data : null;
+                const title = typeof data?.title === 'string' ? data.title : null;
+                setStreamingType(type, title);
             });
 
             // S7.5 — el agente decidió invocar una tool (aún no ha corrido):
@@ -436,7 +464,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             socket.on('diagram:type_clarification', (data) => {
                 // #2 — desenlace válido: cancelar el timeout de generación.
                 cancelGenTimeout();
-                const question: string = data?.question ?? '¿Qué tipo de diagrama UML quieres generar?';
+                const question: string = data?.question ?? '¿Qué tipo de diagrama quieres generar?';
                 const options: { label: string; value: string }[] = Array.isArray(data?.options)
                     ? data.options
                     : [];

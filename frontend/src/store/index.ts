@@ -143,6 +143,15 @@ interface DiagramStore {
     // = se generó en automático o no se generó en esta sesión.
     lastGenerationType: DiagramType | null;
     setLastGenerationType: (type: DiagramType | null) => void;
+    // Tipo + título resueltos por el agente DURANTE el streaming (evento
+    // diagram:type_ready), antes de que llegue el primer nodo. En modo automático
+    // es la única forma de conocer el tipo a tiempo: sin él, el montaje en vivo
+    // usaría el layout genérico y "flashearía" al tipo real en el done. El montaje
+    // en vivo (addNode), el canvas y el header lo leen como fallback del
+    // currentDiagram. Se limpia al arrancar/cerrar cada generación.
+    streamingType: DiagramType | null;
+    streamingTitle: string | null;
+    setStreamingType: (type: DiagramType | null, title: string | null) => void;
     setCurrentDiagram: (diagram: DiagramSchema) => void;
     updateNode(id: string, changes: Partial<DiagramNode>): void;
     // Persiste la posición del nodo tras un drag. Actualiza DiagramNode.position
@@ -266,6 +275,17 @@ export const useStore = create<Store>()((set) => ({
     setSelectedDiagramType: (type) => set({ selectedDiagramType: type }),
     lastGenerationType: null,
     setLastGenerationType: (type) => set({ lastGenerationType: type }),
+    streamingType: null,
+    streamingTitle: null,
+    setStreamingType: (type, title) => set((state) => ({
+        streamingType: type,
+        streamingTitle: title,
+        // Si los nodos ya empezaron a llegar (currentDiagram sembrado), aplicamos
+        // el tipo/título al vuelo para que el layout en vivo cambie al correcto.
+        currentDiagram: state.currentDiagram
+            ? { ...state.currentDiagram, diagram_type: type, title: title ?? state.currentDiagram.title }
+            : state.currentDiagram,
+    })),
     setCurrentDiagram: (diagram) => set({
         currentDiagram: diagram,
         nodes: diagram.nodes,
@@ -317,7 +337,9 @@ export const useStore = create<Store>()((set) => ({
                 nodes: updatedNodes,
                 currentDiagram: state.currentDiagram
                     ? { ...state.currentDiagram, nodes: updatedNodes }
-                    : { title: '', diagram_type: null, nodes: updatedNodes, edges: [] } as unknown as DiagramSchema,
+                    // Primer nodo del streaming: sembramos el diagrama con el tipo/título
+                    // ya resueltos por el agente (diagram:type_ready) si llegaron antes.
+                    : { title: state.streamingTitle ?? '', diagram_type: state.streamingType, nodes: updatedNodes, edges: [] } as unknown as DiagramSchema,
             }
         })
         schedulePersist()
@@ -329,7 +351,7 @@ export const useStore = create<Store>()((set) => ({
                 edges: updatedEdges,
                 currentDiagram: state.currentDiagram
                     ? { ...state.currentDiagram, edges: updatedEdges }
-                    : { title: '', diagram_type: null, nodes: [], edges: updatedEdges } as unknown as DiagramSchema,
+                    : { title: state.streamingTitle ?? '', diagram_type: state.streamingType, nodes: [], edges: updatedEdges } as unknown as DiagramSchema,
             }
         })
         schedulePersist()

@@ -158,6 +158,15 @@ export async function streamAgentToSocket(
               console.log(`⏩ edge_ready    → ${item.data?.id}: ${item.data?.source} → ${item.data?.target} (${item.data?.edge_type})`)
               socket.emit('diagram:edge_ready', item.data)
               break
+            case 'diagram_type':
+              // El agente resolvió el tipo de diagrama (en classify, ANTES del
+              // primer nodo). Puente para que el montaje en vivo use el layout
+              // correcto desde el principio y el header muestre título+tipo, en
+              // lugar de montar genérico y "flashear" al tipo real en el done.
+              // Passthrough puro: el gateway no interpreta (antipatrón visión global).
+              console.log(`⏩ diagram_type  → ${item.diagram_type} "${item.title}"`)
+              socket.emit('diagram:type_ready', { diagram_type: item.diagram_type, title: item.title })
+              break
             case 'done':
               // Propaga la bandera de degradación y los motivos por categoría
               // (S6.9); el frontend compone el aviso. degraded=false → done limpio.
