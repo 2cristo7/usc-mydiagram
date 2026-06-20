@@ -17,6 +17,13 @@ import { DiagramToFlow, estimateNodeSize, flowNodeType } from './diagramToFlow';
 
 const TWO_PI = Math.PI * 2;
 
+// Tamaño del «system» de casos de uso durante el montaje en vivo. El nodo system
+// nunca aparece en una arista, así que siempre espera fuera de la estructura; sin un
+// tamaño explícito, su CSS width/height:100% lo colapsa a un punto. Le damos un
+// cuadrado pequeño para que se lea como una caja en miniatura hasta que el layout
+// final (useCaseLayout) lo dimensione para envolver sus casos de uso.
+const SYSTEM_LIVE_SIZE = 96;
+
 // Radio del círculo de espera para `n` nodos: compacto, pero crece lo justo para que
 // no se solapen (separación ~constante entre nodos contiguos del círculo).
 function circleRadius(n: number): number {
@@ -42,13 +49,18 @@ export function liveLayout(diagram: DiagramSchema): { nodes: Node[]; edges: Edge
     if (connected.size === 0) {
         const pts = circlePoints(diagram.nodes.length, circleRadius(diagram.nodes.length));
         const nodes = diagram.nodes.map((n, i) => {
-            const { width, height } = estimateNodeSize(n.label, n.attributes);
+            const isSystem = n.node_type === 'system';
+            const { width, height } = isSystem
+                ? { width: SYSTEM_LIVE_SIZE, height: SYSTEM_LIVE_SIZE }
+                : estimateNodeSize(n.label, n.attributes, n.node_type);
             return {
                 id: n.id,
                 // React Flow espera la esquina superior izquierda → restamos medio nodo.
                 position: { x: pts[i].x - width / 2, y: pts[i].y - height / 2 },
                 data: { label: n.label, nodeType: n.node_type, attributes: n.attributes },
                 type: flowNodeType(n.node_type, type),
+                // El system necesita tamaño explícito o colapsa a un punto.
+                ...(isSystem ? { style: { width: SYSTEM_LIVE_SIZE, height: SYSTEM_LIVE_SIZE } } : {}),
             } as Node;
         });
         return { nodes, edges: [] };
@@ -74,9 +86,17 @@ export function liveLayout(diagram: DiagramSchema): { nodes: Node[]; edges: Edge
     const nodes = real.nodes.map((n) => {
         const c = ringPos.get(n.id);
         if (!c) return n; // conectado: posición real de la estructura
+        const isSystem = n.type === 'useCaseSystem';
         const data = n.data as { label?: string; attributes?: string[] };
-        const { width, height } = estimateNodeSize(data?.label ?? '', data?.attributes);
-        return { ...n, position: { x: c.x - width / 2, y: c.y - height / 2 } };
+        const { width, height } = isSystem
+            ? { width: SYSTEM_LIVE_SIZE, height: SYSTEM_LIVE_SIZE }
+            : estimateNodeSize(data?.label ?? '', data?.attributes);
+        return {
+            ...n,
+            position: { x: c.x - width / 2, y: c.y - height / 2 },
+            // En vivo el system se muestra como cuadrado pequeño, no a tamaño completo.
+            ...(isSystem ? { style: { width: SYSTEM_LIVE_SIZE, height: SYSTEM_LIVE_SIZE } } : {}),
+        };
     });
     return { nodes, edges: real.edges };
 }

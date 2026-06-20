@@ -2,11 +2,13 @@ import type { DiagramSchema, DiagramType, EdgeType, EdgeVisualData } from '../..
 
 // Forma "nativa" de un edge según el tipo de diagrama, usada SOLO como fallback
 // cuando el diagrama aún no tiene aristas de las que aprender. Coincide con lo
-// que ya renderiza cada diagrama hoy: mindmap dibuja ramas curvas; el resto de
-// tipos (erd, flowchart, architecture, use_case) usan codo ortogonal (el default
-// de EditableEdge).
+// que ya renderiza cada diagrama hoy: mindmap dibuja ramas curvas; casos de uso
+// usan líneas RECTAS (asociaciones actor→caso e include/extend, estilo UML
+// clásico); el resto (erd, flowchart, architecture) usan codo ortogonal.
 export function defaultEdgeShape(type: DiagramType | undefined): NonNullable<EdgeVisualData['shape']> {
-  return type === 'mindmap' ? 'curved' : 'elbow'
+  if (type === 'mindmap') return 'curved'
+  if (type === 'use_case') return 'straight'
+  return 'elbow'
 }
 
 // Estilo visual coherente con la semántica de un edge_type, según el tipo de

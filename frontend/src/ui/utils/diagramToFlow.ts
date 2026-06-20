@@ -7,6 +7,7 @@ import { mindmapLayout } from './mindmapLayout';
 import { architectureLayoutSync } from './architectureLayout';
 import { defaultEdgeShape, edgeTypeStyle } from './edgeDefaults';
 import { routeOrthogonal, simpleZClear, type Rect, type Side as RouteSide } from './orthogonalRoute';
+import { decisionNodeSize } from './decisionNode';
 
 const nodeTypeMap: Partial<Record<NodeType, string>> = {
     person: 'archIcon',
@@ -39,7 +40,26 @@ const nodeTypeOverrides: Partial<Record<DiagramType, Partial<Record<NodeType, st
 // a dagre. Aproxima el TableNode/UmlClassNode: cabecera + una fila por atributo,
 // con fuente monoespaciada (~7.3px por carácter). Los valores son holgados a
 // propósito; es mejor sobreestimar (más aire) que solapar.
-export function estimateNodeSize(label: string, attributes?: string[]): { width: number, height: number } {
+export function estimateNodeSize(label: string, attributes?: string[], nodeType?: NodeType): { width: number, height: number } {
+    // Nodos de FLUJO: cajas pequeñas con texto proporcional (no la rejilla
+    // monoespaciada de tablas/clases). Estimamos su tamaño RENDERIZADO real para
+    // que dagre centre la cadena correctamente: si sobreestimamos el ancho (como
+    // hacía el cálculo de tablas, mínimo 180), dagre reserva de más y el nodo, ya
+    // medido a su tamaño real, queda descentrado del eje → las flechas se tuercen.
+    //
+    //  - decision: rombo (misma fuente que FlowNode → coincidencia exacta).
+    //  - terminator: píldora con padding px-6 (48) + borde 6.
+    //  - step: rectángulo de proceso con padding px-4 (32) + borde 6.
+    if (nodeType === 'decision') {
+        const { width, height } = decisionNodeSize(label);
+        return { width, height };
+    }
+    if (nodeType === 'terminator' || nodeType === 'step') {
+        const FLOW_CHAR = 7.4;            // ancho medio por carácter a 14px (text-sm) bold/semibold
+        const padX = nodeType === 'terminator' ? 48 : 32; // px-6 vs px-4
+        const width = Math.max(72, Math.round(label.length * FLOW_CHAR) + padX + 6);
+        return { width, height: 50 };
+    }
     const attrs = attributes ?? [];
     const longest = Math.max(label.length, ...attrs.map((a) => a.length), 0);
     // padding lateral (24) + hueco para el icono PK/FK (~18) + ancho del texto.
@@ -157,6 +177,13 @@ export function buildFlowEdges(
     diagram: DiagramSchema,
     anchors: Map<string, EdgeRouting>,
 ): Edge[] {
+    // Casos de uso UML: las asociaciones actor↔caso se dibujan RECTAS (sin codos ni
+    // waypoints), estilo clásico en abanico desde el actor. Las relaciones caso↔caso
+    // (include/extend/inherits) conservan su forma por defecto (codo ortogonal).
+    const actorIds = diagram.diagram_type === 'use_case'
+        ? new Set(diagram.nodes.filter((n) => n.node_type === 'actor').map((n) => n.id))
+        : null;
+
     return diagram.edges.map((edge) => {
         const auto = anchors.get(edge.id);
 
@@ -169,6 +196,15 @@ export function buildFlowEdges(
         if (edge.edge_type === 'include') typeDefaults.label = edge.label || '«include»';
         if (edge.edge_type === 'extend')  typeDefaults.label = edge.label || '«extend»';
 
+        // Asociación actor↔caso: recta y sin waypoints. Mantenemos los anclajes
+        // distribuidos (para que cada línea salga de un punto distinto del actor y
+        // formen abanico), pero descartamos la ruta ortogonal.
+        const isActorAssoc = actorIds !== null
+            && (actorIds.has(edge.source) || actorIds.has(edge.target));
+        const routing = isActorAssoc && auto
+            ? { sourceAnchor: auto.sourceAnchor, targetAnchor: auto.targetAnchor }
+            : auto;
+
         return {
             id: edge.id,
             source: edge.source,
@@ -177,8 +213,8 @@ export function buildFlowEdges(
             targetHandle: edge.targetHandle ?? null,
             data: {
                 label: edge.label ?? '',
-                shape: defaultEdgeShape(diagram.diagram_type),
-                ...(auto ?? {}),
+                shape: isActorAssoc ? 'straight' : defaultEdgeShape(diagram.diagram_type),
+                ...(routing ?? {}),
                 // typeDefaults solo rellena lo que el usuario no ha fijado todavía.
                 ...typeDefaults,
                 ...(edge.data ?? {}),
@@ -253,6 +289,12 @@ export function computeDistributedAnchors(
         push(edge.target, sides.tgt, { edgeId: edge.id, role: 'target', desired: tgtDesired });
     }
 
+    // En FLUJO queremos que las aristas salgan/entren por el CENTRO del lado del
+    // nodo (estilo flowchart clásico): cuando un lado tiene una sola arista la
+    // clavamos en el punto medio (0.5) en vez de su `desired`, así la flecha apunta
+    // y sale del centro de la arista del nodo aunque los centros no estén alineados.
+    const centerSingleSide = diagram.diagram_type === 'flowchart';
+
     const result = new Map<string, { sourceAnchor?: Anchor; targetAnchor?: Anchor; waypoints?: { x: number; y: number }[] }>();
     for (const [key, eps] of groups) {
         const nodeId = key.slice(0, -2);
@@ -267,9 +309,12 @@ export function computeDistributedAnchors(
         // su desired exacto (línea recta).
         eps.sort((a, b) => a.desired - b.desired);
         const positions = spreadAlong(eps.map((e) => e.desired), ANCHOR_MIN_SEP, lo, hi);
+        const centerThisSide = centerSingleSide && eps.length === 1;
         eps.forEach((ep, i) => {
             const coord = positions[i];
-            const tNorm = vertical
+            const tNorm = centerThisSide
+                ? 0.5
+                : vertical
                 ? (coord - (box.cx - box.w / 2)) / box.w
                 : (coord - (box.cy - box.h / 2)) / box.h;
             const anchor = anchorFor(side, clamp(tNorm, 0.05, 0.95));
@@ -324,67 +369,142 @@ export function computeDistributedAnchors(
 }
 
 // Layout para diagramas de casos de uso UML.
-// Estrategia: actores a los lados (izquierda/derecha alternando), casos de uso
-// centrados con dagre en orientación LR, nodos «system» como grupos contenedores
-// (extensión de la raíz del dagre, dimensionados para envolver sus hijos).
+// Estrategia clásica: actores apilados a los lados (centrados respecto a la altura
+// del subsistema), casos de uso en 1 o 2 COLUMNAS verticales dentro de la caja
+// «system». Una columna para diagramas pequeños; dos a partir de 7 casos, con los
+// casos conectados a actores en la columna izquierda (de cara a la actor) y las
+// extensiones (solo include/extend entre casos) en la derecha.
 function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] } {
     // Separar actores, casos de uso y la caja system (si existe).
     const actors   = diagram.nodes.filter((n) => n.node_type === 'actor');
     const useCases = diagram.nodes.filter((n) => n.node_type === 'use_case');
     const systems  = diagram.nodes.filter((n) => n.node_type === 'system');
 
-    // Tamaño fijo para los nodos del layout (en px de flujo).
+    // Tamaños fijos para el layout (px de flujo).
     const ACTOR_W    = 80;
-    const ACTOR_H    = 100; // monigote + etiqueta
-    const UC_W       = 160;
-    const UC_H       = 60;
-    const UC_GAP_X   = 40;
-    const UC_GAP_Y   = 40;
-    const SIDE_PAD   = 60;  // espacio desde el borde del «system» hasta el primer actor
-    const GROUP_PAD  = 60;  // relleno interior de la caja system
+    const ACTOR_H    = 110;  // monigote + etiqueta
+    const UC_W       = 170;
+    const UC_H       = 64;
+    const UC_GAP_X   = 110;  // hueco entre columnas: deja sitio a etiquetas «include»/«extend»
+    const UC_GAP_Y   = 64;   // hueco vertical entre casos apilados
+    const SIDE_PAD   = 96;   // del borde del «system» al actor
+    const GROUP_PAD  = 56;   // relleno interior de la caja system
+    const LABEL_BAND = 40;   // banda superior reservada al título del subsistema
 
-    // Layout de los casos de uso: cuadrícula centrada.
-    // Número de columnas: raíz cuadrada redondeada al alza (cuadrícula lo más cuadrada posible).
-    const cols = Math.max(1, Math.ceil(Math.sqrt(useCases.length)));
-    const ucPositions: { id: string; x: number; y: number }[] = useCases.map((uc, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        return {
-            id: uc.id,
-            x: GROUP_PAD + col * (UC_W + UC_GAP_X),
-            y: GROUP_PAD + 36 + row * (UC_H + UC_GAP_Y), // 36px para la etiqueta del system
+    const n = useCases.length;
+    // 1 columna para diagramas pequeños; 2 columnas a partir de 7 casos.
+    const cols = n <= 6 ? 1 : 2;
+
+    // Lado de cada actor (alternando por índice: pares izquierda, impares derecha).
+    // Debe coincidir con el reparto leftActors/rightActors de más abajo.
+    const sideOf = new Map<string, 'L' | 'R'>();
+    actors.forEach((a, i) => sideOf.set(a.id, i % 2 === 0 ? 'L' : 'R'));
+
+    // Tirón lateral de cada caso = nº de actores derechos − nº de actores izquierdos
+    // conectados. <0 mira a la izquierda, >0 a la derecha, 0 indeciso (extensión sin
+    // actor o equilibrado). Sitúa cada caso en la columna de SU actor → aristas cortas
+    // que no cruzan a la otra columna.
+    const pull = new Map<string, number>();
+    for (const uc of useCases) pull.set(uc.id, 0);
+    for (const e of diagram.edges) {
+        if (sideOf.has(e.source) && pull.has(e.target)) pull.set(e.target, pull.get(e.target)! + (sideOf.get(e.source) === 'R' ? 1 : -1));
+        if (sideOf.has(e.target) && pull.has(e.source)) pull.set(e.source, pull.get(e.source)! + (sideOf.get(e.target) === 'R' ? 1 : -1));
+    }
+
+    // Reparto en columnas. Con 1 columna: orden de entrada. Con 2: cada caso a la
+    // columna de su actor dominante; los indecisos equilibran. Se descartan columnas
+    // vacías (si todo tira a un lado, queda 1 columna).
+    let columns: Array<typeof useCases>;
+    if (cols === 1) {
+        columns = [useCases.slice()];
+    } else {
+        const left: typeof useCases = [];
+        const right: typeof useCases = [];
+        const undecided: typeof useCases = [];
+        for (const uc of useCases) {
+            const p = pull.get(uc.id) ?? 0;
+            if (p < 0) left.push(uc);
+            else if (p > 0) right.push(uc);
+            else undecided.push(uc);
+        }
+        for (const uc of undecided) (left.length <= right.length ? left : right).push(uc);
+        columns = [left, right].filter((c) => c.length > 0);
+        if (columns.length === 0) columns = [useCases.slice()];
+    }
+
+    // Dentro de cada columna, ordena para que los casos relacionados por include/
+    // extend (aristas caso↔caso) queden CONTIGUOS → la relación es una línea corta sin
+    // saltos. DFS sembrado por el orden de entrada: emite un caso e inmediatamente sus
+    // vecinos de la misma columna aún no emitidos.
+    const ucIds = new Set(useCases.map((u) => u.id));
+    const ucAdj = new Map<string, string[]>();
+    for (const u of useCases) ucAdj.set(u.id, []);
+    for (const e of diagram.edges) {
+        if (e.source !== e.target && ucIds.has(e.source) && ucIds.has(e.target)) {
+            ucAdj.get(e.source)!.push(e.target);
+            ucAdj.get(e.target)!.push(e.source);
+        }
+    }
+    columns = columns.map((items) => {
+        const idx = new Map(items.map((it, i) => [it.id, i]));
+        const emitted = new Set<string>();
+        const out: typeof items = [];
+        const visit = (it: (typeof useCases)[number]) => {
+            if (emitted.has(it.id)) return;
+            emitted.add(it.id);
+            out.push(it);
+            (ucAdj.get(it.id) ?? [])
+                .filter((id) => idx.has(id) && !emitted.has(id))
+                .sort((a, b) => idx.get(a)! - idx.get(b)!)
+                .forEach((id) => visit(items[idx.get(id)!]));
         };
+        for (const it of items) visit(it);
+        return out;
     });
 
-    // Dimensiones del área de casos de uso (interior de la caja system).
-    const rows     = Math.ceil(useCases.length / cols);
-    const innerW   = cols * UC_W + (cols - 1) * UC_GAP_X + GROUP_PAD * 2;
-    const innerH   = rows * UC_H + (rows - 1) * UC_GAP_Y + GROUP_PAD * 2 + 36;
+    const effCols = columns.length;
+    const rows = Math.max(1, ...columns.map((c) => c.length));
+
+    // Geometría del contenido y de la caja system.
+    const contentW = effCols * UC_W + (effCols - 1) * UC_GAP_X;
+    const contentH = rows * UC_H + (rows - 1) * UC_GAP_Y;
+    const innerW   = contentW + GROUP_PAD * 2;
+    const innerH   = contentH + GROUP_PAD * 2 + LABEL_BAND;
 
     // Posición de la caja system (origen 0,0).
     const sysX = ACTOR_W + SIDE_PAD;
     const sysY = 0;
+    const contentTop = sysY + GROUP_PAD + LABEL_BAND;
 
-    // Actores: mitad a la izquierda, mitad a la derecha, distribuidos verticalmente.
+    // Posiciones de los casos: cada columna centrada verticalmente en el contenido
+    // (las columnas más cortas no quedan pegadas arriba).
+    const ucPos = new Map<string, { x: number; y: number }>();
+    columns.forEach((colItems, col) => {
+        const colH   = colItems.length * UC_H + Math.max(0, colItems.length - 1) * UC_GAP_Y;
+        const startY = contentTop + (contentH - colH) / 2;
+        const x      = sysX + GROUP_PAD + col * (UC_W + UC_GAP_X);
+        colItems.forEach((uc, idx) => {
+            ucPos.set(uc.id, { x, y: startY + idx * (UC_H + UC_GAP_Y) });
+        });
+    });
+
+    // Actores: mitad izquierda / mitad derecha (alternando por índice), repartidos
+    // uniformemente y CENTRADOS respecto a la altura del system (innerH). Un solo
+    // actor por lado queda exactamente a media altura.
     const leftActors  = actors.filter((_, i) => i % 2 === 0);
     const rightActors = actors.filter((_, i) => i % 2 === 1);
-    const actorSpacingY = Math.max(UC_H + UC_GAP_Y, innerH / Math.max(leftActors.length, 1));
+    const actorY = (idx: number, count: number) =>
+        sysY + (innerH * (idx + 1)) / (count + 1) - ACTOR_H / 2;
 
     const actorNodes: Node[] = actors.map((actor, globalIdx) => {
         const isLeft   = globalIdx % 2 === 0;
-        const localIdx = Math.floor(globalIdx / 2);
-        const groupLen = isLeft ? leftActors.length : rightActors.length;
-        const totalH   = groupLen * actorSpacingY - UC_GAP_Y;
-        const startY   = sysY + (innerH - totalH) / 2;
-        const ax = isLeft
-            ? sysX - SIDE_PAD - ACTOR_W
-            : sysX + innerW + SIDE_PAD;
-        const ay = (actor.position)
-            ? actor.position.y
-            : startY + localIdx * actorSpacingY;
+        const side     = isLeft ? leftActors : rightActors;
+        const localIdx = side.findIndex((a) => a.id === actor.id);
+        const ax = isLeft ? sysX - SIDE_PAD - ACTOR_W : sysX + innerW + SIDE_PAD;
+        const ay = actorY(localIdx, side.length);
         return {
             id: actor.id,
-            position: { x: actor.position ? actor.position.x : ax, y: ay },
+            position: actor.position ?? { x: ax, y: ay },
             data: { label: actor.label, nodeType: actor.node_type, attributes: actor.attributes },
             type: 'useCaseActor',
         } as Node;
@@ -392,21 +512,26 @@ function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
 
     // Nodo(s) system como contenedor (parentId no soportado en todos los layouts;
     // aquí usamos posición absoluta con dimensiones ajustadas).
-    const systemNodes: Node[] = systems.map((sys) => ({
-        id: sys.id,
-        position: sys.position ?? { x: sysX, y: sysY },
-        data: { label: sys.label, nodeType: sys.node_type, attributes: sys.attributes },
-        type: 'useCaseSystem',
-        style: { width: innerW, height: innerH },
-        // Nodo contenedor: no tiene handles propios.
-    } as Node));
+    const systemNodes: Node[] = systems.map((sys) => {
+        // Override manual: si el usuario redimensionó/movió el subsistema, su
+        // geometría guardada (group_layout) gana al cálculo automático.
+        const ov = diagram.group_layout?.[sys.id];
+        return {
+            id: sys.id,
+            position: ov ? { x: ov.x, y: ov.y } : (sys.position ?? { x: sysX, y: sysY }),
+            data: { label: sys.label, nodeType: sys.node_type, attributes: sys.attributes },
+            type: 'useCaseSystem',
+            style: ov ? { width: ov.width, height: ov.height } : { width: innerW, height: innerH },
+            // Nodo contenedor: no tiene handles propios.
+        } as Node;
+    });
 
-    // Nodos de casos de uso: posición relativa al system (absoluta en el canvas).
+    // Nodos de casos de uso: posición absoluta en el canvas.
     const ucNodes: Node[] = useCases.map((uc) => {
-        const pos = ucPositions.find((p) => p.id === uc.id)!;
+        const pos = ucPos.get(uc.id)!;
         return {
             id: uc.id,
-            position: uc.position ?? { x: sysX + pos.x, y: sysY + pos.y },
+            position: uc.position ?? pos,
             data: { label: uc.label, nodeType: uc.node_type, attributes: uc.attributes },
             type: 'useCase',
         } as Node;
@@ -467,17 +592,25 @@ export function dagreLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edg
 
     const rankdir = 'TB';
 
-    // Separación generosa entre nodos (nodesep) y entre rangos (ranksep) para que
-    // las tablas/clases no queden pegadas y haya espacio para las etiquetas de las
-    // aristas. marginx/y añade un margen alrededor de todo el grafo.
-    graph.setGraph({ rankdir, nodesep: 120, ranksep: 150, marginx: 40, marginy: 40 });
+    // Separación entre nodos (nodesep) y entre rangos (ranksep). Generosa para
+    // tablas/clases (ERD), donde las cajas son grandes y las etiquetas de arista
+    // necesitan aire. En FLUJO los nodos son pequeños y la cadena es lineal, así
+    // que apretamos el avance entre rangos para que no queden tan separados.
+    const isFlow = diagram.diagram_type === 'flowchart';
+    graph.setGraph({
+        rankdir,
+        nodesep: isFlow ? 70 : 120,
+        ranksep: isFlow ? 80 : 150,
+        marginx: 40,
+        marginy: 40,
+    });
     graph.setDefaultEdgeLabel(() => ({}));
 
     diagram.nodes.forEach( (node) => {
         // Dagre necesita el tamaño real del nodo para no solaparlos. Las tablas/clases
         // crecen con sus atributos, así que estimamos ancho y alto a partir del contenido
         // en lugar de un 150x50 fijo (que provocaba solapamientos verticales).
-        const { width, height } = estimateNodeSize(node.label, node.attributes);
+        const { width, height } = estimateNodeSize(node.label, node.attributes, node.node_type);
         graph.setNode(node.id, { label: node.label, width, height });
     });
 
@@ -495,6 +628,38 @@ export function dagreLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edg
 
     dagre.layout(graph);
 
+    // Centro X de cada nodo (el que devuelve dagre por defecto).
+    const centerX = new Map<string, number>();
+    diagram.nodes.forEach((n) => centerX.set(n.id, graph.node(n.id).x));
+
+    // Alineación de CADENA para FLUJO: dagre no garantiza que los nodos de una
+    // cadena lineal queden con el centro X idéntico cuando sus anchos difieren, y
+    // ese pequeño desfase tuerce las flechas. En flujo alineamos el centro de cada
+    // nodo con el de su PADRE cuando el enlace es una cadena pura (el padre tiene un
+    // único hijo y el hijo un único padre): así los tramos rectos forman un eje
+    // vertical limpio. Las bifurcaciones (decisión con varias salidas) y las
+    // confluencias (varias entradas) conservan su X de dagre para no encimarse.
+    if (isFlow) {
+        const outDeg = new Map<string, number>();
+        const inDeg = new Map<string, number>();
+        const uniqueParent = new Map<string, string>();
+        for (const e of diagram.edges) {
+            if (e.source === e.target) continue;
+            outDeg.set(e.source, (outDeg.get(e.source) ?? 0) + 1);
+            inDeg.set(e.target, (inDeg.get(e.target) ?? 0) + 1);
+            uniqueParent.set(e.target, e.source);
+        }
+        // De arriba abajo (y ascendente) para propagar el centro del padre ya alineado.
+        const ordered = [...diagram.nodes].sort((a, b) => graph.node(a.id).y - graph.node(b.id).y);
+        for (const n of ordered) {
+            if (n.position || (inDeg.get(n.id) ?? 0) !== 1) continue;
+            const p = uniqueParent.get(n.id)!;
+            if ((outDeg.get(p) ?? 0) !== 1) continue;
+            const pc = centerX.get(p);
+            if (pc != null) centerX.set(n.id, pc);
+        }
+    }
+
     // Caja (centro + dimensiones) de cada nodo en coordenadas de flujo, respetando
     // la posición guardada por el usuario. Es la base para repartir los anclajes de
     // las aristas por los lados de los nodos.
@@ -506,7 +671,7 @@ export function dagreLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edg
         if (node.position) {
             boxes.set(node.id, { cx: node.position.x + w / 2, cy: node.position.y + h / 2, w, h });
         } else {
-            boxes.set(node.id, { cx: g.x, cy: g.y, w, h });
+            boxes.set(node.id, { cx: centerX.get(node.id)!, cy: g.y, w, h });
         }
     });
 
@@ -523,7 +688,7 @@ export function dagreLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edg
             ({ x, y } = node.position);
         } else {
             const g = graph.node(node.id);
-            x = g.x - g.width / 2;
+            x = centerX.get(node.id)! - g.width / 2;
             y = g.y - g.height / 2;
         }
         return {
