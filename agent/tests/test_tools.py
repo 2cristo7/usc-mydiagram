@@ -98,6 +98,38 @@ def test_update_node_invalid_type_rejected():
     assert ws._node("usuario").node_type == NodeType.TABLE  # sin cambios
 
 
+def mindmap_workspace() -> DiagramWorkspace:
+    """Mindmap mínimo: tema central ── rama."""
+    nodes = [
+        DiagramNode(id="historia", label="Historia", node_type=NodeType.TOPIC, attributes=[]),
+        DiagramNode(id="carrera", label="Carrera deportiva", node_type=NodeType.TOPIC, attributes=[]),
+    ]
+    edges = [
+        DiagramEdge(id="historia__carrera", source="historia", target="carrera",
+                    label="", edge_type=EdgeType.ASSOCIATION),
+    ]
+    return DiagramWorkspace(DiagramType.MINDMAP, nodes, edges)
+
+
+def test_update_node_mindmap_attributes_rejected():
+    # En mindmap los attributes no se renderizan: el guardrail devuelve un error
+    # accionable (crear nodo hijo) en vez de mutar de forma invisible.
+    ws = mindmap_workspace()
+    res = ws.update_node("carrera", attributes=["Debutó en el Real Madrid en 2008"])
+    assert "error" in res
+    assert "add_node" in res["error"] and "add_edge" in res["error"]
+    assert ws._node("carrera").attributes == []  # sin cambios
+
+
+def test_update_node_mindmap_rename_allowed():
+    # Renombrar (solo label) SÍ es legítimo en mindmap: el guardrail solo bloquea
+    # attributes, no el resto de campos.
+    ws = mindmap_workspace()
+    res = ws.update_node("carrera", label="Trayectoria deportiva")
+    assert res["ok"] is True
+    assert ws._node("carrera").label == "Trayectoria deportiva"
+
+
 # --- delete_node (cascade) ---
 
 def test_delete_node_cascade_edges():

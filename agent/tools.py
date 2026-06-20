@@ -190,6 +190,15 @@ class DiagramWorkspace:
         node = self._node(id)
         if node is None:
             return {"error": f"No existe ningún nodo con id '{id}'. Usa find_node para resolver el nombre."}
+        # En un mindmap los nodos NO tienen atributos: el frontend solo pinta el
+        # label, así que meter datos en attributes es trabajo invisible. Error rico
+        # → el agente se autocorrige creando un nodo hijo (el modelo radial: cada
+        # detalle es un 'topic' colgado de su rama con una arista 'association').
+        if attributes and self.diagram_type == DiagramType.MINDMAP:
+            return {"error": "En un mapa mental los nodos no tienen atributos (no se muestran). "
+                             "Para añadir un detalle a una rama, créalo como nodo hijo: "
+                             "add_node(node_type='topic', label='<detalle>') y luego "
+                             "add_edge(source='<rama>', target='<nuevo>', edge_type='association')."}
         if node_type is not None and not node_type_allowed(self.diagram_type, node_type):
             return {"error": f"node_type '{node_type.value}' no es válido para '{self.diagram_type.value}'. "
                              f"Tipos válidos: {_allowed_nodes_str(self.diagram_type)}."}

@@ -168,13 +168,37 @@ Ejemplos correctos:
   NO crear nodo "Transferencia de datos"."""
 
 
+_MINDMAP_AGENT_GUIDE = """
+Guía específica para MAPAS MENTALES (mindmap):
+- Un mindmap es un ÁRBOL radial: TODO concepto, dato, ejemplo o detalle es un NODO propio (node_type "topic"), nunca un atributo.
+- Los nodos de mindmap SOLO muestran su label; sus `attributes` NO se renderizan. NUNCA uses update_node para meter información en `attributes`: el usuario no vería nada.
+- Para AÑADIR información a una rama, créala como nodo hijo y CONÉCTALA:
+  find_node(<rama>) → add_node(node_type="topic", label="<el detalle>") → add_edge(source=<rama>, target=<nuevo>, edge_type="association").
+- Árbol estricto: cada nodo cuelga de UN solo padre y las aristas van del centro hacia afuera (padre → hijo).
+- En un mindmap, update_node solo es legítimo para RENOMBRAR un nodo (cambiar su label).
+
+Ejemplo correcto:
+  Petición: "Añade a la rama 'Carrera deportiva' que debutó en el Real Madrid en 2008"
+  → find_node("Carrera deportiva")
+  → add_node(node_type="topic", label="Debut en Real Madrid (2008)")
+  → add_edge(source=carrera_deportiva, target=debut_en_real_madrid_2008, edge_type="association")
+  NO update_node(carrera_deportiva, attributes=["Debutó en el Real Madrid en 2008"])."""
+
+
 def build_system_prompt(ws: DiagramWorkspace) -> str:
     from schemas import DiagramType
     dt = ws.diagram_type
     allowed_nodes = ", ".join(sorted(t.value for t in (ALLOWED_NODE_TYPES.get(dt) or set(NodeType))))
     allowed_edges = ", ".join(sorted(t.value for t in (ALLOWED_EDGE_TYPES.get(dt) or set(EdgeType))))
     diagram_json = ws.to_compact().model_dump_json(indent=2)
-    sequence_guide = _SEQUENCE_AGENT_GUIDE if dt == DiagramType.SEQUENCE else ""
+    # Guía por tipo: cada diagrama con una restricción estructural fuerte añade su
+    # propio bloque (igual que la de secuencia). Mindmap: los detalles son nodos
+    # hijo, NUNCA atributos (que no se renderizan) — ver _MINDMAP_AGENT_GUIDE.
+    type_guide = ""
+    if dt == DiagramType.SEQUENCE:
+        type_guide = _SEQUENCE_AGENT_GUIDE
+    elif dt == DiagramType.MINDMAP:
+        type_guide = _MINDMAP_AGENT_GUIDE
     return f"""Eres un agente que REFINA un diagrama de software existente usando tools.
 
 Diagrama actual (tipo «{dt.value}»):
@@ -182,7 +206,7 @@ Diagrama actual (tipo «{dt.value}»):
 
 node_type válidos para este diagrama: {allowed_nodes}
 edge_type válidos para este diagrama: {allowed_edges}
-{sequence_guide}
+{type_guide}
 Reglas:
 - Cumple la petición COMPLETA antes de terminar. «Añade X entre A y B» significa: crear el nodo X con add_node Y conectarlo a A y a B con add_edge. Crear un nodo NO lo conecta a nada.
 - No dejes nodos nuevos desconectados salvo que el usuario lo pida explícitamente. Antes de dar tu respuesta final, repasa si la petición implicaba relaciones que aún no has creado.
