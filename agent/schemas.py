@@ -57,11 +57,49 @@ class DiagramEdge(BaseModel):
     edge_type: EdgeType
 
 
+# ---------------------------------------------------------------------------
+# Fragmentos combinados de diagrama de secuencia (S10.4)
+# ---------------------------------------------------------------------------
+# Un fragmento (UML CombinedFragment) NO es ni nodo ni arista: es una TERCERA
+# entidad que envuelve un rango ORDENADO de mensajes (edges) con una semántica de
+# control de flujo. Por eso vive en su propio array top-level (`fragments`) y no
+# en `attributes` de un nodo (el patrón de los grupos de arquitectura no sirve:
+# allí se agrupan nodos por etiqueta; aquí se agrupan aristas por posición).
+#
+# `alt` tiene VARIOS operandos (if/else: cada rama con su guarda); `opt`/`loop`/
+# una región de `par` tienen uno solo. Los fragmentos ANIDAN: un operando puede
+# contener fragmentos hijos por referencia explícita (`child_fragment_ids`), no
+# por contención de rangos inferida (ambigua cuando comparten extremos).
+class FragmentKind(str, Enum):
+    ALT  = "alt"   # alternativas mutuamente excluyentes (if / else if / else)
+    OPT  = "opt"   # bloque opcional (un solo operando con guarda)
+    LOOP = "loop"  # iteración (guarda = condición/contador del bucle)
+    PAR  = "par"   # regiones concurrentes (cada operando corre en paralelo)
+
+
+class FragmentOperand(BaseModel):
+    # `guard`: la condición entre corchetes ("[saldo > 0]", "[else]", "[para cada item]").
+    guard: str = ""
+    # Mensajes (edge ids) directamente contenidos en este operando, en orden.
+    message_ids: list[str] = Field(default_factory=list)
+    # Fragmentos anidados dentro de este operando, por id (referencia explícita).
+    child_fragment_ids: list[str] = Field(default_factory=list)
+
+
+class Fragment(BaseModel):
+    id: str
+    kind: FragmentKind
+    operands: list[FragmentOperand] = Field(default_factory=list)
+
+
 class DiagramSchema(BaseModel):
     title: str
     diagram_type: DiagramType
     nodes: list[DiagramNode]
     edges: list[DiagramEdge]
+    # Solo lo usan los diagramas de secuencia; opcional (default []) → un diagrama
+    # sin fragmentos es exactamente el comportamiento previo a S10.4.
+    fragments: list[Fragment] = Field(default_factory=list)
 
 
 # S7.1 — Representación compacta que el frontend envía al refinar. Espejo del
@@ -73,6 +111,9 @@ class CompactDiagram(BaseModel):
     diagram_type: DiagramType
     nodes: list[DiagramNode]
     edges: list[DiagramEdge]
+    # S10.4 — los fragmentos de secuencia viajan también al refinar para que el
+    # agente los conserve / razone sobre ellos. Opcional: el resto de tipos no lo trae.
+    fragments: list[Fragment] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -127,3 +168,30 @@ def edge_type_allowed(diagram_type: DiagramType, edge_type: EdgeType) -> bool:
     `node_type_allowed`; mismo fallback permisivo."""
     allowed = ALLOWED_EDGE_TYPES.get(diagram_type)
     return allowed is None or edge_type in allowed
+
+
+def validate_fragment(
+    frag: Fragment, valid_edge_ids: set[str], valid_fragment_ids: set[str]
+) -> tuple[bool, str]:
+    """¿Es `frag` referencialmente coherente? Como en las aristas (integridad
+    referencial), un fragmento que apunta a un mensaje o a un hijo inexistente
+    dejaría un marco fantasma sin contenido en el canvas. Se valida —no se corrige
+    en bucle como nodos/aristas (S10.4): los fragmentos son decoración estructural,
+    así que un fragmento inválido se DESCARTA (degradación limpia), no se reintenta.
+
+    Reglas: kind con ≥1 operando; alt con ≥2; cada message_id y cada
+    child_fragment_id deben existir. Devuelve (ok, motivo)."""
+    if not frag.operands:
+        return False, "fragmento sin operandos"
+    if frag.kind == FragmentKind.ALT and len(frag.operands) < 2:
+        return False, "alt requiere al menos 2 operandos (rama y alternativa)"
+    for op in frag.operands:
+        for mid in op.message_ids:
+            if mid not in valid_edge_ids:
+                return False, f'mensaje inexistente referenciado: "{mid}"'
+        for cid in op.child_fragment_ids:
+            if cid not in valid_fragment_ids:
+                return False, f'fragmento hijo inexistente referenciado: "{cid}"'
+        if not op.message_ids and not op.child_fragment_ids:
+            return False, "operando vacío (sin mensajes ni fragmentos hijos)"
+    return True, ""

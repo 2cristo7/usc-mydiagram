@@ -1,6 +1,6 @@
 import operator
 from typing import TypedDict, Optional, Annotated, Literal
-from schemas import DiagramSchema, DiagramNode, DiagramEdge, DiagramType
+from schemas import DiagramSchema, DiagramNode, DiagramEdge, DiagramType, Fragment
 
 
 class StructuralGap(TypedDict):
@@ -60,6 +60,11 @@ class DiagramState(TypedDict):
     # nuevas/recién arregladas; LangGraph las concatena a las ya válidas. Nunca se
     # retractan, así que no hace falta poder reemplazar.
     edges: Annotated[list[DiagramEdge], operator.add]
+    # S10.4 — fragmentos combinados (alt/opt/loop/par) de un diagrama de secuencia.
+    # Replace (sin Annotated): extract_fragments es UNA pasada sin feedback; cada
+    # ejecución recalcula la lista entera desde los mensajes actuales. Vacío para
+    # cualquier tipo que no sea secuencia.
+    fragments: list[Fragment]
     # Aristas inválidas retenidas pendientes de regenerar — representación
     # uniforme {"raw": <dict crudo>, "reason": <str>} (S6.7, espejo de invalid_nodes),
     # que cubre las TRES clases de fallo de arista: huérfana (referencia a nodo

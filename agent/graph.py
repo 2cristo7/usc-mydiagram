@@ -5,6 +5,7 @@ from nodes.guard import guard
 from nodes.classify import make_classify
 from nodes.extract_nodes import make_extract_nodes
 from nodes.extract_edges import make_extract_edges
+from nodes.extract_fragments import make_extract_fragments
 from nodes.synthesize import synthesize
 from nodes.validate_edges import validate_edges
 from nodes.validate_nodes import validate_nodes
@@ -36,9 +37,11 @@ def route_after_validate_edges(state: DiagramState) -> str:
     # EXTRACCIÓN para regenerar solo las aristas inválidas con feedback. Limpio →
     # synthesize (S6.8 reordenó: validate_edges va ANTES de synthesize, así no se
     # ensambla un diagrama con aristas locales aún inválidas).
+    # S10.4 — antes de ensamblar, pasamos por extract_fragments (no-op salvo en
+    # secuencia): los fragmentos necesitan los mensajes ya validados y ordenados.
     if state["validation_errors"]:
         return "extract_edges"
-    return "synthesize"
+    return "extract_fragments"
 
 def route_after_validate_schema(state: DiagramState) -> str:
     # structural_gaps no-vacío = validate_schema decidió reintentar (hay huecos y
@@ -75,6 +78,7 @@ def initial_generation_state(prompt: str, diagram_type=None, llm_runtime=None) -
         "title": None,
         "nodes": [],
         "edges": [],
+        "fragments": [],
         "invalid_edges": [],
         "invalid_nodes": [],
         "diagram": None,
@@ -106,6 +110,8 @@ def build_graph(queue: asyncio.Queue | None = None):
     builder.add_edge("extract_edges", "validate_edges")
     builder.add_node("validate_edges", validate_edges)
     builder.add_conditional_edges("validate_edges", route_after_validate_edges)
+    builder.add_node("extract_fragments", make_extract_fragments(queue))
+    builder.add_edge("extract_fragments", "synthesize")
     builder.add_node("synthesize", synthesize)
     builder.add_edge("synthesize", "validate_schema")
     builder.add_node("validate_schema", validate_schema)

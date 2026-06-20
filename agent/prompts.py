@@ -97,6 +97,39 @@ Ejemplo:
  {"id": "e2", "source": "servicio_auth", "target": "base_datos", "label": "buscar usuario", "edge_type": "sequence"}]"""
 
 
+# Extracción de FRAGMENTOS combinados (S10.4) — tercera pasada, solo secuencia.
+# Header propio: el formato de salida es un array de fragmentos, no de nodos/aristas.
+_FRAGMENT_HEADER = """Estás identificando los FRAGMENTOS COMBINADOS (estructuras de control UML) de un diagrama de secuencia ya construido.
+Un fragmento agrupa un conjunto de mensajes consecutivos bajo una semántica de control de flujo. Tipos (kind):
+- "alt": alternativas mutuamente excluyentes (if / else if / else). SIEMPRE 2 o más operandos, uno por rama.
+- "opt": un bloque que ocurre solo si se cumple una condición (if simple). UN operando.
+- "loop": un bloque que se repite. UN operando; la guarda es la condición o el contador ("[mientras haya items]", "[3 veces]").
+- "par": regiones que ocurren en paralelo. UN operando por región concurrente.
+
+Devuelve ÚNICAMENTE un array JSON, sin texto adicional, sin markdown, sin bloques de código.
+Si la interacción NO tiene ninguna condición, bucle ni alternativa, devuelve un array vacío [].
+Cada fragmento DEBE tener exactamente esta forma:
+{"id": "f1", "kind": "<alt|opt|loop|par>", "operands": [{"guard": "[condición]", "message_ids": ["e2","e3"], "child_fragment_ids": []}]}
+Reglas:
+- "id": corto y único ("f1", "f2", ...).
+- "message_ids": SOLO ids de mensaje (arista) de la lista de más abajo, en orden. Nunca inventes ids.
+- "guard": la condición ENTRE CORCHETES. Para la rama final de un "alt" usa "[else]".
+- Anidamiento: si un fragmento va DENTRO de un operando de otro, NO repitas sus mensajes en el padre;
+  en su lugar pon el id del hijo en "child_fragment_ids" del operando que lo contiene.
+- Un mensaje pertenece a UN solo operando. No solapes operandos.
+"""
+
+_SEQUENCE_FRAGMENT_PROMPT = """Ejemplo. Para los mensajes:
+e1: usuario -> servicio_auth "login(usuario, clave)"
+e2: servicio_auth -> base_datos "buscar usuario"
+e3: servicio_auth -> usuario "token de sesión"
+e4: servicio_auth -> usuario "credenciales inválidas"
+La interacción dice "si el usuario existe, devuelve el token; si no, error". Eso es un alt de dos ramas:
+[{"id": "f1", "kind": "alt", "operands": [
+  {"guard": "[usuario válido]", "message_ids": ["e3"], "child_fragment_ids": []},
+  {"guard": "[else]", "message_ids": ["e4"], "child_fragment_ids": []}]}]"""
+
+
 # ---------------------------------------------------------------------------
 # Flowchart — el caso que motivó S6.6
 # ---------------------------------------------------------------------------
@@ -365,3 +398,13 @@ def get_edge_prompt(diagram_type: DiagramType, valid_ids: list[str]) -> str:
     header = _EDGE_HEADER.format(dt=diagram_type.value)
     fragment = _EDGE_PROMPTS.get(diagram_type, _FALLBACK_EDGE_PROMPT)
     return f"{header}\n{fragment}\nLos ÚNICOS ids de nodo válidos son: {valid_ids}."
+
+
+def get_fragment_prompt(message_lines: list[str]) -> str:
+    """System prompt para identificar FRAGMENTOS combinados (S10.4).
+
+    `message_lines` son los mensajes YA extraídos, en orden, con su id y semántica
+    ("e1: a -> b \"label\"") — el LLM razona sobre ellos para agruparlos. Inyectados
+    aquí (estado de runtime) como en get_edge_prompt."""
+    msgs = "\n".join(message_lines) if message_lines else "(ningún mensaje)"
+    return f"{_FRAGMENT_HEADER}\n{_SEQUENCE_FRAGMENT_PROMPT}\n\nLos mensajes del diagrama, en orden, son:\n{msgs}"
