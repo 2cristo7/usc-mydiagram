@@ -30,8 +30,10 @@ ERROR_MESSAGES: dict[str, str] = {
         "diagrama. Reformúlalo indicando qué entidades hay y cómo se relacionan."
     ),
     "empty": (
-        "No se pudo extraer ningún elemento del diagrama. Prueba a describirlo con "
-        "más detalle: qué elementos lo componen y cómo se conectan entre sí."
+        "No se pudo extraer ningún elemento del diagrama. Descríbelo de forma "
+        "directa y autocontenida —qué elementos lo componen y cómo se relacionan— "
+        "y evita pedir acciones que el agente no puede hacer (como buscar en "
+        "internet): dale tú el contexto que necesites en la propia descripción."
     ),
     "internal_error": (
         "Se produjo un error interno generando el diagrama. Vuelve a intentarlo en "

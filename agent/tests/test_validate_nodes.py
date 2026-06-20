@@ -162,3 +162,44 @@ async def test_extract_nodes_feedback_fixes_and_dedups():
     assert result["invalid_nodes"] == []
     streamed = [queue.get_nowait()["data"]["id"] for _ in range(queue.qsize())]
     assert streamed == ["bifurca"], "user ya confirmado se ignora por dedup"
+
+
+# ---------- extract_nodes: saneado del stream (JsonArrayStream) ----------
+
+@pytest.mark.asyncio
+async def test_extract_nodes_salvages_json_wrapped_in_prose_and_fence():
+    # El modelo local (qwen3) envuelve el array en una frase y una valla ```json.
+    # Antes esto abortaba a ijson («invalid char ... Lo») y el diagrama salía vacío;
+    # ahora JsonArrayStream recorta la prosa y la valla y el array se parsea igual.
+    queue = asyncio.Queue()
+    state = _base_state()
+    raw = (
+        'Claro, aquí tienes el diagrama:\n```json\n'
+        '[{"id": "user", "label": "Usuario", "node_type": "table", "attributes": []}]\n'
+        '```\nEspero que te sirva.'
+    )
+
+    with patch("nodes.extract_nodes.stream_llm", return_value=_fake_stream(raw)):
+        result = await make_extract_nodes(queue)(state)
+
+    assert [n.id for n in result["nodes"]] == ["user"], "el array se recupera pese a la prosa"
+    assert result["invalid_nodes"] == []
+    streamed = [queue.get_nowait()["data"]["id"] for _ in range(queue.qsize())]
+    assert streamed == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_extract_nodes_pure_refusal_yields_empty_without_crash():
+    # El modelo responde solo prosa (rechazo: "Lo siento, no puedo buscar en
+    # internet..."). No hay ningún '[' → 0 nodos, sin excepción. classify_outcome
+    # lo cerrará como `empty`; aquí basta comprobar que degrada limpio.
+    queue = asyncio.Queue()
+    state = _base_state()
+    raw = "Lo siento, no puedo buscar en internet para obtener contexto sobre OSIX."
+
+    with patch("nodes.extract_nodes.stream_llm", return_value=_fake_stream(raw)):
+        result = await make_extract_nodes(queue)(state)
+
+    assert result["nodes"] == []
+    assert result["invalid_nodes"] == []
+    assert queue.empty(), "nada que streamear si no hubo JSON"

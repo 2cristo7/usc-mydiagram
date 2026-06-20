@@ -1,7 +1,7 @@
 import asyncio
 import ijson
 from state import DiagramState
-from llm import stream_llm, LLMError
+from llm import stream_llm, LLMError, JsonArrayStream
 from schemas import DiagramType, Fragment, validate_fragment
 from prompts import get_fragment_prompt
 
@@ -32,6 +32,8 @@ def make_extract_fragments(queue: asyncio.Queue | None = None):
         kwargs = {"runtime": runtime} if runtime is not None else {}
         raw_stream = stream_llm(system=system, user=state["prompt"], tier="capable",
                                 max_tokens=2048, **kwargs)
+        # Saneado: descarta prosa/```json alrededor del array (gemelo de extract_nodes).
+        json_stream = JsonArrayStream(raw_stream)
 
         events = ijson.sendable_list()
         coro = ijson.items_coro(events, "item")
@@ -42,7 +44,7 @@ def make_extract_fragments(queue: asyncio.Queue | None = None):
                 raw_frags.append(events.pop(0))
 
         try:
-            async for chunk in raw_stream:
+            async for chunk in json_stream:
                 coro.send(chunk.encode())
                 await drain()
             coro.close()

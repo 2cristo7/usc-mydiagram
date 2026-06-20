@@ -1,7 +1,7 @@
 import asyncio
 import ijson
 from state import DiagramState
-from llm import stream_llm, LLMError
+from llm import stream_llm, LLMError, JsonArrayStream
 from schemas import DiagramNode, NodeType, ALLOWED_NODE_TYPES, node_type_allowed
 from prompts import get_node_prompt
 
@@ -61,6 +61,9 @@ Cada elemento DEBE tener exactamente esta forma:
         kwargs = {"runtime": runtime} if runtime is not None else {}
         raw_stream = stream_llm(system=system, user=prompt, tier="capable", max_tokens=2048,
                                 **kwargs)
+        # Saneado: el modelo puede envolver el array en prosa o ```json; sin esto un
+        # solo carácter no-JSON al principio aborta a ijson y el diagrama sale vacío.
+        json_stream = JsonArrayStream(raw_stream)
 
         events = ijson.sendable_list()
         coro = ijson.items_coro(events, "item")
@@ -97,7 +100,7 @@ Cada elemento DEBE tener exactamente esta forma:
                     await queue.put({"_type": "node", "data": node.model_dump()})
 
         try:
-            async for chunk in raw_stream:
+            async for chunk in json_stream:
                 coro.send(chunk.encode())
                 await drain()
             coro.close()
@@ -106,6 +109,13 @@ Cada elemento DEBE tener exactamente esta forma:
             raise
         except Exception as e:
             print(f"[extract_nodes] ijson parse error: {e}")
+
+        # El modelo no devolvió ningún array JSON (rechazo o prosa pura). No es un
+        # fallo del proveedor (no levantamos LLMError, que mandaría al usuario a la
+        # config): se deja pasar con 0 nodos. Si tampoco hay nodos de pasadas
+        # previas, classify_outcome lo cierra como `empty` con su mensaje accionable.
+        if not json_stream.found and not nodes:
+            print("[extract_nodes] el modelo no devolvió JSON (posible rechazo); 0 nodos")
 
         return {"nodes": nodes, "invalid_nodes": invalid}
 

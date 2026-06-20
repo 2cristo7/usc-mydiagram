@@ -1,7 +1,7 @@
 import asyncio
 import ijson
 from state import DiagramState
-from llm import stream_llm, LLMError
+from llm import stream_llm, LLMError, JsonArrayStream
 from schemas import EdgeType, DiagramEdge, ALLOWED_EDGE_TYPES, edge_type_allowed
 from prompts import get_edge_prompt
 
@@ -14,6 +14,13 @@ def make_extract_edges(queue: asyncio.Queue | None = None):
         nodes = state["nodes"]
         node_ids = {n.id for n in nodes}
         valid_ids = [n.id for n in nodes]
+
+        # Sin nodos no puede existir ninguna arista válida (toda referencia sería
+        # huérfana): cortocircuito para no gastar una llamada al LLM en un diagrama
+        # ya inviable. Pasa, p. ej., cuando extract_nodes recibió prosa/rechazo y
+        # devolvió 0 nodos; classify_outcome lo cerrará como `empty`.
+        if not nodes:
+            return {"edges": [], "invalid_edges": []}
 
         # El MODO se detecta por CONTENIDO del estado, no por contador (S6.8): el
         # contador es presupuesto, no señal de modo. Prioridad rellenar > corregir
@@ -69,6 +76,8 @@ Cada elemento DEBE tener exactamente esta forma:
         kwargs = {"runtime": runtime} if runtime is not None else {}
         raw_stream = stream_llm(system=system, user=prompt, tier="capable", max_tokens=2048,
                                 **kwargs)
+        # Saneado: descarta prosa/```json alrededor del array (gemelo de extract_nodes).
+        json_stream = JsonArrayStream(raw_stream)
 
         events = ijson.sendable_list()
         coro = ijson.items_coro(events, "item")
@@ -112,7 +121,7 @@ Cada elemento DEBE tener exactamente esta forma:
                     await queue.put({"_type": "edge", "data": edge.model_dump()})
 
         try:
-            async for chunk in raw_stream:
+            async for chunk in json_stream:
                 coro.send(chunk.encode())
                 await drain()
             coro.close()
