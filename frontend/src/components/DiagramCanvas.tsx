@@ -55,6 +55,7 @@ import { ArchitectureNode } from './nodes/ArchitectureNode'
 import { ArchIconNode } from './nodes/ArchIconNode'
 import { ArchitectureGroupNode } from './nodes/ArchitectureGroupNode'
 import { SequenceActorNode } from './nodes/SequenceActorNode'
+import { SequenceFragmentNode } from './nodes/SequenceFragmentNode'
 import { FlowNode } from './nodes/FlowNode'
 import { TableNode } from './nodes/TableNode'
 import { MindmapNode } from './nodes/MindmapNode'
@@ -66,7 +67,6 @@ import { UseCaseSystemNode } from './nodes/UseCaseSystemNode'
 import { SequenceMessageEdge, EditableEdge, EdgeMarkers } from './edges'
 import { makeConnectionLine } from './edges/ConnectionLine'
 import { predictEdgeDefaults } from '../ui/utils/edgeDefaults'
-import { architectureLayoutElk, architectureLayoutSync } from '../ui/utils/architectureLayout'
 import { EdgeContextMenu } from './edges/EdgeContextMenu'
 import { NodeContextMenu } from './nodes/NodeContextMenu'
 import { persistCurrentDiagram } from '../lib/api'
@@ -82,6 +82,7 @@ const nodeTypes = {
   archIcon: ArchIconNode,
   architectureGroup: ArchitectureGroupNode,
   sequenceActor: SequenceActorNode,
+  sequenceFragment: SequenceFragmentNode,
   flow: FlowNode,
   table: TableNode,
   mindmap: MindmapNode,
@@ -126,7 +127,7 @@ const PAN_ON_DRAG: number[] = [1, 2]
 const suppressContextMenu = (e: React.MouseEvent) => e.preventDefault()
 
 export function DiagramCanvas() {
-  const { currentDiagram, addNode, updateNodePosition } = useStore()
+  const { currentDiagram, addNode, updateNodePosition, setGroupGeometry } = useStore()
   const uiState = useStore((s) => s.uiState)
   const generationPhase = useStore((s) => s.generationPhase)
   const trashedDiagram = useStore((s) => s.trashedDiagram)
@@ -136,6 +137,7 @@ export function DiagramCanvas() {
   // header: currentDiagram.diagram_type ?? preselección ?? tipo de la generación.
   const selectedDiagramType = useStore((s) => s.selectedDiagramType)
   const lastGenerationType = useStore((s) => s.lastGenerationType)
+  const streamingType = useStore((s) => s.streamingType)
   const addEdge = useStore((s) => s.addEdge)
   const canvasLocked = useUiStore((s) => s.canvasLocked)
   const gridEnabled = useUiStore((s) => s.gridEnabled)
@@ -314,6 +316,29 @@ export function DiagramCanvas() {
   )
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(derived.nodes)
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(derived.edges)
+
+  // Arrastre SOLO horizontal de los actores de secuencia: forzamos y=0 en cada
+  // cambio de posición antes de aplicarlo, de modo que el nodo se mueva en vivo
+  // pegado a la cabecera (antes solo se reajustaba al soltar). La lifeline y las
+  // activaciones, al ser hijas del actor, lo siguen solas. Solo afecta a actores:
+  // el redimensionado de fragmentos (que también emite cambios de posición) se
+  // deja intacto.
+  const handleNodesChange = useCallback<typeof onNodesChange>(
+    (changes) => {
+      if (currentDiagram?.diagram_type === 'sequence') {
+        const actorIds = new Set(
+          rfNodes.filter((n) => n.type === 'sequenceActor').map((n) => n.id),
+        )
+        changes = changes.map((c) =>
+          c.type === 'position' && c.position && actorIds.has(c.id)
+            ? { ...c, position: { ...c.position, y: 0 } }
+            : c,
+        )
+      }
+      onNodesChange(changes)
+    },
+    [onNodesChange, currentDiagram, rfNodes],
+  )
   // Re-siembra del estado local al cambiar currentDiagram. EXCLUYE arquitectura:
   // su layout lo posee el efecto ELK (gated por estructura, más abajo). Re-sembrar
   // aquí el layout síncrono provisional en cada cambio de posición reposicionaría
@@ -373,22 +398,6 @@ export function DiagramCanvas() {
     return () => clearTimeout(t)
   }, [derived, currentDiagram, navTick, setRfNodes, setRfEdges])
 
-  // Firma ESTRUCTURAL del diagrama de arquitectura (ids + tipos + grupos de nodos y
-  // conectividad de aristas), SIN posiciones. El refinamiento ELK reflota todo el
-  // layout —contenedores incluidos—, así que solo debe correr cuando cambia la
-  // estructura (carga inicial, alta/baja de nodos o aristas, regrupado), nunca al
-  // persistir una posición tras arrastrar.
-  const archStructureSig = useMemo(() => {
-    if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return null
-    const nodeSig = currentDiagram.nodes
-      .map((n) => `${n.id}~${n.node_type}~${n.attributes.filter((a) => /^group\s*:/i.test(a)).join(';')}`)
-      .join('|')
-    const edgeSig = currentDiagram.edges.map((e) => `${e.id}~${e.source}>${e.target}`).join('|')
-    return `${nodeSig}#${edgeSig}`
-  }, [currentDiagram])
-  // Última firma estructural ya pintada con el layout provisional. Distingue un
-  // cambio de estructura (re-pintar provisional) de un recálculo manual (no).
-  const lastArchSigRef = useRef<string | null>(null)
 
   // Refinamiento del ruteo con tamaños MEDIDOS. El layout inicial (DiagramToFlow)
   // calcula anclajes/waypoints con tamaños ESTIMADOS de los nodos; al renderizar, el
@@ -503,67 +512,58 @@ export function DiagramCanvas() {
     return () => clearTimeout(t)
   }, [relayoutTick])
 
-  // Layout de arquitectura: pintado síncrono provisional inmediato + refinamiento
-  // async con ELK. Gated por archStructureSig (y relayoutTick para el recálculo
-  // manual): solo corre cuando cambia la ESTRUCTURA, NO al persistir una posición
-  // tras arrastrar. Así mover un nodo no reflota ni hace "saltar" el resto del
-  // diagrama (el arrastre en vivo ya actualiza rfNodes via onNodesChange).
+  // Layout de arquitectura: rejilla síncrona determinista. `derived` ya es
+  // architectureLayoutSync(currentDiagram), función PURA de currentDiagram (incluye
+  // group_layout y node.position), así que reconciliar rfNodes desde su salida
+  // refleja TODO cambio —mover/redimensionar un contenedor, mover un hijo, undo/redo,
+  // navegar a otra versión— sin casos especiales por tipo de cambio. (Las aristas las
+  // recalcula el efecto de ruteo de más arriba desde las cajas medidas; aquí solo
+  // posicionamos nodos.) El re-sembrado genérico de más arriba excluye arquitectura
+  // a propósito: lo posee este efecto.
   useEffect(() => {
-    if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return
-    if (generationPhase === 'live') return
-
-    // Pintado provisional inmediato SOLO en cambio estructural (carga inicial, otro
-    // diagrama, alta/baja de nodos): evita un flash del diagrama anterior mientras
-    // ELK resuelve. En un recálculo manual (relayoutTick) los nodos ya están en
-    // pantalla; saltarse el provisional deja que ELK los anime directo a su posición
-    // final en un solo movimiento, sin doble salto.
-    if (archStructureSig !== lastArchSigRef.current) {
-      lastArchSigRef.current = archStructureSig
-      const provisional = architectureLayoutSync(currentDiagram)
-      setRfNodes(provisional.nodes)
-      setRfEdges(provisional.edges)
-    }
-
-    let cancelled = false
-    architectureLayoutElk(currentDiagram).then(({ nodes: elkNodes, edges: elkEdges }) => {
-      if (cancelled) return
-      setRfNodes(elkNodes)
-      setRfEdges(elkEdges)
-    })
-
-    return () => {
-      cancelled = true
-    }
-    // currentDiagram se lee dentro pero NO está en deps a propósito: el disparador
-    // es la estructura (archStructureSig) y el recálculo manual (relayoutTick).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [archStructureSig, relayoutTick, generationPhase, setRfNodes, setRfEdges])
-
-  // Cambios de posición SIN cambio estructural (undo/redo, ediciones de posición de
-  // la IA) no disparan el layout de arquitectura. Para reflejarlos, parcheamos solo
-  // la posición de los nodos en rfNodes desde currentDiagram, sin relanzar el layout
-  // (que reflotaría los contenedores). Al soltar un arrastre, currentDiagram y
-  // rfNodes ya coinciden → no-op (comparamos antes de escribir, sin bucle de render).
-  // No toca los contenedores de grupo (no viven en currentDiagram.nodes), que se
-  // quedan donde ELK los colocó.
-  useEffect(() => {
-    if (!currentDiagram || currentDiagram.diagram_type !== 'architecture') return
-    const posById = new Map(
-      currentDiagram.nodes.filter((n) => n.position).map((n) => [n.id, n.position!]),
-    )
+    if (currentDiagram?.diagram_type !== 'architecture' || generationPhase === 'live') return
     setRfNodes((prev) => {
+      const next = derived.nodes
+      // Misma ESTRUCTURA (mismos id+tipo+padre: un movimiento/redimensión/undo/
+      // edición de etiqueta, no alta/baja ni cambio de tipo): parcheamos posición,
+      // tamaño y data IN-PLACE conservando `measured` para no disparar re-medición
+      // ni parpadeo de aristas. Si cambió la estructura, re-sembramos entero.
+      const sig = (n: Node) => `${n.id}~${n.type ?? ''}~${n.parentId ?? ''}`
+      const prevSigs = new Set(prev.map(sig))
+      const sameStructure = prev.length === next.length && next.every((n) => prevSigs.has(sig(n)))
+      if (!sameStructure) return next
+
+      const byId = new Map(next.map((n) => [n.id, n]))
       let changed = false
-      const next = prev.map((n) => {
-        const p = posById.get(n.id)
-        if (p && (p.x !== n.position.x || p.y !== n.position.y)) {
-          changed = true
-          return { ...n, position: { x: p.x, y: p.y } }
+      const patched = prev.map((n) => {
+        const ln = byId.get(n.id)
+        if (!ln) return n
+        const posChanged = ln.position.x !== n.position.x || ln.position.y !== n.position.y
+        const lw = (ln.style as { width?: number } | undefined)?.width
+        const lh = (ln.style as { height?: number } | undefined)?.height
+        const nw = (n.style as { width?: number } | undefined)?.width
+        const nh = (n.style as { height?: number } | undefined)?.height
+        const sizeChanged = lw !== nw || lh !== nh
+        // data por VALOR (label + attributes): refleja renombrados/edición de la IA
+        // sin re-sembrar. La comparación por valor mantiene el no-op estable (no
+        // basta ===, derived crea data nuevo en cada cálculo).
+        const ld = ln.data as { label?: string; attributes?: string[] }
+        const nd = n.data as { label?: string; attributes?: string[] }
+        const dataChanged =
+          ld.label !== nd.label ||
+          (ld.attributes ?? []).join('') !== (nd.attributes ?? []).join('')
+        if (!posChanged && !sizeChanged && !dataChanged) return n
+        changed = true
+        return {
+          ...n,
+          position: ln.position,
+          style: ln.style ? { ...n.style, ...ln.style } : n.style,
+          data: dataChanged ? ln.data : n.data,
         }
-        return n
       })
-      return changed ? next : prev
+      return changed ? patched : prev
     })
-  }, [currentDiagram, setRfNodes])
+  }, [derived, currentDiagram, generationPhase, setRfNodes])
 
   // ── FASE LIVE ───────────────────────────────────────────────────────────────
   // Montaje en tiempo real durante la generación por streaming. liveLayout coloca los
@@ -577,7 +577,9 @@ export function DiagramCanvas() {
     // Resolver el tipo para el layout en vivo (ver arriba). Si lo conocemos y aún no
     // está en currentDiagram, se lo inyectamos para que liveLayout elija el layout real
     // (p. ej. mindmap radial) en vez del dagre genérico por defecto.
-    const liveType = currentDiagram.diagram_type ?? selectedDiagramType ?? lastGenerationType
+    // En auto, el tipo lo conocemos por el puente de streaming (diagram:type_ready)
+    // antes que por selectedDiagramType/lastGenerationType (ambos null en auto).
+    const liveType = currentDiagram.diagram_type ?? streamingType ?? selectedDiagramType ?? lastGenerationType
     const liveDiagram = liveType && !currentDiagram.diagram_type
       ? { ...currentDiagram, diagram_type: liveType }
       : currentDiagram
@@ -741,6 +743,17 @@ export function DiagramCanvas() {
     const dragged = nodes && nodes.length > 0 ? nodes : [node]
 
     dragged.forEach((n) => {
+      // Contenedor de grupo de arquitectura: su geometría NO vive en
+      // currentDiagram.nodes sino en group_layout, así que persistimos su nueva
+      // posición ahí (conservando el tamaño actual). Sin esto, mover una caja se
+      // perdía al re-sembrar y no lo capturaban ni el undo ni el autoguardado.
+      if (n.type === 'architectureGroup') {
+        const prev = currentDiagram?.group_layout?.[n.id]
+        const width = prev?.width ?? n.measured?.width ?? n.width ?? 0
+        const height = prev?.height ?? n.measured?.height ?? n.height ?? 0
+        setGroupGeometry(n.id, { x: n.position.x, y: n.position.y, width, height })
+        return
+      }
       const diagramNode = currentDiagram?.nodes.find((d) => d.id === n.id)
       if (!diagramNode) return
       const x = n.position.x
@@ -776,7 +789,7 @@ export function DiagramCanvas() {
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
