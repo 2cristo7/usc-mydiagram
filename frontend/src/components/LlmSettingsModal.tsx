@@ -124,6 +124,9 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
   // Modelos Ollama instalados (GET /api/tags) para autocompletar y evitar typos.
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [ollamaTagsError, setOllamaTagsError] = useState(false)
+  // Carga en curso de /api/tags: hasta que resuelve no sabemos si los modelos
+  // configurados existen, así que el dropdown muestra un estado de "cargando".
+  const [ollamaLoading, setOllamaLoading] = useState(false)
   const apiKeyRef = useRef<HTMLInputElement>(null)
   // S10.3b — modal de consentimiento (salta al guardar la 1ª vez) + bandera de
   // key transitoria activa para ESTE proveedor (vive en sessionStorage, no en BD)
@@ -152,6 +155,7 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
     if (!open || !isOllama(provider)) return
     const url = transport === 'direct' && baseUrl.trim() ? baseUrl.trim() : 'http://localhost:11434'
     let cancelled = false
+    setOllamaLoading(true)
     fetch(`${url.replace(/\/$/, '')}/api/tags`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((data) => {
@@ -167,8 +171,35 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
         setOllamaModels([])
         setOllamaTagsError(true)
       })
+      .finally(() => {
+        if (!cancelled) setOllamaLoading(false)
+      })
     return () => { cancelled = true }
   }, [open, provider, transport, baseUrl])
+
+  // Reconciliación Ollama: en cuanto llega la lista de modelos instalados, sacamos
+  // del cajón "Otro…" lo que sí esté instalado y selecciónalo en el dropdown. Si un
+  // slot no tenía nada que casar (texto libre vacío), lo apuntamos al primer modelo
+  // detectado en vez de dejar "Otro…" preseleccionado.
+  useEffect(() => {
+    if (!isOllama(provider) || ollamaModels.length === 0) return
+    if (fastSel === CUSTOM) {
+      if (fastCustom && ollamaModels.includes(fastCustom)) {
+        setFastSel(fastCustom)
+        setFastCustom('')
+      } else if (!fastCustom) {
+        setFastSel(ollamaModels[0])
+      }
+    }
+    if (capableSel === CUSTOM) {
+      if (capableCustom && ollamaModels.includes(capableCustom)) {
+        setCapableSel(capableCustom)
+        setCapableCustom('')
+      } else if (!capableCustom) {
+        setCapableSel(ollamaModels[0])
+      }
+    }
+  }, [ollamaModels, provider, fastSel, capableSel, fastCustom, capableCustom])
 
   // Populate form from loaded config
   useEffect(() => {
@@ -545,7 +576,12 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
 
         {/* Aviso de modelos Ollama detectados */}
         {isOllama(provider) && (
-          ollamaModels.length > 0 ? (
+          ollamaLoading && ollamaModels.length === 0 ? (
+            <p className="text-xs opacity-60 text-[var(--color-ink)] -mb-2 flex items-center gap-1.5">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-[var(--color-ink)] border-t-transparent" />
+              Detectando modelos instalados…
+            </p>
+          ) : ollamaModels.length > 0 ? (
             <p className="text-xs opacity-60 text-[var(--color-ink)] -mb-2">
               {ollamaModels.length} modelo{ollamaModels.length > 1 ? 's' : ''} instalado{ollamaModels.length > 1 ? 's' : ''} detectado{ollamaModels.length > 1 ? 's' : ''} · elígelo en la lista.
             </p>
