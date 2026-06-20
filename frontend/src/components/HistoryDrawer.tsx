@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LogIn, SearchX, Inbox, Trash2 } from 'lucide-react'
+import { LogIn, SearchX, Inbox, Trash2, Plus } from 'lucide-react'
 import { Drawer, Badge, Spinner, EmptyState } from '../ui/primitives'
 import { useUiStore } from '../store/ui'
 import { useAuthStore } from '../store/auth'
@@ -116,6 +116,15 @@ export function HistoryDrawer() {
   const filteredTrash = trashItems.filter((item) =>
     item.title.toLowerCase().includes(trashSearch.toLowerCase()),
   )
+
+  // Arranca un diagrama nuevo en blanco desde el historial: limpia el workspace
+  // vivo (canvas + chat), resetea el diario undo/redo y cierra el cajón para dejar
+  // el lienzo a la vista. No toca la BD; el próximo prompt genera desde cero.
+  function handleNewDiagram() {
+    newDiagram()
+    useHistoryStore.getState().reset()
+    setDrawerOpen(false)
+  }
 
   async function loadDiagram(id: string) {
     if (loadingId) return
@@ -340,14 +349,22 @@ export function HistoryDrawer() {
           </>
         ) : (
           <>
-            <div className="px-4 py-3 border-b-[3px] border-[var(--color-ink)]">
+            <div className="flex items-stretch gap-2 px-4 py-3 border-b-[3px] border-[var(--color-ink)]">
               <input
                 type="search"
                 placeholder="Buscar por título..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="block w-full border-[3px] border-[var(--color-ink)] p-2 text-sm bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] text-[var(--color-ink)]"
+                className="block min-w-0 flex-1 border-[3px] border-[var(--color-ink)] p-2 text-sm bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] text-[var(--color-ink)]"
               />
+              <button
+                onClick={handleNewDiagram}
+                aria-label="Nuevo diagrama"
+                title="Nuevo diagrama"
+                className="flex aspect-square shrink-0 items-center justify-center border-[3px] border-[var(--color-ink)] text-[var(--color-ink)] bg-[var(--color-accent)] hover:brightness-95 active:translate-y-px"
+              >
+                <Plus size={18} strokeWidth={3} />
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto scrollbar-brutal">
               {loading && (
