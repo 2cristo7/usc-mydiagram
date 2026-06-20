@@ -5,7 +5,7 @@ vi.mock('../ui/utils/sequenceLayout', () => ({
   sequenceLayout: vi.fn(() => ({ nodes: [], edges: [] })),
 }))
 import type { DiagramSchema, DiagramType, NodeType, EdgeType } from '../types'
-import { parseGroups, architectureLayoutSync, architectureLayoutElk } from '../ui/utils/architectureLayout'
+import { parseGroups, architectureLayoutSync } from '../ui/utils/architectureLayout'
 import { DiagramToFlow } from '../ui/utils/diagramToFlow'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -212,6 +212,52 @@ describe('architectureLayoutSync', () => {
   })
 })
 
+// ── Rejilla de grupos ─────────────────────────────────────────────────────────
+
+describe('architectureLayoutSync — grupos en rejilla', () => {
+  // Diagrama con 4 grupos SIN aristas entre ellos: el caso que antes producía una
+  // columna vertical. Con la rejilla (cols = ⌈√4⌉ = 2) deben quedar en 2×2.
+  const FOUR_GROUPS: DiagramSchema = {
+    title: 'Cuatro grupos', diagram_type: 'architecture',
+    nodes: [
+      mkNode('a', 'A', 'service', ['group: Datos']),
+      mkNode('b', 'B', 'person', ['group: Externos']),
+      mkNode('c', 'C', 'container', ['group: Frontend']),
+      mkNode('d', 'D', 'service', ['group: Backend']),
+    ],
+    edges: [],
+  }
+
+  test('sin aristas entre grupos, los contenedores se reparten en varias columnas y filas', () => {
+    const { nodes } = architectureLayoutSync(FOUR_GROUPS)
+    const containers = nodes.filter((n) => n.type === 'architectureGroup')
+    expect(containers.length).toBe(4)
+    const xs = new Set(containers.map((c) => Math.round(c.position.x)))
+    const ys = new Set(containers.map((c) => Math.round(c.position.y)))
+    // 4 grupos → rejilla 2×2: NO todos en la misma columna (el bug original) ni fila.
+    expect(xs.size).toBeGreaterThan(1)
+    expect(ys.size).toBeGreaterThan(1)
+  })
+
+  test('los contenedores de la rejilla no se solapan entre sí', () => {
+    const { nodes } = architectureLayoutSync(FOUR_GROUPS)
+    const boxes = nodes
+      .filter((n) => n.type === 'architectureGroup')
+      .map((n) => {
+        const s = n.style as { width: number; height: number }
+        return { x: n.position.x, y: n.position.y, w: s.width, h: s.height }
+      })
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j]
+        const overlap =
+          a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+        expect(overlap).toBe(false)
+      }
+    }
+  })
+})
+
 // ── DiagramToFlow bifurcación ─────────────────────────────────────────────────
 
 describe('DiagramToFlow bifurca a architectureLayoutSync para architecture', () => {
@@ -240,33 +286,11 @@ describe('DiagramToFlow bifurca a architectureLayoutSync para architecture', () 
   })
 })
 
-// ── architectureLayoutElk ─────────────────────────────────────────────────────
+// ── contenedores de grupo: geometría válida ───────────────────────────────────
 
-describe('architectureLayoutElk', () => {
-  test('resuelve correctamente y devuelve nodos con posiciones válidas', async () => {
-    const { nodes, edges } = await architectureLayoutElk(DIAGRAM_3G)
-    // Nodos del diagrama + contenedores de grupo
-    expect(nodes.length).toBeGreaterThanOrEqual(DIAGRAM_3G.nodes.length)
-    // Todos los nodos tienen posiciones válidas
-    for (const n of nodes) {
-      expect(typeof n.position.x).toBe('number')
-      expect(isNaN(n.position.x)).toBe(false)
-      expect(typeof n.position.y).toBe('number')
-      expect(isNaN(n.position.y)).toBe(false)
-    }
-    // Las aristas se preservan
-    expect(edges.length).toBe(DIAGRAM_3G.edges.length)
-  })
-
-  test('los nodos hijo tienen parentId apuntando al contenedor del grupo', async () => {
-    const { nodes } = await architectureLayoutElk(DIAGRAM_3G)
-    const authNode = nodes.find((n) => n.id === 'auth')
-    expect(authNode?.parentId).toBeTruthy()
-    expect(authNode?.extent).toBe('parent')
-  })
-
-  test('los contenedores de grupo tienen style con width y height', async () => {
-    const { nodes } = await architectureLayoutElk(DIAGRAM_3G)
+describe('architectureLayoutSync — contenedores de grupo', () => {
+  test('los contenedores de grupo tienen style con width y height', () => {
+    const { nodes } = architectureLayoutSync(DIAGRAM_3G)
     const containers = nodes.filter((n) => n.type === 'architectureGroup')
     expect(containers.length).toBe(3)
     for (const c of containers) {
@@ -276,11 +300,11 @@ describe('architectureLayoutElk', () => {
     }
   })
 
-  test('grafo vacío devuelve layout síncrono (sin errores)', async () => {
+  test('grafo vacío devuelve layout sin nodos ni aristas (sin errores)', () => {
     const empty: DiagramSchema = {
       title: 'vacío', diagram_type: 'architecture', nodes: [], edges: [],
     }
-    const result = await architectureLayoutElk(empty)
+    const result = architectureLayoutSync(empty)
     expect(result.nodes).toHaveLength(0)
     expect(result.edges).toHaveLength(0)
   })
