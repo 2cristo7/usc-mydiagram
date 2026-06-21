@@ -1,7 +1,7 @@
 /**
  * e2e/export-png.spec.ts
  *
- * Tests de exportación PNG para los 7 tipos de diagrama.
+ * Tests de exportación PNG para los 8 tipos de diagrama.
  * Requiere el dev server de Vite en localhost:5173 (playwright.config.ts lo
  * levanta automáticamente con webServer si no está ya en marcha).
  *
@@ -129,6 +129,27 @@ const DIAGRAMS = {
             { id: 'e4', source: 'root', target: 'db', label: '', edge_type: 'association' },
         ],
     },
+    use_case: {
+        title: 'Use Case E2E Test',
+        diagram_type: 'use_case',
+        nodes: [
+            { id: 'sys', label: 'MydIAgram', node_type: 'system', attributes: [] },
+            { id: 'usr', label: 'Usuario', node_type: 'actor', attributes: [] },
+            { id: 'uc1', label: 'Generar diagrama desde lenguaje natural', node_type: 'use_case', attributes: [] },
+            { id: 'uc2', label: 'Refinar diagrama por conversación', node_type: 'use_case', attributes: [] },
+            { id: 'uc3', label: 'Editar el diagrama en el lienzo', node_type: 'use_case', attributes: [] },
+            { id: 'uc4', label: 'Guardar y consultar el historial de diagramas', node_type: 'use_case', attributes: [] },
+            { id: 'uc5', label: 'Configurar el proveedor de modelo de lenguaje', node_type: 'use_case', attributes: [] },
+        ],
+        edges: [
+            { id: 'e1', source: 'usr', target: 'uc1', label: '', edge_type: 'association' },
+            { id: 'e2', source: 'usr', target: 'uc2', label: '', edge_type: 'association' },
+            { id: 'e3', source: 'usr', target: 'uc3', label: '', edge_type: 'association' },
+            { id: 'e4', source: 'usr', target: 'uc4', label: '', edge_type: 'association' },
+            { id: 'e5', source: 'usr', target: 'uc5', label: '', edge_type: 'association' },
+            { id: 'e6', source: 'uc2', target: 'uc1', label: 'include', edge_type: 'include' },
+        ],
+    },
 } as const;
 
 // ── Cabecera PNG ──────────────────────────────────────────────────────────────
@@ -212,7 +233,7 @@ async function verifyPng(
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-test.describe('Export PNG — los 7 tipos de diagrama', () => {
+test.describe('Export PNG — los 8 tipos de diagrama', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto('/');
         // En estado idle la app NO renderiza ReactFlow (sin diagrama). Esperamos
@@ -290,6 +311,152 @@ test.describe('Export PNG — validaciones específicas por tipo', () => {
         // Dagre coloca 3 tablas de un ERD en disposición horizontal
         // El ancho debería ser mayor que el alto
         expect(width, `erd PNG width (${width}) debería ser > height (${height})`).toBeGreaterThan(height * 0.5);
+    });
+
+    // ── El cuadrado del sistema (subsystem) entra ENTERO en el PNG ───────────
+    // Un diagrama de casos de uso encierra los óvalos en una caja «system». Esa
+    // caja es un nodo (useCaseSystem) con dimensiones explícitas; si el encuadre
+    // del export no contara su offsetWidth/Height, la caja saldría recortada (era
+    // el bug: solo se veían los bordes laterales, el superior/inferior fuera del
+    // marco). Aquí se reproduce el rectángulo real de cada nodo en el DOM —igual
+    // que getRenderedNodeBounds— y se exige que la caja quede DENTRO de la unión
+    // (el encuadre del PNG, que además añade padding). Cubre el 8º tipo, el único
+    // que faltaba en la suite de export.
+    test('use_case — el cuadrado del sistema entra entero en el encuadre', async ({ page }) => {
+        await injectDiagram(page, DIAGRAMS.use_case);
+
+        const { sys, bounds } = await page.evaluate(() => {
+            const vp = document.querySelector('.react-flow__viewport') as HTMLElement;
+            const FLOAT = String.raw`[-+]?[\d.]+(?:e[-+]?\d+)?`;
+            const RE = new RegExp(`translate(?:3d)?\\(\\s*(${FLOAT})px,\\s*(${FLOAT})px`, 'i');
+            const rects = Array.from(vp.querySelectorAll<HTMLElement>('.react-flow__node')).map((el) => {
+                const m = RE.exec(el.style.transform);
+                return {
+                    type: (el.className.match(/react-flow__node-(\S+)/) || [])[1],
+                    x: m ? parseFloat(m[1]) : null,
+                    y: m ? parseFloat(m[2]) : null,
+                    w: el.offsetWidth,
+                    h: el.offsetHeight,
+                };
+            });
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const r of rects) {
+                if (r.x == null || r.y == null) continue;
+                minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
+                maxX = Math.max(maxX, r.x + r.w); maxY = Math.max(maxY, r.y + r.h);
+            }
+            const s = rects.find((r) => r.type === 'useCaseSystem') ?? null;
+            return { sys: s, bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY } };
+        });
+
+        console.log(`[e2e] use_case system rect:`, JSON.stringify(sys));
+        console.log(`[e2e] use_case node bounds:`, JSON.stringify(bounds));
+
+        // 1. La caja del sistema existe y tiene tamaño real (no colapsada a 0).
+        expect(sys, 'no se renderizó el nodo useCaseSystem').not.toBeNull();
+        expect(sys!.w, 'la caja del sistema tiene ancho 0 (colapsada)').toBeGreaterThan(100);
+        expect(sys!.h, 'la caja del sistema tiene alto 0 (colapsada)').toBeGreaterThan(100);
+
+        // 2. La caja entra ENTERA en el encuadre (los 4 lados), con tolerancia 1px.
+        const tol = 1;
+        expect(sys!.x, 'borde izquierdo de la caja recortado').toBeGreaterThanOrEqual(bounds.x - tol);
+        expect(sys!.y, 'borde superior de la caja recortado').toBeGreaterThanOrEqual(bounds.y - tol);
+        expect(sys!.x + sys!.w, 'borde derecho de la caja recortado').toBeLessThanOrEqual(bounds.x + bounds.width + tol);
+        expect(sys!.y + sys!.h, 'borde inferior de la caja recortado').toBeLessThanOrEqual(bounds.y + bounds.height + tol);
+
+        // 3. Y el PNG se genera bien.
+        const download = await triggerPngExport(page);
+        const { size } = await verifyPng(download, 'use_case');
+        console.log(`[e2e] use_case PNG OK (${size} bytes)`);
+    });
+
+    // ── La etiqueta de un self-message entra ENTERA en el PNG ────────────────
+    // Un self-message de secuencia (origen = destino) se dibuja como un bucle a la
+    // DERECHA de la lifeline, y su etiqueta se coloca aún más a la derecha, fuera
+    // de la caja del actor. Las etiquetas no son ni `.react-flow__node` ni
+    // `.react-flow__edge path`, así que sin `getRenderedLabelBounds` el encuadre no
+    // las contaba y el texto salía recortado por el borde derecho. Aquí se
+    // reproduce el encuadre real del export (nodos ∪ aristas ∪ etiquetas) y se
+    // exige que la caja de la etiqueta del self-message quede DENTRO.
+    test('sequence — la etiqueta de un self-message no se recorta', async ({ page }) => {
+        const selfMsg = {
+            title: 'Self-message E2E',
+            diagram_type: 'sequence' as const,
+            nodes: [
+                { id: 'a', label: 'Cliente', node_type: 'actor', attributes: [] as string[] },
+                { id: 'b', label: 'Servicio', node_type: 'actor', attributes: [] as string[] },
+            ],
+            edges: [
+                { id: 'e1', source: 'a', target: 'b', label: 'peticion', edge_type: 'sequence' },
+                { id: 'e2', source: 'b', target: 'b', label: 'validar credenciales internamente', edge_type: 'sequence' },
+                { id: 'e3', source: 'b', target: 'a', label: 'respuesta', edge_type: 'sequence' },
+            ],
+        };
+        await injectDiagram(page, selfMsg as unknown as (typeof DIAGRAMS)[keyof typeof DIAGRAMS]);
+
+        const { frame, selfLabel, nodeMaxX, labelMaxX } = await page.evaluate(() => {
+            const vp = document.querySelector('.react-flow__viewport') as HTMLElement;
+            const FLOAT = String.raw`[-+]?[\d.]+(?:e[-+]?\d+)?`;
+            const RE = new RegExp(`translate(?:3d)?\\(\\s*(${FLOAT})px,\\s*(${FLOAT})px`, 'i');
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            let nodeMaxX = -Infinity;
+            // Nodos (igual que getRenderedNodeBounds).
+            vp.querySelectorAll<HTMLElement>('.react-flow__node').forEach((el) => {
+                const m = RE.exec(el.style.transform); if (!m) return;
+                const x = parseFloat(m[1]), y = parseFloat(m[2]);
+                minX = Math.min(minX, x); minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x + el.offsetWidth); maxY = Math.max(maxY, y + el.offsetHeight);
+                nodeMaxX = Math.max(nodeMaxX, x + el.offsetWidth);
+            });
+            // Aristas (igual que getRenderedEdgeBounds).
+            vp.querySelectorAll<SVGPathElement>('.react-flow__edge path').forEach((p) => {
+                let b: DOMRect; try { b = p.getBBox(); } catch { return; }
+                if (b.width === 0 && b.height === 0) return;
+                minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+                maxX = Math.max(maxX, b.x + b.width); maxY = Math.max(maxY, b.y + b.height);
+            });
+            // Etiquetas (igual que getRenderedLabelBounds).
+            let selfLabel: { x: number; y: number; w: number; h: number; text: string } | null = null;
+            let labelMaxX = -Infinity;
+            vp.querySelectorAll<HTMLElement>('.react-flow__edgelabel-renderer > *').forEach((el) => {
+                const mtx = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+                const w = el.offsetWidth, h = el.offsetHeight;
+                if (w === 0 && h === 0) return;
+                minX = Math.min(minX, mtx.e); minY = Math.min(minY, mtx.f);
+                maxX = Math.max(maxX, mtx.e + w); maxY = Math.max(maxY, mtx.f + h);
+                labelMaxX = Math.max(labelMaxX, mtx.e + w);
+                const text = el.textContent ?? '';
+                if (text.includes('validar')) selfLabel = { x: mtx.e, y: mtx.f, w, h, text };
+            });
+            return {
+                frame: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+                selfLabel, nodeMaxX, labelMaxX,
+            };
+        });
+
+        console.log(`[e2e] self-message frame:`, JSON.stringify(frame));
+        console.log(`[e2e] self-message label:`, JSON.stringify(selfLabel));
+
+        // 0. El fixture ejercita de verdad el hueco: la etiqueta del self-message
+        //    sobresale a la derecha del rectángulo de los nodos. Si no, el test no
+        //    probaría nada (regresión de la regresión).
+        expect(labelMaxX, 'la etiqueta del self-message debería sobresalir de los nodos').toBeGreaterThan(nodeMaxX);
+
+        // 1. La etiqueta existe y tiene tamaño real.
+        expect(selfLabel, 'no se encontró la etiqueta del self-message').not.toBeNull();
+
+        // 2. La etiqueta entra ENTERA en el encuadre (los 4 lados), con tolerancia 1px.
+        const s = selfLabel as unknown as { x: number; y: number; w: number; h: number };
+        const tol = 1;
+        expect(s.x, 'borde izquierdo de la etiqueta recortado').toBeGreaterThanOrEqual(frame.x - tol);
+        expect(s.y, 'borde superior de la etiqueta recortado').toBeGreaterThanOrEqual(frame.y - tol);
+        expect(s.x + s.w, 'borde derecho de la etiqueta recortado').toBeLessThanOrEqual(frame.x + frame.width + tol);
+        expect(s.y + s.h, 'borde inferior de la etiqueta recortado').toBeLessThanOrEqual(frame.y + frame.height + tol);
+
+        // 3. Y el PNG se genera bien.
+        const download = await triggerPngExport(page);
+        const { size } = await verifyPng(download, 'sequence-selfmsg');
+        console.log(`[e2e] self-message PNG OK (${size} bytes)`);
     });
 
     // ── Excepción para diagramas enormes ─────────────────────────────────────

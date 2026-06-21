@@ -9,6 +9,7 @@ import {
   triggerTextDownload,
   getRenderedNodeBounds,
   getRenderedEdgeBounds,
+  getRenderedLabelBounds,
   getRenderedEdges,
   drawArrowMarker,
   unionRects,
@@ -52,17 +53,25 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
   async function handleExportPng() {
     if (exporting) return
     const viewportEl = document.querySelector<HTMLElement>('.react-flow__viewport')
-    if (!viewportEl) return
+    if (!viewportEl) {
+      toast.error('No hay nada que exportar.')
+      return
+    }
     setExporting(true)
-    // Encuadre del diagrama ENTERO: unión de los bounds de los nodos y de las
-    // aristas (estas se curvan o se enrutan a los handles laterales, fuera del
-    // rectángulo de los nodos; sin ellas el PNG recorta esas líneas — p. ej. las
-    // relaciones de un ERD con tablas apiladas en vertical).
+    // Encuadre del diagrama ENTERO: unión de los bounds de los nodos, de las
+    // aristas y de las ETIQUETAS de arista. Las aristas se curvan o se enrutan a
+    // los handles laterales, fuera del rectángulo de los nodos (sin ellas el PNG
+    // recorta esas líneas — p. ej. las relaciones de un ERD con tablas apiladas en
+    // vertical). Las etiquetas no son ni nodos ni paths, y algunas caen fuera de
+    // las cajas: el texto de un self-message de secuencia se dibuja a la derecha de
+    // la lifeline, más allá del actor, y sin esto sale recortado.
     const bounds = unionRects(
-      getRenderedNodeBounds(viewportEl),
-      getRenderedEdgeBounds(viewportEl),
+      unionRects(getRenderedNodeBounds(viewportEl), getRenderedEdgeBounds(viewportEl)),
+      getRenderedLabelBounds(viewportEl),
     )
     if (!bounds) {
+      // Diagrama sin nodos ni aristas renderizados: no hay rectángulo que capturar.
+      toast.error('No hay nada que exportar.')
       setExporting(false)
       return
     }
@@ -131,15 +140,22 @@ export function ExportMenu({ onRegenerate }: ExportMenuProps) {
 
   // Exporta el diagrama actual a un formato de TEXTO del registry (native .mdia,
   // Mermaid, draw.io, Excalidraw). El PNG NO pasa por aquí: es binario/canvas.
+  // Envuelto en try/catch (igual que handleExportPng): si un serializador lanza
+  // con un diagrama atípico, el fallo no debe ser silencioso.
   function handleExportText(fmtId: string) {
     if (!currentDiagram) return
     const fmt = exportFormats().find((f) => f.id === fmtId)
     if (!fmt || !fmt.toContent) return
-    triggerTextDownload(
-      fmt.toContent(currentDiagram),
-      diagramFilename(currentDiagram.title, fmt.extension),
-      fmt.id === 'native' ? 'application/json' : 'text/plain',
-    )
+    try {
+      triggerTextDownload(
+        fmt.toContent(currentDiagram),
+        diagramFilename(currentDiagram.title, fmt.extension),
+        fmt.id === 'native' ? 'application/json' : 'text/plain',
+      )
+    } catch (err) {
+      console.error(`[export] fallo al exportar ${fmt.label}:`, err)
+      toast.error(`No se pudo exportar a ${fmt.label}.`)
+    }
   }
 
   // Items del menú: PNG (binario, fijo) + un item por cada formato de texto

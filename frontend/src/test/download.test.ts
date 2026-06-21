@@ -133,6 +133,27 @@ describe('getRenderedNodeBounds', () => {
         expect(b.x).toBe(-330);
     });
 
+    test('parsea translate de un solo argumento (forma de Firefox para y=0)', () => {
+        // Firefox serializa `translate(240px, 0px)` como `translate(240px)` al leer
+        // `style.transform` inline (CSS permite omitir la Y cuando es 0). El regex
+        // debe tratar la Y como 0; si exigiera la coma, el nodo quedaría fuera de
+        // los bounds. Era la causa del recorte de cabeceras de secuencia (y=0) SOLO
+        // en Firefox: Chromium/WebKit conservan el `, 0px` y no se reproducía.
+        const vp = document.createElement('div');
+        const actor = makeNode(0, 0, 160, 42);
+        actor.style.transform = 'translate(0px)'; // 1er actor de secuencia, y=0
+        const actor2 = makeNode(0, 0, 160, 42);
+        actor2.style.transform = 'translate(240px)'; // 2º actor, y=0
+        vp.appendChild(actor);
+        vp.appendChild(actor2);
+        // Una lifeline en y=80 (sí lleva las dos coordenadas porque y≠0).
+        vp.appendChild(makeNode(72, 80, 16, 400));
+        // minY debe ser 0 (los actores entran), no 80 (lifeline).
+        const b = getRenderedNodeBounds(vp)!;
+        expect(b.y).toBe(0);
+        expect(b).toEqual({ x: 0, y: 0, width: 400, height: 480 });
+    });
+
     test('devuelve null si no hay nodos', () => {
         expect(getRenderedNodeBounds(document.createElement('div'))).toBeNull();
     });

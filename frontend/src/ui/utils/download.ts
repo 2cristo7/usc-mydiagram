@@ -28,14 +28,24 @@ export interface Rect {
     height: number;
 }
 
-// Captura las dos primeras coordenadas de `translate(...)` / `translate3d(...)`.
+// Captura las coordenadas de `translate(...)` / `translate3d(...)`.
 // El número admite signo, decimales y NOTACIÓN CIENTÍFICA: React Flow emite a
 // veces valores como `translate(-330px, 4.04e-14px)` (un 0 con error de coma
 // flotante). Un `[-\d.]+` ingenuo NO casa el `e-14`, falla el match entero y el
 // nodo queda fuera de los bounds → el PNG lo recorta (era el bug del nodo del
 // extremo recortado). El patrón de float completo lo evita.
+//
+// La SEGUNDA coordenada es OPCIONAL. CSS permite omitir la Y de `translate()`
+// cuando vale 0 (`translate(240px)` ≡ `translate(240px, 0)`), y **Firefox
+// serializa así el `style.transform` inline**: al fijar React Flow
+// `translate(240px, 0px)`, Gecko lo reescribe a `translate(240px)`. Chromium y
+// WebKit conservan el `, 0px`. Si el regex exigiera la coma + segundo `px`, en
+// Firefox NINGÚN nodo en `y=0` casaría: en un diagrama de SECUENCIA, donde las
+// cabeceras de actor están justo en `y=0`, todas quedaban fuera de los bounds,
+// `minY` saltaba a las lifelines (`y=80`) y el PNG recortaba las cabeceras. Con
+// la Y opcional (default 0) el encuadre vuelve a incluirlas en cualquier motor.
 const FLOAT = String.raw`[-+]?[\d.]+(?:e[-+]?\d+)?`;
-const TRANSLATE_RE = new RegExp(`translate(?:3d)?\\(\\s*(${FLOAT})px,\\s*(${FLOAT})px`, 'i');
+const TRANSLATE_RE = new RegExp(`translate(?:3d)?\\(\\s*(${FLOAT})px(?:\\s*,\\s*(${FLOAT})px)?`, 'i');
 
 /**
  * Calcula el rectángulo que envuelve TODOS los nodos a partir del DOM ya
@@ -58,7 +68,8 @@ export function getRenderedNodeBounds(viewportEl: HTMLElement): Rect | null {
         const m = TRANSLATE_RE.exec(el.style.transform);
         if (!m) return;
         const x = parseFloat(m[1]);
-        const y = parseFloat(m[2]);
+        // Y opcional: `translate(Xpx)` (forma de Firefox para y=0) ⇒ y = 0.
+        const y = m[2] !== undefined ? parseFloat(m[2]) : 0;
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x + el.offsetWidth);
@@ -117,6 +128,50 @@ export function getRenderedEdgeBounds(viewportEl: HTMLElement): Rect | null {
         minY = Math.min(minY, box.y);
         maxX = Math.max(maxX, box.x + box.width);
         maxY = Math.max(maxY, box.y + box.height);
+    });
+    if (!isFinite(minX)) return null;
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * Bounds de las ETIQUETAS de arista renderizadas (las cajas de texto que dibuja el
+ * `<EdgeLabelRenderer>` de React Flow), en coordenadas de flujo.
+ *
+ * Por qué hace falta: una etiqueta no es ni `.react-flow__node` ni
+ * `.react-flow__edge path`, así que ni `getRenderedNodeBounds` ni
+ * `getRenderedEdgeBounds` la ven. En la mayoría de diagramas cae dentro del
+ * rectángulo de los nodos, pero no siempre: la etiqueta de un self-message de
+ * secuencia se dibuja A LA DERECHA de la lifeline, fuera de la caja del actor, y
+ * el PNG la recortaba (se veía «validar… int» en vez del texto entero). Uniendo
+ * estos bounds, el encuadre cubre también las etiquetas en cualquier diagrama.
+ *
+ * Cada etiqueta vive en `.react-flow__edgelabel-renderer` (un contenedor anclado
+ * al origen del viewport, sin transform propio) y se posiciona con un
+ * `transform: translate(...)` en coordenadas de FLUJO. Su matriz computada da en
+ * (e, f) la esquina superior izquierda ya en coordenadas de flujo —los
+ * porcentajes `-50%`/`-100%` quedan resueltos por el navegador—, y
+ * `offsetWidth/Height` su tamaño real.
+ *
+ * `getComputedStyle().transform` / `DOMMatrix` solo dan layout real en navegador;
+ * en jsdom devuelven identidad o lanzan, así que (igual que `getBBox`) esta
+ * función no se cubre en los tests unitarios sino en los e2e de exportación.
+ */
+export function getRenderedLabelBounds(viewportEl: HTMLElement): Rect | null {
+    const labelEls = viewportEl.querySelectorAll<HTMLElement>('.react-flow__edgelabel-renderer > *');
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    labelEls.forEach((el) => {
+        let m: DOMMatrix;
+        try {
+            m = new DOMMatrix(getComputedStyle(el).transform);
+        } catch {
+            return; // jsdom u otros entornos sin DOMMatrix/layout (transform 'none')
+        }
+        const w = el.offsetWidth, h = el.offsetHeight;
+        if (w === 0 && h === 0) return;
+        minX = Math.min(minX, m.e);
+        minY = Math.min(minY, m.f);
+        maxX = Math.max(maxX, m.e + w);
+        maxY = Math.max(maxY, m.f + h);
     });
     if (!isFinite(minX)) return null;
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
