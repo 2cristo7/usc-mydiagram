@@ -1,7 +1,8 @@
+import { useRef } from 'react'
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import type { NodeType } from '../../types'
-import { useInlineEdit } from '../../hooks/useInlineEdit'
-import { useStore } from '../../store'
+import { useNodeAttrEditor } from '../../hooks/useNodeAttrEditor'
+import { InlineAttrFields } from './InlineAttrFields'
 
 type C4Data = { label: string; nodeType: NodeType; attributes: string[] }
 type C4NodeType = Node<C4Data, 'c4'>
@@ -20,23 +21,24 @@ function extractTech(attributes: string[]): string | null {
   return m ? m[1].trim() : null
 }
 
-export function C4Node({ id, data, selected }: NodeProps<C4NodeType>) {
+export function C4Node({ id, data }: NodeProps<C4NodeType>) {
   const { label, nodeType, attributes = [] } = data
   const color = C4_COLORS[nodeType] ?? 'var(--color-accent)'
   const tech = extractTech(attributes)
-  const updateNode = useStore((s) => s.updateNode)
-
-  const { isEditing, inputProps, containerProps } = useInlineEdit({
-    initialValue: label,
-    onCommit: (newLabel) => updateNode(id, { label: newLabel }),
-    selected,
-    nodeId: id,
-  })
+  const containerRef = useRef<HTMLDivElement>(null)
+  const rowRefs = useRef<(HTMLInputElement | null)[]>([])
+  const ed = useNodeAttrEditor(id, label, attributes, { containerRef, rowRefs })
 
   return (
     <div
-      {...containerProps}
-      className={`bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] rounded-[var(--radius)] min-w-[120px] ${containerProps.className}`}
+      ref={containerRef}
+      className={`bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] rounded-[var(--radius)] min-w-[120px] ${
+        ed.isEditing ? 'nodrag nowheel' : ''
+      }`}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        if (!ed.isEditing) ed.start()
+      }}
     >
       <div
         className="px-3 py-1 border-b-[3px] border-[var(--color-ink)] text-xs font-semibold text-white text-center"
@@ -45,16 +47,13 @@ export function C4Node({ id, data, selected }: NodeProps<C4NodeType>) {
         {nodeType}
       </div>
       <div className="px-3 py-2 text-center">
-        {isEditing ? (
-          <input
-            {...inputProps}
-            className="font-semibold text-sm text-[var(--color-ink)] text-center bg-transparent border-b border-[var(--color-ink)] outline-none w-full"
-          />
+        {ed.isEditing ? (
+          <InlineAttrFields ed={ed} rowRefs={rowRefs} />
         ) : (
-          <div className="font-semibold text-sm text-[var(--color-ink)]">{label}</div>
-        )}
-        {tech && (
-          <div className="text-xs text-[var(--color-ink)]/60 mt-0.5">{tech}</div>
+          <>
+            <div className="font-semibold text-sm text-[var(--color-ink)]">{label}</div>
+            {tech && <div className="text-xs text-[var(--color-ink)]/60 mt-0.5">{tech}</div>}
+          </>
         )}
       </div>
       <Handle type="target" position={Position.Top} />

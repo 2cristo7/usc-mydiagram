@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Pencil, Trash2 } from 'lucide-react'
 import { useStore } from '../../store'
 import { persistCurrentDiagram } from '../../lib/api'
+import { flowNodeType, ATTRIBUTE_FLOW_TYPES } from '../../ui/utils/diagramToFlow'
 
 export interface NodeContextMenuProps {
   nodeId: string
@@ -16,6 +17,8 @@ export interface NodeContextMenuProps {
 export function NodeContextMenu({ nodeId, position, onClose }: NodeContextMenuProps) {
   const removeNode = useStore((s) => s.removeNode)
   const requestNodeEdit = useStore((s) => s.requestNodeEdit)
+  const setEditingNodeId = useStore((s) => s.setEditingNodeId)
+  const currentDiagram = useStore((s) => s.currentDiagram)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -37,7 +40,16 @@ export function NodeContextMenu({ nodeId, position, onClose }: NodeContextMenuPr
   }, [onClose])
 
   function handleEdit() {
-    requestNodeEdit(nodeId)
+    // Los nodos con atributos (tabla ERD, iconos de arquitectura) entran en edición
+    // INLINE de nombre + atributos en su propio cuerpo. El resto sigue con la edición
+    // inline de solo la etiqueta vía requestNodeEdit.
+    const node = currentDiagram?.nodes.find((n) => n.id === nodeId)
+    const flowType = node ? flowNodeType(node.node_type, currentDiagram?.diagram_type) : null
+    if (flowType && ATTRIBUTE_FLOW_TYPES.has(flowType)) {
+      setEditingNodeId(nodeId)
+    } else {
+      requestNodeEdit(nodeId)
+    }
     onClose()
   }
 

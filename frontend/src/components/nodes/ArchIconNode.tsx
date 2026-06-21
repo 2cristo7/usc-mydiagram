@@ -1,8 +1,9 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
-import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
 import type { NodeType } from '../../types'
-import { useInlineEdit } from '../../hooks/useInlineEdit'
 import { useStore } from '../../store'
+import { useNodeAttrEditor } from '../../hooks/useNodeAttrEditor'
 import { useArchGeom } from '../../store/archGeom'
 import {
   archBottlePolygon,
@@ -223,14 +224,22 @@ export function ArchIconNode({ id, data, selected }: NodeProps<ArchIconNodeType>
   const { label, nodeType, attributes = [] } = data
   const typeColor = TYPE_COLOR[nodeType] ?? INK
   const typeLabel = TYPE_LABELS[nodeType] ?? nodeType
-  const updateNode = useStore((s) => s.updateNode)
   const IconComponent = ICON_MAP[nodeType]
 
-  const { isEditing, inputProps, containerProps } = useInlineEdit({
-    initialValue: label,
-    onCommit: (newLabel) => updateNode(id, { label: newLabel }),
-    selected,
-    nodeId: id,
+  // El atributo `group:` (pertenencia al grupo) NO está en data.attributes
+  // —architectureLayoutSync lo filtra—, pero debe CONSERVARSE al guardar la edición.
+  // Lo leemos de la fuente (currentDiagram) para reanexarlo en el commit.
+  const fullAttrs = useStore((s) => s.currentDiagram?.nodes.find((n) => n.id === id)?.attributes)
+  const hiddenAttrs = useMemo(
+    () => (fullAttrs ?? []).filter((a) => /^group\s*:/i.test(a)),
+    [fullAttrs],
+  )
+  const containerRef = useRef<HTMLDivElement>(null)
+  const rowRefs = useRef<(HTMLInputElement | null)[]>([])
+  const ed = useNodeAttrEditor(id, label, attributes, {
+    containerRef,
+    rowRefs,
+    hiddenAttributes: hiddenAttrs,
   })
 
   const techAttr = attributes.find((a) => /^tech\s*:/i.test(a))
@@ -257,7 +266,7 @@ export function ArchIconNode({ id, data, selected }: NodeProps<ArchIconNodeType>
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [label, typeLabel, tech, isEditing, id, setArchSize])
+  }, [label, typeLabel, tech, id, setArchSize])
 
   // Limpia la entrada del store al desmontar el nodo.
   useLayoutEffect(() => () => removeArchSize(id), [id, removeArchSize])
@@ -272,8 +281,12 @@ export function ArchIconNode({ id, data, selected }: NodeProps<ArchIconNodeType>
 
   return (
     <div
-      {...containerProps}
-      className={containerProps.className}
+      ref={containerRef}
+      className={ed.isEditing ? 'nodrag nowheel' : ''}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        if (!ed.isEditing) ed.start()
+      }}
       style={{
         // La caja que mide React Flow (donde se anclan los edges) es el icono
         // MÁS la holgura PAD (ARCH_ICON_BOX = 72). El texto desborda hacia abajo
@@ -344,8 +357,8 @@ export function ArchIconNode({ id, data, selected }: NodeProps<ArchIconNodeType>
           style={{
             marginTop: ARCH_GAP,
             textAlign: 'center',
-            width: 'max-content',
-            maxWidth: 150,
+            width: ed.isEditing ? 180 : 'max-content',
+            maxWidth: ed.isEditing ? 180 : 150,
             lineHeight: 1.35,
           }}
         >
@@ -362,62 +375,112 @@ export function ArchIconNode({ id, data, selected }: NodeProps<ArchIconNodeType>
           {typeLabel}
         </div>
 
-        {isEditing ? (
-          <textarea
-            {...inputProps}
-            rows={1}
-            // Igual que el label estático: ancho fijo + multilínea. El alto se
-            // ajusta al contenido (auto-grow) para que el texto envuelva en
-            // varias líneas en vez de estirarse en una sola.
-            ref={(el) => {
-              inputProps.ref(el)
-              if (el) {
-                el.style.height = 'auto'
-                el.style.height = `${el.scrollHeight}px`
-              }
-            }}
-            onInput={(e) => {
-              const el = e.currentTarget
-              el.style.height = 'auto'
-              el.style.height = `${el.scrollHeight}px`
-            }}
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              lineHeight: 1.35,
-              fontFamily: 'inherit',
-              color: 'var(--color-ink)',
-              textAlign: 'center',
-              background: 'var(--color-surface)',
-              border: '2px solid var(--color-ink)',
-              borderRadius: 'var(--radius)',
-              outline: 'none',
-              width: 120,
-              padding: '2px 4px',
-              resize: 'none',
-              overflow: 'hidden',
-              display: 'block',
-              boxSizing: 'border-box',
-            }}
-          />
+        {ed.isEditing ? (
+          <>
+            <input
+              autoFocus
+              value={ed.name}
+              onChange={(e) => ed.setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (rowRefs.current[0]) rowRefs.current[0].focus()
+                  else ed.addRow()
+                }
+              }}
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                fontFamily: 'inherit',
+                color: 'var(--color-ink)',
+                textAlign: 'center',
+                width: '100%',
+                background: 'var(--color-surface)',
+                border: '2px solid var(--color-ink)',
+                borderRadius: 'var(--radius)',
+                outline: 'none',
+                padding: '1px 4px',
+                boxSizing: 'border-box',
+              }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
+              {ed.attrs.map((attr, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <input
+                    ref={(el) => {
+                      rowRefs.current[i] = el
+                    }}
+                    value={attr}
+                    onChange={(e) => ed.updateRow(i, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        ed.addRow()
+                      }
+                    }}
+                    placeholder="atributo"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 10,
+                      fontFamily: 'inherit',
+                      color: 'var(--color-ink)',
+                      background: 'var(--color-surface)',
+                      border: '1px solid color-mix(in srgb, var(--color-ink) 40%, transparent)',
+                      borderRadius: 4,
+                      outline: 'none',
+                      padding: '1px 3px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <button
+                    onClick={() => ed.deleteRow(i)}
+                    title="Eliminar atributo"
+                    style={{ flexShrink: 0, color: '#ef4444', display: 'flex', cursor: 'pointer' }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={ed.addRow}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 3,
+                  marginTop: 1,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: 'var(--color-ink)',
+                  opacity: 0.7,
+                  cursor: 'pointer',
+                }}
+              >
+                <Plus size={11} /> Añadir
+              </button>
+            </div>
+          </>
         ) : (
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: 'var(--color-ink)',
-              wordBreak: 'break-word',
-              overflowWrap: 'break-word',
-              whiteSpace: 'normal',
-            }}
-          >
-            {label}
-          </div>
-        )}
+          <>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: 'var(--color-ink)',
+                wordBreak: 'break-word',
+                overflowWrap: 'break-word',
+                whiteSpace: 'normal',
+              }}
+            >
+              {label}
+            </div>
 
-          {tech && (
-            <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{tech}</div>
-          )}
+            {tech && (
+              <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{tech}</div>
+            )}
+          </>
+        )}
         </div>
       </div>
 
