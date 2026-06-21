@@ -23,7 +23,12 @@ export function useAuth() {
   }, [setSession])
 }
 
-export async function signInWithGoogle() {
+// Contrato 1 — devuelve true si el OAuth se inició correctamente (el navegador
+// redirige a Google), false si falló ANTES de redirigir (popup bloqueado, OAuth
+// mal configurado, red caída). El toast de error ya se muestra aquí; el llamante
+// usa el booleano para decidir si apagar su spinner (cuando hay redirect real, el
+// componente se desmonta con la navegación y nunca lee el resultado).
+export async function signInWithGoogle(): Promise<boolean> {
   try {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
@@ -36,11 +41,14 @@ export async function signInWithGoogle() {
     if (error) {
       console.error('[useAuth] signInWithGoogle error:', error)
       toast.error('No se pudo iniciar sesión con Google. Inténtalo de nuevo.')
+      return false
     }
+    return true
   } catch (err) {
     // Captura fallos inesperados de red o del SDK que rechazan la promesa.
     console.error('[useAuth] signInWithGoogle excepción:', err)
     toast.error('No se pudo iniciar sesión con Google. Inténtalo de nuevo.')
+    return false
   }
 }
 

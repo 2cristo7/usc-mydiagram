@@ -58,8 +58,15 @@ export function GoogleLoginModal({ open, onClose }: GoogleLoginModalProps) {
   async function handleLogin() {
     setLoading(true)
     try {
-      await signInWithGoogle()
+      // Contrato 1: signInWithGoogle() devuelve true si arrancó el OAuth (la
+      // página se redirige y este componente se desmonta → no hace falta apagar
+      // loading) y false si falló antes de redirigir (ya mostró su propio toast),
+      // en cuyo caso reactivamos el botón para que el usuario pueda reintentar.
+      const ok = await signInWithGoogle()
+      if (!ok) setLoading(false)
     } catch {
+      // Catch defensivo: el contrato dice que no lanza, pero por si acaso un
+      // fallo inesperado del SDK rechazara la promesa, no dejamos el botón colgado.
       setLoading(false)
     }
   }
