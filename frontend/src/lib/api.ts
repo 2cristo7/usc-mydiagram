@@ -64,6 +64,48 @@ function authHeaders(): Record<string, string> | null {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
 }
 
+// Timeout por defecto de cada petición REST. Sin él, si el servidor acepta la
+// conexión pero no responde (proxy colgado, microservicio bloqueado…), la promesa
+// del fetch queda pendiente para siempre y los flags `loading` de la UI nunca se
+// apagan. Aquí cortamos a los 30 s con un mensaje legible.
+const DEFAULT_TIMEOUT_MS = 30_000
+
+// fetch con timeout vía AbortController: aborta la petición pasado `timeoutMs` y
+// lanza un Error legible (en vez del críptico "The operation was aborted") para que
+// el consumidor lo muestre tal cual. Cualquier otro fallo de red se propaga intacto.
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } catch (err) {
+    // Distinguimos el aborto por timeout (AbortError) del resto de fallos de red:
+    // solo el primero merece el mensaje de "tardó demasiado".
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('La petición tardó demasiado. Revisa tu conexión.')
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// Parseo JSON protegido para los GET: tras `if (!res.ok) throw`, confiar en
+// `res.json()` a ciegas es frágil — un 2xx con cuerpo HTML (página de error de un
+// proxy, redirect mal configurado) lanza un SyntaxError críptico. Aquí lo
+// envolvemos en un mensaje legible para el consumidor.
+async function parseJson<T>(res: Response, what: string): Promise<T> {
+  try {
+    return (await res.json()) as T
+  } catch {
+    throw new Error(`Respuesta inesperada del servidor al ${what}.`)
+  }
+}
+
 async function doSave(ctx?: SaveContext): Promise<SaveResult> {
   const headers = authHeaders()
   if (!headers) return { ok: false, error: 'no-session' }
@@ -90,7 +132,7 @@ async function doSave(ctx?: SaveContext): Promise<SaveResult> {
   })
 
   try {
-    const res = await fetch(url, { method: isUpdate ? 'PATCH' : 'POST', headers, body })
+    const res = await fetchWithTimeout(url, { method: isUpdate ? 'PATCH' : 'POST', headers, body })
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}))
       return { ok: false, error: detail.error ?? `HTTP ${res.status}` }
@@ -123,34 +165,37 @@ export function persistCurrentDiagram(ctx?: SaveContext): Promise<SaveResult> {
 export async function listVersions(diagramId: string): Promise<VersionMeta[]> {
   const headers = authHeaders()
   if (!headers) return []
-  const res = await fetch(`${API_URL}/diagrams/${diagramId}/versions`, { headers })
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/${diagramId}/versions`, { headers })
   if (!res.ok) throw new Error(`No se pudo cargar el historial de versiones (HTTP ${res.status})`)
-  return res.json()
+  return parseJson<VersionMeta[]>(res, 'cargar el historial de versiones')
 }
 
 // Una versión completa (con su snapshot) para previsualizarla al navegar a ella.
 export async function getVersion(diagramId: string, versionId: string): Promise<DiagramVersionRow> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/diagrams/${diagramId}/versions/${versionId}`, { headers })
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/${diagramId}/versions/${versionId}`, { headers })
   if (!res.ok) throw new Error(`No se pudo cargar la versión (HTTP ${res.status})`)
-  return res.json()
+  return parseJson<DiagramVersionRow>(res, 'cargar la versión')
 }
 
+// Contrato unificado (igual que getDiagram/getVersion): sin token LANZA 'Sesión
+// requerida' en vez de devolver [] silencioso. Así la UI distingue "no autenticado"
+// de "lista legítimamente vacía" (un array vacío del servidor).
 export async function listDiagrams(): Promise<DiagramMeta[]> {
   const headers = authHeaders()
-  if (!headers) return []
-  const res = await fetch(`${API_URL}/diagrams`, { headers })
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetchWithTimeout(`${API_URL}/diagrams`, { headers })
   if (!res.ok) throw new Error(`No se pudo cargar el historial (HTTP ${res.status})`)
-  return res.json()
+  return parseJson<DiagramMeta[]>(res, 'cargar el historial')
 }
 
 export async function getDiagram(id: string): Promise<DiagramRow> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/diagrams/${id}`, { headers })
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/${id}`, { headers })
   if (!res.ok) throw new Error(`No se pudo cargar el diagrama (HTTP ${res.status})`)
-  return res.json()
+  return parseJson<DiagramRow>(res, 'cargar el diagrama')
 }
 
 // Renombrar: cambia solo el título (columna + data.title), sin crear versión en
@@ -159,7 +204,7 @@ export async function getDiagram(id: string): Promise<DiagramRow> {
 export async function renameDiagram(id: string, title: string): Promise<DiagramMeta> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/diagrams/${id}/rename`, {
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/${id}/rename`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify({ title }),
@@ -168,31 +213,32 @@ export async function renameDiagram(id: string, title: string): Promise<DiagramM
     const detail = await res.json().catch(() => ({}))
     throw new Error(detail.error ?? `No se pudo renombrar el diagrama (HTTP ${res.status})`)
   }
-  return res.json()
+  return parseJson<DiagramMeta>(res, 'renombrar el diagrama')
 }
 
 // Borrado suave: mueve el diagrama a la papelera.
 export async function deleteDiagram(id: string): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/diagrams/${id}`, { method: 'DELETE', headers })
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/${id}`, { method: 'DELETE', headers })
   if (!res.ok) throw new Error(`No se pudo eliminar el diagrama (HTTP ${res.status})`)
 }
 
-// Diagramas en la papelera (borrado suave), más recientes primero.
+// Diagramas en la papelera (borrado suave), más recientes primero. Mismo contrato
+// que listDiagrams: sin token LANZA 'Sesión requerida' (no devuelve [] silencioso).
 export async function listTrash(): Promise<DiagramMeta[]> {
   const headers = authHeaders()
-  if (!headers) return []
-  const res = await fetch(`${API_URL}/diagrams/trash`, { headers })
+  if (!headers) throw new Error('Sesión requerida')
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/trash`, { headers })
   if (!res.ok) throw new Error(`No se pudo cargar la papelera (HTTP ${res.status})`)
-  return res.json()
+  return parseJson<DiagramMeta[]>(res, 'cargar la papelera')
 }
 
 // Saca un diagrama de la papelera y lo devuelve al historial.
 export async function restoreDiagram(id: string): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/diagrams/${id}/restore`, { method: 'POST', headers })
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/${id}/restore`, { method: 'POST', headers })
   if (!res.ok) throw new Error(`No se pudo restaurar el diagrama (HTTP ${res.status})`)
 }
 
@@ -200,7 +246,7 @@ export async function restoreDiagram(id: string): Promise<void> {
 export async function deleteDiagramPermanent(id: string): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/diagrams/${id}/permanent`, { method: 'DELETE', headers })
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/${id}/permanent`, { method: 'DELETE', headers })
   if (!res.ok) throw new Error(`No se pudo eliminar definitivamente (HTTP ${res.status})`)
 }
 
@@ -208,7 +254,7 @@ export async function deleteDiagramPermanent(id: string): Promise<void> {
 export async function emptyTrash(): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/diagrams/trash`, { method: 'DELETE', headers })
+  const res = await fetchWithTimeout(`${API_URL}/diagrams/trash`, { method: 'DELETE', headers })
   if (!res.ok) throw new Error(`No se pudo vaciar la papelera (HTTP ${res.status})`)
 }
 
@@ -238,15 +284,15 @@ export interface LlmConfigPayload {
 export async function getLlmConfig(): Promise<LlmConfig> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/llm-config`, { headers })
+  const res = await fetchWithTimeout(`${API_URL}/llm-config`, { headers })
   if (!res.ok) throw new Error(`No se pudo obtener la configuración LLM (HTTP ${res.status})`)
-  return res.json()
+  return parseJson<LlmConfig>(res, 'obtener la configuración LLM')
 }
 
 export async function putLlmConfig(payload: LlmConfigPayload): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/llm-config`, {
+  const res = await fetchWithTimeout(`${API_URL}/llm-config`, {
     method: 'PUT',
     headers,
     body: JSON.stringify(payload),
@@ -262,7 +308,7 @@ export async function putLlmConfig(payload: LlmConfigPayload): Promise<void> {
 export async function deleteLlmApiKey(provider: string): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/llm-config/api-key/${encodeURIComponent(provider)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/llm-config/api-key/${encodeURIComponent(provider)}`, {
     method: 'DELETE',
     headers,
   })
@@ -280,7 +326,9 @@ export async function deleteLlmApiKey(provider: string): Promise<void> {
 export async function exportAccountData(): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/account/export`, { headers })
+  // Timeout holgado: la exportación serializa TODA la cuenta (puede tardar más
+  // que una petición normal).
+  const res = await fetchWithTimeout(`${API_URL}/account/export`, { headers }, 60_000)
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
     throw new Error(detail.error ?? `No se pudieron exportar los datos (HTTP ${res.status})`)
@@ -301,7 +349,7 @@ export async function exportAccountData(): Promise<void> {
 export async function deleteAccount(): Promise<void> {
   const headers = authHeaders()
   if (!headers) throw new Error('Sesión requerida')
-  const res = await fetch(`${API_URL}/account`, { method: 'DELETE', headers })
+  const res = await fetchWithTimeout(`${API_URL}/account`, { method: 'DELETE', headers })
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}))
     throw new Error(detail.error ?? `No se pudo eliminar la cuenta (HTTP ${res.status})`)

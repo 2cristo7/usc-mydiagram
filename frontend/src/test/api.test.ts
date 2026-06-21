@@ -52,7 +52,7 @@ describe('persistCurrentDiagram', () => {
 
   it('primer guardado = POST y cachea el id devuelto (para que el siguiente sea PATCH)', async () => {
     fetchMock.mockResolvedValueOnce(okResponse('new-id'))
-    const res = await persistCurrentDiagram('crea un blog')
+    const res = await persistCurrentDiagram({ instruction: 'crea un blog' })
     expect(res).toEqual({ ok: true, id: 'new-id' })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toBe('http://localhost:3001/diagrams')
