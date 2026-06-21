@@ -84,6 +84,7 @@ Cada elemento DEBE tener exactamente esta forma:
 
         edges: list[DiagramEdge] = []
         invalid: list[dict] = []
+        truncated = False  # ijson abortó a mitad de stream (respuesta cortada)
 
         async def drain():
             while events:
@@ -129,8 +130,21 @@ Cada elemento DEBE tener exactamente esta forma:
         except LLMError:
             raise
         except Exception as e:
+            # ijson abortó a mitad de stream (respuesta truncada/cortada). NO rompemos:
+            # conservamos lo parseado, pero registramos la degradación (S6.9) para que
+            # el usuario sepa que el diagrama puede estar incompleto.
             print(f"[extract_edges] ijson parse error: {e}")
+            truncated = True
 
-        return {"edges": edges, "invalid_edges": invalid}
+        result: DiagramState = {"edges": edges, "invalid_edges": invalid}
+        # Degradación de parseo (category "structure"): el array de aristas quedó
+        # incompleto. Se acumula en `degradations` (reducer operator.add) para
+        # sobrevivir al END y avisar al usuario.
+        if truncated:
+            result["degradations"] = [{
+                "category": "structure",
+                "reasons": ["parseo JSON incompleto al extraer aristas: la respuesta del modelo se cortó (truncada)"],
+            }]
+        return result
 
     return extract_edges

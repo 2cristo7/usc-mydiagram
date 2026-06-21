@@ -70,6 +70,7 @@ Cada elemento DEBE tener exactamente esta forma:
 
         nodes: list[DiagramNode] = []
         invalid: list[dict] = []
+        truncated = False  # ijson abortó a mitad de stream (respuesta cortada)
 
         async def drain():
             while events:
@@ -108,7 +109,12 @@ Cada elemento DEBE tener exactamente esta forma:
         except LLMError:
             raise
         except Exception as e:
+            # ijson abortó a mitad de stream (respuesta truncada/cortada). NO rompemos:
+            # conservamos lo parseado hasta aquí, pero registramos la degradación para
+            # que el usuario sepa que el diagrama puede estar incompleto (S6.9), en vez
+            # de entregarlo silenciosamente parcial.
             print(f"[extract_nodes] ijson parse error: {e}")
+            truncated = True
 
         # El modelo no devolvió ningún array JSON (rechazo o prosa pura). No es un
         # fallo del proveedor (no levantamos LLMError, que mandaría al usuario a la
@@ -117,6 +123,16 @@ Cada elemento DEBE tener exactamente esta forma:
         if not json_stream.found and not nodes:
             print("[extract_nodes] el modelo no devolvió JSON (posible rechazo); 0 nodos")
 
-        return {"nodes": nodes, "invalid_nodes": invalid}
+        result: DiagramState = {"nodes": nodes, "invalid_nodes": invalid}
+        # Degradación de parseo (category "structure": carencia del conjunto): la
+        # respuesta del modelo se cortó y el array de nodos quedó incompleto. Se
+        # acumula en el canal `degradations` (reducer operator.add) para sobrevivir
+        # al END y que classify_outcome avise al usuario.
+        if truncated:
+            result["degradations"] = [{
+                "category": "structure",
+                "reasons": ["parseo JSON incompleto al extraer nodos: la respuesta del modelo se cortó (truncada)"],
+            }]
+        return result
 
     return extract_nodes

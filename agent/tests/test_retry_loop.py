@@ -103,12 +103,13 @@ def test_route_back_to_extract_edges_on_errors():
     assert route_after_validate_edges(state) == "extract_edges"
 
 
-def test_route_to_synthesize_when_clean():
+def test_route_to_extract_fragments_when_clean():
     # S6.8 reordenó el grafo: validate_edges va ANTES de synthesize, así que
-    # "limpio" ya no termina el grafo, sino que avanza a synthesize (el fin del
-    # grafo lo decide ahora validate_schema, tras la validación estructural).
+    # "limpio" ya no termina el grafo. S10.4 insertó extract_fragments entre
+    # validate_edges y synthesize (no-op salvo en secuencia): tras validar las
+    # aristas, el router pasa por la extracción de fragmentos antes de ensamblar.
     state = _base_state(validation_errors=[])
-    assert route_after_validate_edges(state) == "synthesize"
+    assert route_after_validate_edges(state) == "extract_fragments"
 
 
 # ---------- extract_edges: pasada normal, tres clases de inválida ----------
@@ -187,6 +188,27 @@ async def test_extract_edges_feedback_fixes_and_streams():
     assert result["invalid_edges"] == [], "ya no quedan inválidas"
     streamed = [queue.get_nowait()["data"]["id"] for _ in range(queue.qsize())]
     assert streamed == ["e1"], "e0 ya confirmada se ignora por dedup"
+
+
+@pytest.mark.asyncio
+async def test_extract_edges_truncated_registers_degradation():
+    # JSON cortado a mitad de stream: ijson aborta. NO se rompe (se conserva lo
+    # parseado), pero se registra una degradación de parseo (category "structure")
+    # para que la respuesta truncada llegue al usuario en vez de un diagrama
+    # silenciosamente parcial.
+    queue = asyncio.Queue()
+    state = _base_state(retry_count=0)
+    # Primera arista completa y válida; la segunda queda cortada (sin cerrar).
+    truncated = '[{"id": "e0", "source": "user", "target": "order", "label": "p", "edge_type": "one_to_many"},' \
+                ' {"id": "e1", "source": "user", "tar'
+
+    with patch("nodes.extract_edges.stream_llm", return_value=_fake_stream(truncated)):
+        result = await make_extract_edges(queue)(state)
+
+    assert [e.id for e in result["edges"]] == ["e0"], "se conserva lo parseado antes del corte"
+    assert "degradations" in result, "el truncado se registra como degradación"
+    assert result["degradations"][0]["category"] == "structure"
+    assert "truncada" in result["degradations"][0]["reasons"][0]
 
 
 @pytest.mark.asyncio

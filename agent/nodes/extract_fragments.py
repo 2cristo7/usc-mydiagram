@@ -38,6 +38,7 @@ def make_extract_fragments(queue: asyncio.Queue | None = None):
         events = ijson.sendable_list()
         coro = ijson.items_coro(events, "item")
         raw_frags: list[dict] = []
+        truncated = False  # ijson abortó a mitad de stream (respuesta cortada)
 
         async def drain():
             while events:
@@ -52,8 +53,11 @@ def make_extract_fragments(queue: asyncio.Queue | None = None):
         except LLMError:
             raise
         except Exception as e:
+            # ijson abortó a mitad de stream (respuesta truncada/cortada). NO rompemos:
+            # seguimos con los fragmentos parseados hasta aquí (raw_frags) y registramos
+            # la degradación (S6.9) en vez de descartar todo en silencio.
             print(f"[extract_fragments] ijson parse error: {e}")
-            return {"fragments": []}
+            truncated = True
 
         # Dos pasadas: primero Pydantic-parsea todos (para conocer el universo de
         # ids de fragmento válidos), luego valida referencias cruzadas y descarta
@@ -74,6 +78,15 @@ def make_extract_fragments(queue: asyncio.Queue | None = None):
             else:
                 print(f"[extract_fragments] descartado {frag.id}: {reason}")
 
-        return {"fragments": fragments}
+        result: DiagramState = {"fragments": fragments}
+        # Degradación de parseo (category "structure"): el array de fragmentos quedó
+        # incompleto al cortarse la respuesta. Se acumula en `degradations` (reducer
+        # operator.add) para sobrevivir al END y avisar al usuario.
+        if truncated:
+            result["degradations"] = [{
+                "category": "structure",
+                "reasons": ["parseo JSON incompleto al extraer fragmentos de secuencia: la respuesta del modelo se cortó (truncada)"],
+            }]
+        return result
 
     return extract_fragments
