@@ -27,6 +27,17 @@ export interface OpSummary {
     deletedEdges?: number;
 }
 
+// S10.3 — una operación concreta sobre un nodo, para la lista por nodo que se
+// despliega en la tarjeta de operación (alta/edición/baja + nombre). `kind` decide
+// el icono y el color; `label` es el nombre final del nodo. Las aristas NO entran
+// aquí: op_summary solo guarda su conteo, no su nombre, así que no se pueden listar
+// individualmente (quedan en el "recibo" de la cabecera). El `find` tampoco entra.
+export type NodeOpKind = 'add' | 'update' | 'delete';
+export interface NodeOp {
+    kind: NodeOpKind;
+    label: string;
+}
+
 // Metadata de una versión del diario (sin el snapshot `data`, que se trae al
 // navegar). Es la unidad que pinta el panel de operaciones.
 export interface VersionMeta {
@@ -52,7 +63,10 @@ export interface Clarification {
     options: string[];
 }
 
-export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
+// 'reconnecting' (S10.3 — contrato 2): Socket.IO está reintentando la conexión
+// tras una caída. Estado intermedio entre 'disconnected' y un futuro 'connected'
+// (o 'error' si agota los intentos). El panel lo pinta como aviso temporal.
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error';
 
 // S10.3 — elección de tipo de diagrama cuando el backend detecta ambigüedad UML
 // y emite `diagram:type_clarification`. Camino independiente del flujo refine
@@ -115,7 +129,7 @@ export const nodeTypeSchema = z.enum([
 
 export const edgeTypeSchema = z.enum([
     'one_to_many', 'many_to_many', 'one_to_one', 'inherits', 'calls',
-    'sequence', 'depends_on', 'association', 'flow', 'conditional',
+    'sequence', 'sequence_reply', 'depends_on', 'association', 'flow', 'conditional',
     'include', 'extend',
 ]);
 
@@ -287,6 +301,7 @@ export const DIAGRAM_EDGE_TYPES: Record<DiagramType, { value: EdgeType; label: s
     ],
     sequence: [
         { value: 'sequence', label: 'Mensaje' },
+        { value: 'sequence_reply', label: 'Respuesta' },
     ],
 };
 

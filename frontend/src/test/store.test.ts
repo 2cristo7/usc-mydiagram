@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from 'vitest'
-import { useStore } from '../store'
+import { useStore, selectPromptDraft, NEW_DRAFT_KEY } from '../store'
 import type { DiagramType, NodeType } from '../types'
 import type { GenerationPhase } from '../store'
 
@@ -24,8 +24,31 @@ beforeEach(() => {
     })
   })
 
+test('promptDrafts: el borrador es POR DIAGRAMA y se conserva al navegar', () => {
+  useStore.setState({ promptDrafts: {}, currentDiagramId: null })
+
+  // Diagrama nuevo/sin guardar: el borrador va al slot NEW_DRAFT_KEY.
+  useStore.getState().setPromptDraft('ERD de tienda')
+  expect(selectPromptDraft(useStore.getState())).toBe('ERD de tienda')
+  expect(useStore.getState().promptDrafts[NEW_DRAFT_KEY]).toBe('ERD de tienda')
+
+  // Navego a un diagrama guardado X: su slot está vacío (input limpio).
+  useStore.setState({ currentDiagramId: 'X' })
+  expect(selectPromptDraft(useStore.getState())).toBe('')
+  useStore.getState().setPromptDraft('añade Carrito')
+  expect(selectPromptDraft(useStore.getState())).toBe('añade Carrito')
+
+  // Vuelvo al diagrama nuevo: reaparece su borrador, intacto.
+  useStore.setState({ currentDiagramId: null })
+  expect(selectPromptDraft(useStore.getState())).toBe('ERD de tienda')
+
+  // Y el borrador de X sigue guardado bajo su id.
+  useStore.setState({ currentDiagramId: 'X' })
+  expect(selectPromptDraft(useStore.getState())).toBe('añade Carrito')
+})
+
 test('addVersion: añade al diario y el canvas pasa a coincidir con esa versión', () => {
-  const v = { id: '1', seq: 1, origin: 'generate' as const, instruction: 'Crea un ERD', op_summary: null, created_at: new Date().toISOString() }
+  const v = { id: '1', seq: 1, origin: 'generate' as const, instruction: 'Crea un ERD', op_summary: null, parent_version_id: null, created_at: new Date().toISOString() }
   useStore.getState().addVersion(v)
   expect(useStore.getState().versions).toContain(v)
   expect(useStore.getState().currentVersionSeq).toBe(1)

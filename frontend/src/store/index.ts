@@ -1,4 +1,4 @@
-import type { DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry, PendingTypeChoice, VersionMeta } from "../types";
+import type { DiagramNode, DiagramEdge, DiagramSchema, DiagramType, UIState, Clarification, AgentToolCall, ToolTraceEntry, NodeOp, PendingTypeChoice, VersionMeta } from "../types";
 import { create } from "zustand";
 import { persistCurrentDiagram, renameDiagram } from "../lib/api";
 import { toast } from "./toast";
@@ -12,6 +12,10 @@ import { toast } from "./toast";
 // en vivo sobre el canvas interactivo (no toca generationPhase). Cargar un diagrama
 // guardado va directamente a 'done'.
 export type GenerationPhase = 'idle' | 'live' | 'done';
+
+// Key del slot de borrador del diagrama nuevo/sin guardar (currentDiagramId === null).
+// Los ids reales son UUID, así que este sentinel no colisiona con ninguno.
+export const NEW_DRAFT_KEY = '__new__';
 
 // Autoguardado con debounce: TODA edición manual del diagrama (renombrar nodos,
 // añadir/borrar nodos y aristas, editar aristas, arrastrar, recalcular layout)
@@ -35,6 +39,9 @@ function schedulePersist() {
     }
     _saveTimer = setTimeout(() => {
         _saveTimer = null
+        // Marca el inicio del guardado (flag observable por la UI: "Guardando…").
+        const { setSaving, setSaveError } = useStore.getState()
+        setSaving(true)
         // Edición MANUAL → versión origin 'manual_edit' (navegable con ◀ ▶, no sale
         // en la lista de operaciones). La versión devuelta se añade al diario.
         // 'no-session' no es un fallo real (usuario sin login): se ignora en
@@ -42,9 +49,23 @@ function schedulePersist() {
         persistCurrentDiagram({ origin: 'manual_edit' }).then((r) => {
             if (r.ok && r.version) {
                 useStore.getState().addVersion(r.version)
+                setSaveError(null)
             } else if (!r.ok && r.error !== 'no-session') {
+                setSaveError(r.error ?? 'Error de guardado')
                 toast.error('No se pudieron guardar los cambios. Revisa tu conexión.')
+            } else {
+                // Éxito sin versión nueva (p. ej. no-session): limpiamos el error previo.
+                setSaveError(null)
             }
+        // .catch defensivo: persistCurrentDiagram hoy nunca rechaza (atrapa en doSave),
+        // pero no dependemos de ese invariante — si algún día rechaza, no dejamos el
+        // flag `saving` pegado ni perdemos el error en silencio.
+        }).catch((err: unknown) => {
+            console.error('[persist] autoguardado rechazó:', err)
+            setSaveError((err as Error)?.message ?? 'Error de guardado')
+            toast.error('No se pudieron guardar los cambios. Revisa tu conexión.')
+        }).finally(() => {
+            setSaving(false)
         })
     }, 800)
 }
@@ -64,6 +85,14 @@ interface MsgStore {
     // null = no hay operación corriendo.
     activeOperation: string | null;
     setActiveOperation: (op: string | null) => void;
+    // Borrador del input flotante POR DIAGRAMA (memoria de input, solo frontend).
+    // Mapa keyed por currentDiagramId; el diagrama nuevo/sin guardar usa NEW_DRAFT_KEY.
+    // Navegar entre diagramas conserva lo escrito-sin-enviar de cada uno; el slot del
+    // diagrama solo se vacía al emitir su operación (sendMessage) y, si esa falla,
+    // restoreFailedPrompt lo repone. Léelo con selectPromptDraft (resuelve la key).
+    promptDrafts: Record<string, string>;
+    // Escribe el borrador del DIAGRAMA ACTUAL (resuelve la key internamente).
+    setPromptDraft: (v: string) => void;
     // seq de la versión cuyo estado coincide EXACTAMENTE con el canvas actual.
     // null = el canvas DIVERGE (se editó a mano y aún no coincide con ninguna
     // versión). Gobierna el botón "volver a esta versión": una tarjeta cuyo seq ==
@@ -93,6 +122,12 @@ interface MsgStore {
     // la petición. null = sin petición pendiente.
     editRequestNodeId: string | null;
     requestNodeEdit: (id: string | null) => void;
+    // S10.3 — id del nodo en EDICIÓN INLINE de sus atributos (tabla ERD / iconos de
+    // arquitectura): el nodo renderiza inputs para el nombre y las filas en su PROPIO
+    // cuerpo (sin panel flotante), con añadir/eliminar fila. null = ninguno; solo uno
+    // a la vez.
+    editingNodeId: string | null;
+    setEditingNodeId: (id: string | null) => void;
     uiState: UIState;
     setUiState: (state: MsgStore['uiState']) => void;
     // Fase de animación del streaming. Independiente de uiState para no
@@ -114,6 +149,13 @@ interface MsgStore {
     traceToolCall: (call: AgentToolCall) => void;
     traceToolResult: (id: string, status: 'ok' | 'error') => void;
     clearToolTrace: () => void;
+    // S10.3 — operaciones por nodo del run EN VIVO (alta/edición/baja con el label
+    // ya resuelto), para la lista que va "saliendo" en la tarjeta En curso. Distinta
+    // de toolTrace (traza cruda: incluye find y usa los args de entrada del agente):
+    // aquí solo nodos y con el nombre final. Se limpia al lanzar un run nuevo.
+    liveOps: NodeOp[];
+    pushLiveOp: (op: NodeOp) => void;
+    clearLiveOps: () => void;
 }
 
 interface DiagramStore {
@@ -174,6 +216,11 @@ interface DiagramStore {
     // Migration path: EditableEdge uses this to persist inline label/type edits.
     // updates maps to Partial<DiagramEdge> (the domain type stored in edge data).
     updateEdge(edgeId: string, updates: Partial<DiagramEdge>): void;
+    // S10.3 — reordena una arista a la posición `newIndex` del array de aristas
+    // (índice de INSERCIÓN tras retirarla). En secuencia el orden del array ES el
+    // eje temporal: mover un mensaje verticalmente equivale a reubicarlo aquí, y
+    // sequenceLayout recalcula filas, fragmentos y activaciones de forma coherente.
+    moveEdge(edgeId: string, newIndex: number): void;
     addNode: (node: DiagramNode) => void;
     addEdge: (edge: DiagramEdge) => void;
     // S7.5 — deltas del agente. El cascade de removeNode lo declara el SERVIDOR
@@ -214,9 +261,23 @@ interface DiagramStore {
     trashedDiagram: { id: string; title: string } | null;
     markCurrentTrashed: (info: { id: string; title: string }) => void;
     clearTrashed: () => void;
+    // Estado del autoguardado (schedulePersist). El autosave es fire-and-forget;
+    // estos flags lo hacen OBSERVABLE para que la UI pueda mostrar "Guardando…" o un
+    // aviso de fallo sin que cada componente reinvente el seguimiento.
+    //   · saving    → hay una persistencia en curso (true al empezar, false al acabar).
+    //   · saveError → mensaje del último fallo de guardado (null si el último fue ok).
+    saving: boolean;
+    saveError: string | null;
+    setSaving: (saving: boolean) => void;
+    setSaveError: (error: string | null) => void;
 }
 
 export type Store = MsgStore & DiagramStore;
+
+// Borrador del input para el diagrama ACTUALMENTE abierto (memoria de input por
+// diagrama). Devuelve el slot de currentDiagramId, o el del diagrama nuevo si null.
+export const selectPromptDraft = (s: Store): string =>
+    s.promptDrafts[s.currentDiagramId ?? NEW_DRAFT_KEY] ?? '';
 
 export const useStore = create<Store>()((set) => ({
 
@@ -241,6 +302,10 @@ export const useStore = create<Store>()((set) => ({
     })),
     activeOperation: null,
     setActiveOperation: (op) => set({ activeOperation: op }),
+    promptDrafts: {},
+    setPromptDraft: (v) => set((s) => ({
+        promptDrafts: { ...s.promptDrafts, [s.currentDiagramId ?? NEW_DRAFT_KEY]: v },
+    })),
     currentVersionSeq: null,
     currentVersionId: null,
     headVersionId: null,
@@ -256,6 +321,8 @@ export const useStore = create<Store>()((set) => ({
     navTick: 0,
     editRequestNodeId: null,
     requestNodeEdit: (id) => set({ editRequestNodeId: id }),
+    editingNodeId: null,
+    setEditingNodeId: (id) => set({ editingNodeId: id }),
     uiState: 'idle',
     setUiState: (state) => set({ uiState: state }),
     generationPhase: 'idle',
@@ -273,6 +340,10 @@ export const useStore = create<Store>()((set) => ({
         toolTrace: state.toolTrace.map((entry) => entry.id === id ? { ...entry, status } : entry),
     })),
     clearToolTrace: () => set({ toolTrace: [] }),
+
+    liveOps: [],
+    pushLiveOp: (op) => set((state) => ({ liveOps: [...state.liveOps, op] })),
+    clearLiveOps: () => set({ liveOps: [] }),
 
     nodes: [],
     edges: [],
@@ -293,7 +364,7 @@ export const useStore = create<Store>()((set) => ({
         // Si los nodos ya empezaron a llegar (currentDiagram sembrado), aplicamos
         // el tipo/título al vuelo para que el layout en vivo cambie al correcto.
         currentDiagram: state.currentDiagram
-            ? { ...state.currentDiagram, diagram_type: type, title: title ?? state.currentDiagram.title }
+            ? { ...state.currentDiagram, diagram_type: type ?? state.currentDiagram.diagram_type, title: title ?? state.currentDiagram.title }
             : state.currentDiagram,
     })),
     setCurrentDiagram: (diagram) => set({
@@ -332,6 +403,32 @@ export const useStore = create<Store>()((set) => ({
             edges: state.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge),
             currentDiagram: state.currentDiagram ? { ...state.currentDiagram, edges: state.currentDiagram.edges.map(edge => edge.id === edgeId ? { ...edge, ...updates } : edge) } : null,
         }))
+        schedulePersist()
+     },
+     moveEdge: (edgeId, newIndex) => {
+        set((state) => {
+            const from = state.edges.findIndex((e) => e.id === edgeId)
+            if (from === -1) return {}
+            // `edges` y `currentDiagram.edges` se mantienen en el MISMO orden, así que
+            // aplicamos la misma reubicación (from → newIndex) a ambos.
+            const reorder = <T extends { id: string }>(arr: T[]): T[] => {
+                const copy = arr.slice()
+                const [moved] = copy.splice(from, 1)
+                const to = Math.max(0, Math.min(newIndex, copy.length))
+                copy.splice(to, 0, moved)
+                return copy
+            }
+            const edges = reorder(state.edges)
+            // No-op (soltar en el mismo slot): no tocar el store → sin re-layout ni
+            // entrada de historial espuria.
+            if (edges.every((e, i) => e.id === state.edges[i].id)) return {}
+            return {
+                edges,
+                currentDiagram: state.currentDiagram
+                    ? { ...state.currentDiagram, edges: reorder(state.currentDiagram.edges) }
+                    : null,
+            }
+        })
         schedulePersist()
      },
      updateNodePosition: (id, position) => {
@@ -459,6 +556,7 @@ export const useStore = create<Store>()((set) => ({
         pendingClarification: null,
         pendingTypeChoice: null,
         editRequestNodeId: null,
+        editingNodeId: null,
         uiState: 'idle',
         generationPhase: 'idle',
         trashedDiagram: null,
@@ -482,11 +580,16 @@ export const useStore = create<Store>()((set) => ({
         pendingClarification: null,
         pendingTypeChoice: null,
         editRequestNodeId: null,
+        editingNodeId: null,
         uiState: 'idle',
         generationPhase: 'idle',
         trashedDiagram: info,
      }),
      clearTrashed: () => set({ trashedDiagram: null }),
+     saving: false,
+     saveError: null,
+     setSaving: (saving) => set({ saving }),
+     setSaveError: (error) => set({ saveError: error }),
      importDiagram: (diagram) => set({
         nodes: diagram.nodes,
         edges: diagram.edges,
@@ -503,6 +606,7 @@ export const useStore = create<Store>()((set) => ({
         pendingClarification: null,
         pendingTypeChoice: null,
         editRequestNodeId: null,
+        editingNodeId: null,
         uiState: 'ready',
         generationPhase: 'done',
         trashedDiagram: null,
