@@ -12,7 +12,9 @@
  */
 import { describe, test, expect, vi } from 'vitest'
 import type { DiagramSchema, DiagramType, NodeType, EdgeType } from '../types'
-import { DiagramToFlow } from '../ui/utils/diagramToFlow'
+// Alias sin prefijo `use` para no disparar el falso positivo de react-hooks al
+// llamarlo dentro de un bucle (no es un hook; es el helper de tamaño del nodo).
+import { DiagramToFlow, useCaseNodeSize as ucNodeSize } from '../ui/utils/diagramToFlow'
 import { diagramImportSchema } from '../types'
 
 // Stub sequenceLayout para evitar efectos secundarios en tests no-sequence
@@ -168,6 +170,77 @@ describe('Use Case', () => {
   test('arista huérfana rechazada', () => {
     const roto = { ...diagram, edges: [makeEdge('ex', 'cliente', 'nulo', '', 'association')] }
     expect(diagramImportSchema.safeParse(roto).success).toBe(false)
+  })
+
+  // La caja «system» debe CONTENER todos los casos, sin recortarlos. Se prueba con
+  // muchos casos (2 columnas) y una etiqueta larga que envuelve a varias líneas: su
+  // rectángulo real (useCaseNodeSize) tiene que quedar dentro del box.
+  test('el box system contiene el rectángulo de cada caso de uso', () => {
+    const grande: DiagramSchema = {
+      title: 'Plataforma',
+      diagram_type: 'use_case',
+      nodes: [
+        makeNode('actor1', 'Usuario', 'actor'),
+        makeNode('actor2', 'Administrador del sistema', 'actor'),
+        makeNode('sys', 'Plataforma', 'system'),
+        makeNode('c1', 'Registrar una incidencia con descripción muy detallada y adjuntos', 'use_case'),
+        makeNode('c2', 'Login', 'use_case'),
+        makeNode('c3', 'Consultar histórico de incidencias resueltas', 'use_case'),
+        makeNode('c4', 'Exportar', 'use_case'),
+        makeNode('c5', 'Asignar técnico responsable a una incidencia abierta', 'use_case'),
+        makeNode('c6', 'Cerrar incidencia', 'use_case'),
+        makeNode('c7', 'Notificar', 'use_case'),
+        makeNode('c8', 'Gestionar permisos de los usuarios del sistema', 'use_case'),
+      ],
+      edges: [
+        makeEdge('a1', 'actor1', 'c1', '', 'association'),
+        makeEdge('a2', 'actor1', 'c2', '', 'association'),
+        makeEdge('a3', 'actor2', 'c8', '', 'association'),
+        makeEdge('a4', 'actor2', 'c5', '', 'association'),
+      ],
+    }
+    const { nodes } = DiagramToFlow(grande)
+    const sys = nodes.find((n) => n.type === 'useCaseSystem')!
+    const sysW = (sys.style as { width: number }).width
+    const sysH = (sys.style as { height: number }).height
+    const boxL = sys.position.x, boxT = sys.position.y
+    const boxR = boxL + sysW, boxB = boxT + sysH
+
+    const cases = nodes.filter((n) => n.type === 'useCase')
+    expect(cases.length).toBe(8)
+    for (const c of cases) {
+      const { width, height } = ucNodeSize((c.data as { label: string }).label)
+      expect(c.position.x).toBeGreaterThanOrEqual(boxL)
+      expect(c.position.y).toBeGreaterThanOrEqual(boxT)
+      expect(c.position.x + width).toBeLessThanOrEqual(boxR)
+      expect(c.position.y + height).toBeLessThanOrEqual(boxB)
+    }
+  })
+
+  // Un override manual de la caja MÁS PEQUEÑO que el contenido no debe recortar: el
+  // auto-size actúa como suelo y el box se expande para seguir cubriéndolo todo.
+  test('override manual menor que el contenido se expande hasta contener los casos', () => {
+    const conOverride: DiagramSchema = {
+      title: 'Tienda online',
+      diagram_type: 'use_case',
+      nodes: diagram.nodes,
+      edges: diagram.edges,
+      group_layout: { sys: { x: 200, y: 50, width: 40, height: 40 } },
+    }
+    const { nodes } = DiagramToFlow(conOverride)
+    const sys = nodes.find((n) => n.type === 'useCaseSystem')!
+    const sysW = (sys.style as { width: number }).width
+    const sysH = (sys.style as { height: number }).height
+    const boxL = sys.position.x, boxT = sys.position.y
+    const boxR = boxL + sysW, boxB = boxT + sysH
+
+    for (const c of nodes.filter((n) => n.type === 'useCase')) {
+      const { width, height } = ucNodeSize((c.data as { label: string }).label)
+      expect(c.position.x).toBeGreaterThanOrEqual(boxL)
+      expect(c.position.y).toBeGreaterThanOrEqual(boxT)
+      expect(c.position.x + width).toBeLessThanOrEqual(boxR)
+      expect(c.position.y + height).toBeLessThanOrEqual(boxB)
+    }
   })
 })
 

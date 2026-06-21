@@ -72,6 +72,34 @@ export function estimateNodeSize(label: string, attributes?: string[], nodeType?
     return { width, height };
 }
 
+// Ancho máximo del TEXTO de un caso de uso antes de envolver a varias líneas.
+// Es la única fuente de verdad del wrap: UseCaseNode lo aplica como max-width (CSS)
+// y useCaseNodeSize lo usa para estimar el alto, de modo que el layout dimensiona
+// la caja «system» EXACTAMENTE como se renderiza el nodo (sin recortes).
+export const USE_CASE_MAX_TEXT_W = 200;
+
+// Tamaño renderizado (caja contenedora) de un caso de uso a partir de su etiqueta,
+// replicando el wrap de UseCaseNode: el texto se envuelve a USE_CASE_MAX_TEXT_W y el
+// nodo crece en VERTICAL (varias líneas). Es deliberadamente holgado: mejor
+// sobreestimar que recortar. El padding es generoso (px-8/py-4) porque en una elipse
+// el rectángulo de texto solo cabe si la caja es bastante mayor; así el texto
+// multilínea no asoma por las esquinas del óvalo. Chrome lateral = px-8 (64) + borde
+// 6; vertical = py-4 (32) + borde 6. Mínimos = min-w-[120]/min-h-[52] del componente.
+export function useCaseNodeSize(label: string): { width: number; height: number } {
+    const CHAR_W = 7.4;   // ancho medio por glifo a 14px (text-sm) semibold
+    const LINE_H = 18;    // 14px * leading-tight (~1.25), redondeado al alza
+    const PAD_X  = 70;    // px-8 (64) + borde (6)
+    const PAD_Y  = 38;    // py-4 (32) + borde (6)
+    const MIN_W  = 120;
+    const MIN_H  = 52;
+    const lineW = label.length * CHAR_W;
+    const textW = Math.min(USE_CASE_MAX_TEXT_W, lineW);
+    const lines = Math.max(1, Math.ceil(lineW / USE_CASE_MAX_TEXT_W));
+    const width  = Math.max(MIN_W, Math.round(textW) + PAD_X);
+    const height = Math.max(MIN_H, lines * LINE_H + PAD_Y);
+    return { width, height };
+}
+
 export type Box = { cx: number; cy: number; w: number; h: number };
 type Side = 'T' | 'B' | 'L' | 'R';
 type Anchor = { x: number; y: number };
@@ -383,13 +411,18 @@ function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
     // Tamaños fijos para el layout (px de flujo).
     const ACTOR_W    = 80;
     const ACTOR_H    = 110;  // monigote + etiqueta
-    const UC_W       = 170;
-    const UC_H       = 64;
+    const UC_W_MIN   = 170;  // ancho mínimo de columna (los casos cortos no encogen de más)
     const UC_GAP_X   = 110;  // hueco entre columnas: deja sitio a etiquetas «include»/«extend»
     const UC_GAP_Y   = 64;   // hueco vertical entre casos apilados
     const SIDE_PAD   = 96;   // del borde del «system» al actor
     const GROUP_PAD  = 56;   // relleno interior de la caja system
     const LABEL_BAND = 40;   // banda superior reservada al título del subsistema
+
+    // Tamaño RENDERIZADO de cada caso (texto multilínea → crece en vertical). El box
+    // se dimensiona a partir de ESTOS tamaños, no de un alto fijo, para envolverlos
+    // siempre. Misma regla de wrap que UseCaseNode (useCaseNodeSize comparte el cap).
+    const sizeOf = new Map<string, { width: number; height: number }>();
+    for (const uc of useCases) sizeOf.set(uc.id, useCaseNodeSize(uc.label));
 
     const n = useCases.length;
     // 1 columna para diagramas pequeños; 2 columnas a partir de 7 casos.
@@ -463,11 +496,15 @@ function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
     });
 
     const effCols = columns.length;
-    const rows = Math.max(1, ...columns.map((c) => c.length));
 
-    // Geometría del contenido y de la caja system.
-    const contentW = effCols * UC_W + (effCols - 1) * UC_GAP_X;
-    const contentH = rows * UC_H + (rows - 1) * UC_GAP_Y;
+    // Ancho de cada columna = el caso más ancho que contiene (mínimo UC_W_MIN). Alto
+    // de cada columna = suma de los altos reales de sus casos + huecos. El contenido
+    // se mide así, con tamaños por nodo, en vez de con una rejilla uniforme.
+    const colW = columns.map((col) => Math.max(UC_W_MIN, ...col.map((uc) => sizeOf.get(uc.id)!.width)));
+    const colH = columns.map((col) =>
+        col.reduce((s, uc) => s + sizeOf.get(uc.id)!.height, 0) + Math.max(0, col.length - 1) * UC_GAP_Y);
+    const contentW = colW.reduce((s, w) => s + w, 0) + Math.max(0, effCols - 1) * UC_GAP_X;
+    const contentH = Math.max(0, ...colH);
     const innerW   = contentW + GROUP_PAD * 2;
     const innerH   = contentH + GROUP_PAD * 2 + LABEL_BAND;
 
@@ -476,16 +513,21 @@ function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
     const sysY = 0;
     const contentTop = sysY + GROUP_PAD + LABEL_BAND;
 
-    // Posiciones de los casos: cada columna centrada verticalmente en el contenido
-    // (las columnas más cortas no quedan pegadas arriba).
+    // x acumulada de cada columna (anchos variables → no es un paso constante).
+    const colX: number[] = [];
+    for (let c = 0, x = sysX + GROUP_PAD; c < effCols; x += colW[c] + UC_GAP_X, c++) colX.push(x);
+
+    // Posiciones de los casos: cada columna centrada verticalmente en el contenido;
+    // cada caso centrado horizontalmente en el ancho de su columna. Se apilan por su
+    // alto REAL, así un caso multilínea empuja a los de debajo sin solaparse.
     const ucPos = new Map<string, { x: number; y: number }>();
     columns.forEach((colItems, col) => {
-        const colH   = colItems.length * UC_H + Math.max(0, colItems.length - 1) * UC_GAP_Y;
-        const startY = contentTop + (contentH - colH) / 2;
-        const x      = sysX + GROUP_PAD + col * (UC_W + UC_GAP_X);
-        colItems.forEach((uc, idx) => {
-            ucPos.set(uc.id, { x, y: startY + idx * (UC_H + UC_GAP_Y) });
-        });
+        let y = contentTop + (contentH - colH[col]) / 2;
+        for (const uc of colItems) {
+            const s = sizeOf.get(uc.id)!;
+            ucPos.set(uc.id, { x: colX[col] + (colW[col] - s.width) / 2, y });
+            y += s.height + UC_GAP_Y;
+        }
     });
 
     // Actores: mitad izquierda / mitad derecha (alternando por índice), repartidos
@@ -510,41 +552,69 @@ function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
         } as Node;
     });
 
+    // Posición final de cada caso (respeta el arrastre manual del propio caso).
+    const ucFinal = new Map<string, { x: number; y: number }>();
+    for (const uc of useCases) ucFinal.set(uc.id, uc.position ?? ucPos.get(uc.id)!);
+
+    // Región que la caja DEBE cubrir: parte de la geometría automática y se expande
+    // hasta envolver el rectángulo REAL de cada caso (con su tamaño medido) más el
+    // relleno; LABEL_BAND extra por arriba para el título. Así ningún caso queda
+    // fuera, ni siquiera si se arrastró o creció en multilínea.
+    let aL = sysX, aT = sysY, aR = sysX + innerW, aB = sysY + innerH;
+    for (const uc of useCases) {
+        const p = ucFinal.get(uc.id)!;
+        const s = sizeOf.get(uc.id)!;
+        aL = Math.min(aL, p.x - GROUP_PAD);
+        aT = Math.min(aT, p.y - GROUP_PAD - LABEL_BAND);
+        aR = Math.max(aR, p.x + s.width + GROUP_PAD);
+        aB = Math.max(aB, p.y + s.height + GROUP_PAD);
+    }
+    const autoX = aL, autoY = aT, autoW = aR - aL, autoH = aB - aT;
+
     // Nodo(s) system como contenedor (parentId no soportado en todos los layouts;
     // aquí usamos posición absoluta con dimensiones ajustadas).
     const systemNodes: Node[] = systems.map((sys) => {
-        // Override manual: si el usuario redimensionó/movió el subsistema, su
-        // geometría guardada (group_layout) gana al cálculo automático.
+        // Override manual: si el usuario redimensionó/movió el subsistema, puede
+        // AGRANDARLO o MOVERLO, pero el auto-size es un SUELO: la caja nunca encoge
+        // por debajo de lo que hace falta para contener todos los casos (se expande
+        // para cubrir la región automática). Así no los corta nunca.
         const ov = diagram.group_layout?.[sys.id];
+        let x = autoX, y = autoY, width = autoW, height = autoH;
+        if (ov) {
+            x = Math.min(ov.x, autoX);
+            y = Math.min(ov.y, autoY);
+            width  = Math.max(ov.x + ov.width,  autoX + autoW) - x;
+            height = Math.max(ov.y + ov.height, autoY + autoH) - y;
+        }
         return {
             id: sys.id,
-            position: ov ? { x: ov.x, y: ov.y } : (sys.position ?? { x: sysX, y: sysY }),
+            position: { x, y },
             data: { label: sys.label, nodeType: sys.node_type, attributes: sys.attributes },
             type: 'useCaseSystem',
-            style: ov ? { width: ov.width, height: ov.height } : { width: innerW, height: innerH },
+            style: { width, height },
             // Nodo contenedor: no tiene handles propios.
         } as Node;
     });
 
     // Nodos de casos de uso: posición absoluta en el canvas.
-    const ucNodes: Node[] = useCases.map((uc) => {
-        const pos = ucPos.get(uc.id)!;
-        return {
-            id: uc.id,
-            position: uc.position ?? pos,
-            data: { label: uc.label, nodeType: uc.node_type, attributes: uc.attributes },
-            type: 'useCase',
-        } as Node;
-    });
+    const ucNodes: Node[] = useCases.map((uc) => ({
+        id: uc.id,
+        position: ucFinal.get(uc.id)!,
+        data: { label: uc.label, nodeType: uc.node_type, attributes: uc.attributes },
+        type: 'useCase',
+    } as Node));
 
     // Todos los nodos en orden: system primero (se renderiza detrás).
     const allNodes = [...systemNodes, ...actorNodes, ...ucNodes];
 
-    // Cajas para el ruteo de aristas.
+    // Cajas para el ruteo de aristas: system desde su style; actores fijos; casos
+    // con su tamaño real medido (sizeOf), para que las flechas apunten bien aunque
+    // el caso haya crecido en multilínea.
     const boxes = new Map<string, { cx: number; cy: number; w: number; h: number }>();
     for (const n of allNodes) {
-        const w = (n.style as { width?: number } | undefined)?.width ?? (n.type === 'useCaseActor' ? ACTOR_W : UC_W);
-        const h = (n.style as { height?: number } | undefined)?.height ?? (n.type === 'useCaseActor' ? ACTOR_H : UC_H);
+        const s = sizeOf.get(n.id);
+        const w = (n.style as { width?: number } | undefined)?.width ?? s?.width ?? (n.type === 'useCaseActor' ? ACTOR_W : UC_W_MIN);
+        const h = (n.style as { height?: number } | undefined)?.height ?? s?.height ?? (n.type === 'useCaseActor' ? ACTOR_H : 52);
         boxes.set(n.id, { cx: n.position.x + w / 2, cy: n.position.y + h / 2, w, h });
     }
 
@@ -556,6 +626,14 @@ function useCaseLayout(diagram: DiagramSchema): { nodes: Node[], edges: Edge[] }
 
     return { nodes: allNodes, edges };
 }
+
+// Tipos de nodo (React Flow `type`) que muestran atributos y entran en edición
+// INLINE (nombre + atributos en el propio nodo) al hacer doble clic: la tabla ERD
+// (lista completa de columnas) y los nodos de arquitectura (icono + línea `tech:`).
+// `architecture`/`c4` son legacy —hoy arquitectura siempre renderiza como
+// `archIcon`— pero se incluyen por consistencia. Fuente única: la consumen los
+// propios nodos y el menú contextual ("Editar").
+export const ATTRIBUTE_FLOW_TYPES = new Set(['table', 'archIcon', 'architecture', 'c4']);
 
 // Resuelve el componente React Flow (`type`) de un nodo del dominio: override por
 // diagram_type → mapa general → 'default'. Compartido por dagreLayout y el layout
