@@ -6,7 +6,7 @@ import { useStore } from '../store/index';
 import { useUiStore } from '../store/ui';
 import { NodePalette } from './NodePalette';
 import { AuthButton } from './AuthButton';
-import { FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView';
+import { FIT_VIEW_DURATION, useFitDiagramView } from '../ui/utils/fitView';
 
 // Retardo entre relayout() y el fitView de centrado. Debe cubrir la animación de
 // "Recalcular layout" (LAYOUT_ANIM_MS = 400 ms en DiagramCanvas) más el margen del
@@ -14,7 +14,8 @@ import { FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView';
 const RELAYOUT_FIT_DELAY_MS = 450;
 
 export function EditToolbar() {
-  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const { zoomIn, zoomOut } = useReactFlow();
+  const fitDiagramView = useFitDiagramView();
   const { undo, redo, canUndo, canRedo, reset: resetHistory } = useHistoryStore();
   const currentDiagram = useStore((s) => s.currentDiagram);
   const newDiagram = useStore((s) => s.newDiagram);
@@ -61,7 +62,7 @@ export function EditToolbar() {
             // Esperamos a que los nodos lleguen a sus posiciones (animación de
             // layout + refinamiento ELK async) antes de encuadrar; si no, el
             // fitView mediría el layout viejo y centraría mal.
-            setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), RELAYOUT_FIT_DELAY_MS);
+            setTimeout(() => fitDiagramView({ duration: FIT_VIEW_DURATION }), RELAYOUT_FIT_DELAY_MS);
           }}
           aria-label="Recalcular el layout automático del diagrama"
         />
@@ -84,7 +85,7 @@ export function EditToolbar() {
         <IconButton
           icon={<Maximize2 size={16} />}
           tooltip="Ajustar vista"
-          onClick={() => fitView(FIT_VIEW_OPTIONS_ANIMATED)}
+          onClick={() => fitDiagramView({ duration: FIT_VIEW_DURATION })}
         />
         <IconButton
           icon={<ZoomIn size={16} />}

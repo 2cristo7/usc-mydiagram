@@ -12,7 +12,7 @@ import {
   useReactFlow,
   ConnectionMode,
 } from '@xyflow/react'
-import { AlertTriangle, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { EmptyState, Spinner } from '../ui/primitives'
 
 function DiagramQuestionIcon({ size = 48, className }: { size?: number; className?: string }) {
@@ -74,7 +74,7 @@ import { toast } from '../store/toast'
 import { beginHistoryInteraction, endHistoryInteraction } from '../store/historyManager'
 import { beginDragCursor, endDragCursor } from '../ui/utils/dragCursor'
 import { GRID_SIZE } from '../ui/utils/grid'
-import { FIT_VIEW_OPTIONS, FIT_VIEW_OPTIONS_ANIMATED } from '../ui/utils/fitView'
+import { FIT_VIEW_OPTIONS, FIT_VIEW_DURATION, useFitDiagramView } from '../ui/utils/fitView'
 
 const nodeTypes = {
   c4: C4Node,
@@ -175,6 +175,25 @@ export function DiagramCanvas() {
   const isConnecting = useRef(false)
   const [, setConnectingTarget] = useState<string | null>(null)
 
+  // Persiste el diagrama y, si falla, avisa al usuario: un borrado/cambio que no
+  // llega a BD queda solo en memoria y reaparece al recargar. Sin este aviso el
+  // fallo es silencioso. persistCurrentDiagram puede resolver con {ok:false} (fallo
+  // esperado, p. ej. red) o rechazar la promesa; cubrimos ambos. 'no-session' no es
+  // un fallo real (usuario sin login): la edición no se guarda y no hay nada que
+  // avisar (igual que en el autoguardado del store).
+  const persistOrWarn = useCallback(() => {
+    persistCurrentDiagram()
+      .then((r) => {
+        if (!r.ok && r.error !== 'no-session') {
+          toast.error('No se pudo guardar el cambio. Revisa tu conexión.')
+        }
+      })
+      .catch((e) => {
+        console.error('[DiagramCanvas] error persistiendo el cambio:', e)
+        toast.error('No se pudo guardar el cambio. Revisa tu conexión.')
+      })
+  }, [])
+
   // Borrado de nodos (tecla Supr/Retroceso): React Flow quita el nodo de su estado
   // local, pero la verdad vive en el store (currentDiagram), que se re-siembra; hay
   // que reflejar el borrado allí (removeNode arrastra las aristas incidentes) y
@@ -186,15 +205,15 @@ export function DiagramCanvas() {
       const edgeIds = edges.filter((e) => e.source === n.id || e.target === n.id).map((e) => e.id)
       removeNode(n.id, edgeIds)
     })
-    void persistCurrentDiagram()
-  }, [])
+    persistOrWarn()
+  }, [persistOrWarn])
 
   // Borrado de aristas por teclado (mismo motivo: reflejar en el store + persistir).
   const onEdgesDelete = useCallback((deleted: Edge[]) => {
     const { removeEdge } = useStore.getState()
     deleted.forEach((e) => removeEdge(e.id))
-    void persistCurrentDiagram()
-  }, [])
+    persistOrWarn()
+  }, [persistOrWarn])
 
   const onConnectStart = useCallback(() => {
     isConnecting.current = true
@@ -255,7 +274,11 @@ export function DiagramCanvas() {
       s.setLastGenerationPrompt(row.prompt ?? null)
       try {
         s.setVersions(await listVersions(row.id))
-      } catch {
+      } catch (e) {
+        // Degrada (abre con el diario vacío) pero no en silencio: deja traza en
+        // consola y avisa discretamente de que se perdió el historial de versiones.
+        console.warn('[DiagramCanvas] no se pudo cargar el historial de versiones:', e)
+        toast.warning('No se pudo cargar el historial de versiones.')
         s.setVersions([])
       }
       useHistoryStore.getState().reset()
@@ -303,7 +326,10 @@ export function DiagramCanvas() {
   // el arrastre siga al ratón en vivo. Derivamos del store via DiagramToFlow y
   // re-sembramos el estado local cada vez que cambia currentDiagram (nueva
   // generación, edición desde IA, persistencia de posición tras soltar).
-  const { screenToFlowPosition, getNodes, getInternalNode, fitView } = useReactFlow()
+  const { screenToFlowPosition, getNodes, getInternalNode } = useReactFlow()
+  // Encuadre consciente del tipo de diagrama: ancla arriba en secuencia (cabeceras
+  // siempre visibles), centra en el resto. Lo comparten todos los puntos de fit.
+  const fitDiagramView = useFitDiagramView()
   const derived = useMemo(
     () => (currentDiagram ? DiagramToFlow(currentDiagram) : { nodes: [], edges: [] }),
     [currentDiagram],
@@ -482,9 +508,9 @@ export function DiagramCanvas() {
     // medidos antes de calcular el encuadre. Animado (duration): el diagrama
     // aparece en la vista anterior y "vuela" suavemente al encuadre nuevo, en
     // vez de dar un salto brusco (flash).
-    const t = setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), 80)
+    const t = setTimeout(() => fitDiagramView({ duration: FIT_VIEW_DURATION }), 80)
     return () => clearTimeout(t)
-  }, [currentDiagramId, fitView])
+  }, [currentDiagramId, fitDiagramView])
 
   // Re-encuadre continuo durante el montaje en vivo: la prop `fitView` solo encuadra
   // al montar, pero el diagrama CRECE mientras la cola de revelado lo va tejiendo.
@@ -494,9 +520,9 @@ export function DiagramCanvas() {
   // continuo. Retardo de un frame para que React Flow haya aplicado los nodos nuevos.
   useEffect(() => {
     if (generationPhase !== 'live') return
-    const t = setTimeout(() => fitView(FIT_VIEW_OPTIONS_ANIMATED), 0)
+    const t = setTimeout(() => fitDiagramView({ duration: FIT_VIEW_DURATION }), 0)
     return () => clearTimeout(t)
-  }, [generationPhase, currentDiagram, fitView])
+  }, [generationPhase, currentDiagram, fitDiagramView])
 
   // Animación del "Recalcular layout": al disparar relayout(), el store
   // incrementa relayoutTick. Activamos una clase que pone una transición CSS en
@@ -512,7 +538,27 @@ export function DiagramCanvas() {
     return () => clearTimeout(t)
   }, [relayoutTick])
 
-  // Layout de arquitectura: rejilla síncrona determinista. `derived` ya es
+  // Asentamiento final del montaje en vivo (live → done). Al cerrar la generación el
+  // canvas deja de alimentarse de liveLayout y pasa a rfNodes (DiagramToFlow), en la
+  // MISMA instancia de ReactFlow (sin remontaje). Para que cualquier delta residual
+  // —p. ej. un nodo que aún esperaba en el anillo radial— se DESLICE en vez de saltar,
+  // la transición de transform debe estar activa en el MISMO commit que el cambio de
+  // posiciones. Por eso phaseJustSettled se calcula en el propio render (no en un
+  // efecto, que llegaría un frame tarde); el efecto solo extiende la ventana y
+  // sincroniza el ref. Reusa la clase .animate-layout (ya da el glide del transform).
+  const prevPhaseRef = useRef(generationPhase)
+  const phaseJustSettled = prevPhaseRef.current === 'live' && generationPhase === 'done'
+  useEffect(() => {
+    if (prevPhaseRef.current !== generationPhase) prevPhaseRef.current = generationPhase
+    if (!phaseJustSettled) return
+    setAnimateLayout(true)
+    const t = setTimeout(() => setAnimateLayout(false), LAYOUT_ANIM_MS + 50)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generationPhase])
+
+  // Layout de arquitectura: dagre layered síncrono determinista (rejilla si no hay
+  // aristas entre grupos). `derived` ya es
   // architectureLayoutSync(currentDiagram), función PURA de currentDiagram (incluye
   // group_layout y node.position), así que reconciliar rfNodes desde su salida
   // refleja TODO cambio —mover/redimensionar un contenedor, mover un hijo, undo/redo,
@@ -520,8 +566,12 @@ export function DiagramCanvas() {
   // recalcula el efecto de ruteo de más arriba desde las cajas medidas; aquí solo
   // posicionamos nodos.) El re-sembrado genérico de más arriba excluye arquitectura
   // a propósito: lo posee este efecto.
+  // NO se gatea por la fase 'live': durante el montaje el canvas muestra liveLayout
+  // (no rfNodes), pero mantenemos rfNodes sembrado en segundo plano para que en el
+  // handoff live→done ya tenga el layout completo y no haya un frame vacío (el
+  // re-sembrado genérico hace lo mismo para el resto de tipos).
   useEffect(() => {
-    if (currentDiagram?.diagram_type !== 'architecture' || generationPhase === 'live') return
+    if (currentDiagram?.diagram_type !== 'architecture') return
     setRfNodes((prev) => {
       const next = derived.nodes
       // Misma ESTRUCTURA (mismos id+tipo+padre: un movimiento/redimensión/undo/
@@ -565,81 +615,24 @@ export function DiagramCanvas() {
     })
   }, [derived, currentDiagram, generationPhase, setRfNodes])
 
-  // ── FASE LIVE ───────────────────────────────────────────────────────────────
-  // Montaje en tiempo real durante la generación por streaming. liveLayout coloca los
-  // nodos que van llegando en un CÍRCULO RADIAL compacto y, según llegan las aristas,
-  // cristaliza la estructura real (mindmap radial, ERD con dagre…) tirando de los nodos
-  // conectados a su sitio; los aún sueltos esperan en un anillo. La cola de revelado de
-  // useWebSocket marca el ritmo (un elemento cada ~190 ms+). La clase 'is-live' aplica
-  // vía CSS la transición de transform, de modo que cada recálculo se ve como un glide.
-  // El re-encuadre (cámara que sigue el montaje) lo lleva el efecto de más arriba.
-  if (generationPhase === 'live' && currentDiagram) {
-    // Resolver el tipo para el layout en vivo (ver arriba). Si lo conocemos y aún no
-    // está en currentDiagram, se lo inyectamos para que liveLayout elija el layout real
-    // (p. ej. mindmap radial) en vez del dagre genérico por defecto.
-    // En auto, el tipo lo conocemos por el puente de streaming (diagram:type_ready)
-    // antes que por selectedDiagramType/lastGenerationType (ambos null en auto).
-    const liveType = currentDiagram.diagram_type ?? streamingType ?? selectedDiagramType ?? lastGenerationType
-    const liveDiagram = liveType && !currentDiagram.diagram_type
-      ? { ...currentDiagram, diagram_type: liveType }
-      : currentDiagram
-    const { nodes: liveNodes, edges: liveEdges } = liveLayout(liveDiagram)
-
-    return (
-      <div className="relative flex h-full w-full is-live">
-        <EdgeMarkers />
-        <ReactFlow
-          nodes={liveNodes}
-          edges={liveEdges}
-          fitView
-          fitViewOptions={FIT_VIEW_OPTIONS}
-          nodesDraggable={false}
-          panOnDrag={PAN_ON_DRAG}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onConnect={onConnect}
-          onConnectStart={onConnectStart}
-          onConnectEnd={onConnectEnd}
-          onNodeMouseEnter={onNodeMouseEnter}
-          onNodeMouseLeave={onNodeMouseLeave}
-          onContextMenu={suppressContextMenu}
-          className="bg-[var(--color-bg)]"
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background
-            variant={BackgroundVariant.Dots}
-            color="var(--color-ink)"
-            gap={20}
-            size={1}
-            style={{ opacity: 0.12 }}
-          />
-          <MiniMap
-            className="border-[3px] border-[var(--color-ink)]"
-            nodeColor="var(--color-accent)"
-            style={{ background: 'var(--color-surface)', ...MINIMAP_SIZE }}
-          />
-        </ReactFlow>
-      </div>
-    )
-  }
-
-  // ── FASE DONE / IDLE ────────────────────────────────────────────────────────
-  // Comportamiento normal: sin diagrama → estados vacíos; con diagrama → canvas
-  // interactivo completo (drag, drop, propiedades).
+  // ── FASE LIVE / DONE / IDLE ───────────────────────────────────────────────────
+  // Un ÚNICO <ReactFlow> sirve las tres fases (return final). Durante la generación
+  // ('live') se alimenta de liveLayout —nube radial + cristalización dagre por arista,
+  // no editable— y en 'done'/'idle' de rfNodes (DiagramToFlow, interactivo). Al ser la
+  // MISMA instancia, el paso live→done NO remonta el canvas: no hay flash ni reset de
+  // cámara; el asentamiento final se desliza por CSS (ventana phaseJustSettled, abajo).
+  // Sin diagrama → estados vacíos.
 
   if (!currentDiagram) {
     if (trashedDiagram) {
       return (
         <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
-          <button
-            onClick={restoreTrashed}
-            className="max-w-sm border-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-brutal)] text-center hover:bg-[var(--color-accent)]/10 active:translate-x-[2px] active:translate-y-[2px]"
-          >
-            <Trash2 size={32} className="mx-auto mb-2 text-[var(--color-ink)]/60" />
-            <p className="text-sm font-semibold text-[var(--color-ink)]">
-              Diagrama en la papelera, clica aquí para restaurarlo
-            </p>
-          </button>
+          <EmptyState
+            icon={<Trash2 size={48} />}
+            title="Diagrama en la papelera"
+            description="Este diagrama se ha movido a la papelera. Puedes restaurarlo para volver a editarlo."
+            action={{ label: 'Restaurar', onClick: restoreTrashed }}
+          />
         </div>
       )
     }
@@ -655,21 +648,10 @@ export function DiagramCanvas() {
         </div>
       )
     }
-    if (uiState === 'error') {
-      return (
-        <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
-          <div className="max-w-sm border-[3px] border-[var(--color-danger)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-brutal)] text-center">
-            <AlertTriangle size={32} className="mx-auto mb-2 text-[var(--color-danger)]" />
-            <p className="text-sm font-semibold text-[var(--color-ink)]">
-              No se pudo generar el diagrama.
-            </p>
-            <p className="mt-1 text-xs text-[var(--color-ink)]/60">
-              Revisa el chat e inténtalo de nuevo.
-            </p>
-          </div>
-        </div>
-      )
-    }
+    // El error de generación ya no se pinta como tarjeta central: lo muestra el
+    // AlertBanner anclado al borde superior del canvas (App.tsx). Sin diagrama, el
+    // estado de error cae al estado vacío de reposo, con el banner explicando el
+    // fallo y el prompt fallido restaurado en el input para reintentar.
     return (
       <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)]">
         <EmptyState
@@ -769,58 +751,65 @@ export function DiagramCanvas() {
     endDragCursor()
   }
 
-  // Banner de error no intrusivo: visible cuando un refinamiento falla pero ya hay
-  // un diagrama en el canvas (el bloque !currentDiagram no se alcanza en ese caso,
-  // así que el usuario no vería nada sin este aviso). Se superpone en la franja
-  // superior sin tapar el diagrama; desaparece al volver a 'ready' o 'generating'.
-  const showErrorBanner = uiState === 'error'
+  // ── Origen de nodos/aristas según la fase ────────────────────────────────────
+  // 'live': montaje en vivo con liveLayout (nube radial compacta para los nodos que
+  // van llegando; al llegar las aristas, dagre/mindmap cristaliza la estructura y los
+  // nodos sueltos esperan en un anillo). Resolvemos el tipo igual que el header
+  // (currentDiagram.diagram_type ?? streaming ?? preselección ?? tipo de la generación)
+  // y lo inyectamos si aún no está en currentDiagram, para que liveLayout elija el
+  // layout REAL desde el principio en vez del dagre genérico.
+  // 'done'/'idle': rfNodes/rfEdges (canvas interactivo, DiagramToFlow).
+  const isLive = generationPhase === 'live'
+  let renderNodes = rfNodes
+  let renderEdges = rfEdges
+  if (isLive) {
+    const liveType = currentDiagram.diagram_type ?? streamingType ?? selectedDiagramType ?? lastGenerationType
+    const liveDiagram = liveType && !currentDiagram.diagram_type
+      ? { ...currentDiagram, diagram_type: liveType }
+      : currentDiagram
+    const live = liveLayout(liveDiagram)
+    renderNodes = live.nodes
+    renderEdges = live.edges
+  }
 
   return (
-    <div ref={canvasRef} className="relative flex h-full w-full">
-      {showErrorBanner && (
-        <div className="absolute top-0 left-0 right-0 z-20 flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] border-b-[3px] border-[var(--color-danger)] shadow-[0_3px_0_var(--color-danger)] pointer-events-none">
-          <AlertTriangle size={16} className="shrink-0 text-[var(--color-danger)]" />
-          <p className="text-xs font-semibold text-[var(--color-ink)]">
-            No se pudo completar la operación. Revisa el chat e inténtalo de nuevo.
-          </p>
-        </div>
-      )}
+    <div ref={canvasRef} className={`relative flex h-full w-full${isLive ? ' is-live' : ''}`}>
       <EdgeMarkers />
       <ReactFlow
-        nodes={rfNodes}
-        edges={rfEdges}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={onEdgesChange}
+        nodes={renderNodes}
+        edges={renderEdges}
+        onNodesChange={isLive ? undefined : handleNodesChange}
+        onEdgesChange={isLive ? undefined : onEdgesChange}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
-        nodesDraggable={!canvasLocked}
-        nodesConnectable={!canvasLocked}
-        elementsSelectable={!canvasLocked}
+        nodesDraggable={!isLive && !canvasLocked}
+        nodesConnectable={!isLive && !canvasLocked}
+        elementsSelectable={!isLive && !canvasLocked}
         panOnDrag={PAN_ON_DRAG}
-        selectionOnDrag={!canvasLocked}
-        snapToGrid={gridEnabled}
+        selectionOnDrag={!isLive && !canvasLocked}
+        snapToGrid={!isLive && gridEnabled}
         snapGrid={[GRID_SIZE, GRID_SIZE]}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        deleteKeyCode={['Delete', 'Backspace']}
-        onNodesDelete={onNodesDelete}
-        onEdgesDelete={onEdgesDelete}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
+        deleteKeyCode={isLive ? [] : ['Delete', 'Backspace']}
+        onNodesDelete={isLive ? undefined : onNodesDelete}
+        onEdgesDelete={isLive ? undefined : onEdgesDelete}
+        onDrop={isLive ? undefined : onDrop}
+        onDragOver={isLive ? undefined : onDragOver}
         onConnect={onConnect}
         onConnectStart={onConnectStart}
         onConnectEnd={onConnectEnd}
         onNodeMouseEnter={onNodeMouseEnter}
         onNodeMouseLeave={onNodeMouseLeave}
-        onNodeContextMenu={onNodeContextMenu}
-        onEdgeContextMenu={onEdgeContextMenu}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDragStop={onNodeDragStop}
+        onNodeContextMenu={isLive ? undefined : onNodeContextMenu}
+        onEdgeContextMenu={isLive ? undefined : onEdgeContextMenu}
+        onNodeDragStart={isLive ? undefined : onNodeDragStart}
+        onNodeDragStop={isLive ? undefined : onNodeDragStop}
         onContextMenu={suppressContextMenu}
-        onPaneClick={() => { setSelectedNode(null); closeEdgeMenu(); closeNodeMenu() }}
+        onPaneClick={isLive ? undefined : () => { setSelectedNode(null); closeEdgeMenu(); closeNodeMenu() }}
         connectionMode={ConnectionMode.Loose}
         connectionLineComponent={connectionLineComponent}
-        className={`bg-[var(--color-bg)]${animateLayout ? ' animate-layout' : ''}${animateNav ? ' animate-nav' : ''}`}
+        className={`bg-[var(--color-bg)]${(animateLayout || phaseJustSettled) ? ' animate-layout' : ''}${animateNav ? ' animate-nav' : ''}`}
         proOptions={{ hideAttribution: true }}
       >
         <Background
