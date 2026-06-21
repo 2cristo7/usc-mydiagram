@@ -28,6 +28,11 @@ const DEFAULT_CONFIG = {
 
 const COMMERCIAL_PROVIDERS = ['openai', 'anthropic', 'gemini']
 
+// Proveedores válidos para la config: los comerciales + el local (ollama, el
+// valor por defecto de DEFAULT_CONFIG). COMMERCIAL_PROVIDERS sigue acotando dónde
+// tiene sentido guardar una API key (Vault); aquí se valida el enum completo.
+const VALID_PROVIDERS = [...COMMERCIAL_PROVIDERS, 'ollama']
+
 // Rechaza una base_url de usuario que apunte (de forma evidente) a un host interno.
 // Es la primera línea anti-SSRF: el agente, que es quien hace la petición, resuelve
 // el DNS y vuelve a validar; aquí bloqueamos los vectores literales obvios (IPs
@@ -69,7 +74,8 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
   const supabase = supabaseForUser(req.accessToken!)
   const { data, error } = await supabase.rpc('get_llm_config')
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[llm-config] error al leer la configuración:', error)
+    res.status(500).json({ error: 'No se pudo leer la configuración.' })
     return
   }
   // get_llm_config devuelve array vacío si no hay fila aún
@@ -86,6 +92,18 @@ router.put('/', async (req: AuthedRequest, res: Response) => {
 
   if (!provider || !transport || model_fast === undefined || model_capable === undefined) {
     res.status(400).json({ error: 'Faltan campos obligatorios: provider, transport, model_fast, model_capable' })
+    return
+  }
+
+  // Validación de tipos y enum (no solo presencia): provider/transport deben ser
+  // strings y provider debe pertenecer a la lista soportada. Evita persistir una
+  // config que luego no resuelve ningún proveedor real.
+  if (typeof provider !== 'string' || typeof transport !== 'string') {
+    res.status(400).json({ error: 'provider y transport deben ser cadenas de texto.' })
+    return
+  }
+  if (!VALID_PROVIDERS.includes(provider)) {
+    res.status(400).json({ error: 'Proveedor no válido.' })
     return
   }
 
@@ -107,7 +125,8 @@ router.put('/', async (req: AuthedRequest, res: Response) => {
   })
 
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[llm-config] error al guardar la configuración:', error)
+    res.status(500).json({ error: 'No se pudo guardar la configuración.' })
     return
   }
 
@@ -127,7 +146,8 @@ router.delete('/api-key/:provider', async (req: AuthedRequest, res: Response) =>
   const supabase = supabaseForUser(req.accessToken!)
   const { error } = await supabase.rpc('delete_llm_api_key', { p_provider: provider })
   if (error) {
-    res.status(500).json({ error: error.message })
+    console.error('[llm-config] error al revocar la API key:', error)
+    res.status(500).json({ error: 'No se pudo revocar la credencial.' })
     return
   }
   res.json({ ok: true })

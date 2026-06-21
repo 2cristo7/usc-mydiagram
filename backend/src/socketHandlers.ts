@@ -46,6 +46,10 @@ interface PendingLlmRequest {
   resolve: (content: string) => void
   reject: (err: { error_code: string; detail?: string }) => void
   timer: ReturnType<typeof setTimeout>
+  // S10.5 — socket.id del navegador dueño de esta petición (== proxy_session).
+  // El handler de disconnect lo usa para rechazar SOLO los pending de ese socket
+  // y no abortar generaciones en vuelo de otros usuarios.
+  socketId: string
 }
 
 export const pendingLlmRequests = new Map<string, PendingLlmRequest>()
@@ -117,6 +121,7 @@ export function createInternalLlmRouter(io: Server) {
         resolve: (content) => onResponse({ request_id, content }),
         reject: (err) => onError({ request_id, ...err }),
         timer,
+        socketId: proxy_session,
       })
 
       sock.on('llm:response', onResponse)
@@ -146,6 +151,12 @@ export function createInternalLlmRouter(io: Server) {
 // get_llm_api_key) y monta el objeto LlmConfig a inyectar en el body del agente.
 // Devuelve undefined si el socket es anónimo o si no hay fila de config.
 
+// Proveedores que requieren API key (a diferencia de 'ollama', local/sin key).
+// Se duplica aquí a propósito: llmConfig.ts lo tiene como const no exportada y no
+// queremos acoplar el router HTTP con el handler de socket por una lista de 3
+// strings. Si crece, conviene extraerla a un módulo compartido.
+const COMMERCIAL_PROVIDERS = ['openai', 'anthropic', 'gemini']
+
 async function resolveLlmConfig(socket: Socket): Promise<LlmConfig | undefined> {
   const userId = socket.data.userId as string | null
   const token = socket.handshake.auth?.token as string | undefined
@@ -171,13 +182,35 @@ async function resolveLlmConfig(socket: Socket): Promise<LlmConfig | undefined> 
     const hasPersistedKey = Array.isArray(saved_providers) && saved_providers.includes(provider)
     let api_key: string | null = null
     if (hasPersistedKey) {
-      const { data: key } = await supabase.rpc('get_llm_api_key', { p_provider: provider })
+      // S10.3c — la key persistida vive cifrada en Vault. Si este RPC falla de
+      // forma transitoria (hipo de red/DB) y descartamos el error, `api_key`
+      // queda null y el agente recibe un Bearer vacío → HTTP 401 INTERMITENTE
+      // que «luego vuelve a funcionar» en cuanto el RPC responde bien. Por eso
+      // lo registramos en vez de tragarlo.
+      const { data: key, error: keyErr } = await supabase.rpc('get_llm_api_key', { p_provider: provider })
+      if (keyErr) {
+        console.warn(`[llm-config] get_llm_api_key falló para provider=${provider}:`, keyErr.message)
+      }
       api_key = key ?? null
     } else {
       const transient = socket.data.transientApiKey as { provider: string; key: string } | undefined
       if (transient && transient.provider === provider) {
         api_key = transient.key
       }
+    }
+
+    // Diagnóstico del 401 intermitente: un proveedor comercial que acaba sin key
+    // hará que el agente devuelva HTTP 401. Distingue las dos causas reales:
+    //  · persisted=true  → el RPC de Vault no devolvió la key (ver warning arriba).
+    //  · persisted=false → la key transitoria aún no llegó al socket (race de
+    //    reconexión: el navegador la reempuja en `connect`, pero esta generación
+    //    salió antes de que el gateway la registrara).
+    if (COMMERCIAL_PROVIDERS.includes(provider) && !api_key) {
+      console.warn(
+        `[llm-config] provider=${provider} resuelto SIN api_key ` +
+        `(persisted=${hasPersistedKey}, transient=${Boolean(socket.data.transientApiKey)}) ` +
+        `— el agente devolverá HTTP 401.`,
+      )
     }
 
     const config: LlmConfig = {
@@ -231,6 +264,27 @@ function emitRateLimited(socket: Socket): void {
   })
 }
 
+// S10.5 — Red de seguridad para los handlers async de socket. streamAgentToSocket
+// tiene su propio try/catch, pero un throw síncrono previo (p.ej. en
+// parseGenerationPayload) quedaría como unhandledRejection y dejaría al cliente
+// colgado sin diagram:error. Este wrapper captura cualquier fallo, lo loguea
+// server-side (con el evento como contexto) y emite un error genérico al socket.
+function safeHandler(
+  socket: Socket,
+  event: string,
+  handler: (payload: unknown) => Promise<void>,
+): (payload: unknown) => void {
+  return (payload: unknown) => {
+    handler(payload).catch((err) => {
+      console.error(`[socket] error no controlado en '${event}':`, err)
+      socket.emit('diagram:error', {
+        error: 'Error procesando la petición. Vuelve a intentarlo.',
+        category: 'internal',
+      })
+    })
+  }
+}
+
 export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> = {}): void {
   const { streamAgentToSocket, checkRateLimit, getCached, setCached, agentBaseUrl } = {
     ...defaultDeps,
@@ -273,22 +327,35 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
     // conectar y al cambiarla; la guardamos SOLO en memoria del socket para
     // inyectarla en la generación (resolveLlmConfig). Nunca toca BD ni disco.
     // payload null → el usuario la borró/persistió: se olvida de inmediato.
-    socket.on('llm:set_transient_key', (payload) => {
+    //
+    // El segundo argumento es un ACK opcional de Socket.IO. El navegador reenvía
+    // la key (con callback) JUSTO antes de cada generación y ESPERA esta
+    // confirmación antes de emitirla: así el gateway ya la tiene registrada en
+    // memoria cuando resolveLlmConfig la lee, cerrando la carrera
+    // reconexión↔generación que dejaba api_key=null → 401 espurio («se arreglaba
+    // al recargar»). Los empujes sin callback (re-push de `connect`, push del
+    // modal) no acaban aquí: `ack` llega como undefined y se ignora.
+    socket.on('llm:set_transient_key', (payload, ack) => {
       if (payload && typeof payload.provider === 'string' && typeof payload.api_key === 'string' && payload.api_key) {
         socket.data.transientApiKey = { provider: payload.provider, key: payload.api_key }
       } else {
         delete socket.data.transientApiKey
       }
+      if (typeof ack === 'function') ack({ ok: true })
     })
 
-    // Al desconectar, rechazar todas las Promises pendientes de este socket para
-    // no dejar /internal/llm colgado esperando los 120s. Los listeners
+    // Al desconectar, rechazar las Promises pendientes DE ESTE socket para no
+    // dejar /internal/llm colgado esperando los 120s. Los listeners
     // llm:response/llm:error los registra createInternalLlmRouter directamente
     // en el socket (socket.on) y los limpia al resolverse; aquí solo hacemos
     // cleanup de emergencia para el caso de desconexión inesperada.
+    // S10.5 — el Map es GLOBAL (compartido entre todos los sockets), así que se
+    // filtra por socketId === socket.id: desconectar al usuario A no debe abortar
+    // las generaciones en vuelo del usuario B.
     socket.on('disconnect', (reason) => {
       console.log(`Cliente desconectado del WebSocket — ${reason}`)
       for (const [request_id, pending] of pendingLlmRequests) {
+        if (pending.socketId !== socket.id) continue
         pendingLlmRequests.delete(request_id)
         clearTimeout(pending.timer)
         pending.reject({ error_code: 'browser_disconnected' })
@@ -344,27 +411,28 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
     // S10.2 — el payload pasó de string pelado a { prompt, diagram_type? }. Se
     // tolera el string antiguo (un cliente sin actualizar manda solo el prompt →
     // tipo automático) para no romper conexiones a medio desplegar.
-    socket.on('message:send', async (message) => {
+    socket.on('message:send', safeHandler(socket, 'message:send', async (message) => {
       const { prompt, diagramType } = parseGenerationPayload(message)
       console.log(`Mensaje recibido del cliente (generación): ${prompt}${diagramType ? ` [tipo: ${diagramType}]` : ' [tipo: auto]'}`)
       await runGeneration(prompt, true, diagramType)
-    })
+    }))
 
     // S9.3b — Redo: regenera el mismo prompt IGNORANDO la caché y sobrescribe.
     // S10.2 — conserva el tipo forzado original (lo reenvía el frontend) para que
     // regenerar no cambie el tipo del diagrama bajo los pies del usuario.
-    socket.on('message:regenerate', async (payload) => {
+    socket.on('message:regenerate', safeHandler(socket, 'message:regenerate', async (raw) => {
+      const payload = raw as { prompt?: unknown; diagram_type?: unknown } | undefined
       const prompt = (payload?.prompt ?? '').toString()
       if (!prompt) return
       const diagramType = normalizeDiagramType(payload?.diagram_type)
       console.log(`Mensaje recibido del cliente (regenerar, sin caché): ${prompt}${diagramType ? ` [tipo: ${diagramType}]` : ' [tipo: auto]'}`)
       await runGeneration(prompt, false, diagramType)
-    })
+    }))
 
     // Refinamiento: el frontend ya decidió que hay diagrama y adjunta su versión
     // compacta. No se cachea (depende del diagrama de entrada, no solo del prompt).
-    socket.on('message:refine', async (payload) => {
-      const { prompt, diagram } = payload ?? {}
+    socket.on('message:refine', safeHandler(socket, 'message:refine', async (raw) => {
+      const { prompt, diagram } = (raw ?? {}) as { prompt?: string; diagram?: { diagram_type?: string; nodes?: unknown[]; edges?: unknown[] } }
       console.log('Mensaje recibido del cliente (refinamiento):', prompt)
       if (!assertFreshToken(socket)) return
       if (!checkRateLimit(rateLimitKey(socket))) {
@@ -377,12 +445,12 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
       // S10.3 — config LLM también para refinamiento
       const llmConfig = await resolveLlmConfig(socket)
       await streamAgentToSocket(`${agentBaseUrl}/refine/stream`, { prompt, diagram }, socket, undefined, llmConfig)
-    })
+    }))
 
     // Reanudación tras clarificación (S7.4): la respuesta del usuario + el
     // thread_id de la ejecución pausada van a /refine/resume.
-    socket.on('message:clarification_answer', async (payload) => {
-      const { thread_id, answer } = payload ?? {}
+    socket.on('message:clarification_answer', safeHandler(socket, 'message:clarification_answer', async (raw) => {
+      const { thread_id, answer } = (raw ?? {}) as { thread_id?: string; answer?: string }
       console.log('Respuesta de clarificación recibida:', answer)
       if (!assertFreshToken(socket)) return
       if (!checkRateLimit(rateLimitKey(socket))) {
@@ -393,6 +461,6 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
       // S10.3 — config LLM también para reanudación de clarificación
       const llmConfig = await resolveLlmConfig(socket)
       await streamAgentToSocket(`${agentBaseUrl}/refine/resume`, { thread_id, answer }, socket, undefined, llmConfig)
-    })
+    }))
   })
 }

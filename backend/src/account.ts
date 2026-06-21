@@ -37,7 +37,8 @@ router.get('/export', async (req: AuthedRequest, res: Response) => {
     .select('*')
     .order('created_at', { ascending: true })
   if (diagErr) {
-    res.status(500).json({ error: diagErr.message })
+    console.error('[account] error al exportar diagramas:', diagErr)
+    res.status(500).json({ error: 'No se pudieron exportar los datos.' })
     return
   }
 
@@ -49,7 +50,8 @@ router.get('/export', async (req: AuthedRequest, res: Response) => {
     .order('diagram_id', { ascending: true })
     .order('seq', { ascending: true })
   if (verErr) {
-    res.status(500).json({ error: verErr.message })
+    console.error('[account] error al exportar versiones:', verErr)
+    res.status(500).json({ error: 'No se pudieron exportar los datos.' })
     return
   }
 
@@ -57,7 +59,8 @@ router.get('/export', async (req: AuthedRequest, res: Response) => {
   // nunca configuró nada.
   const { data: llmRows, error: llmErr } = await supabase.rpc('get_llm_config')
   if (llmErr) {
-    res.status(500).json({ error: llmErr.message })
+    console.error('[account] error al exportar la config LLM:', llmErr)
+    res.status(500).json({ error: 'No se pudieron exportar los datos.' })
     return
   }
   const llm_config = Array.isArray(llmRows) ? (llmRows[0] ?? null) : (llmRows ?? null)
@@ -105,14 +108,16 @@ router.delete('/', async (req: AuthedRequest, res: Response) => {
   const supabase = supabaseForUser(req.accessToken!)
   const { error: vaultErr } = await supabase.rpc('delete_all_llm_api_keys')
   if (vaultErr) {
-    res.status(500).json({ error: `No se pudo borrar la credencial: ${vaultErr.message}` })
+    console.error('[account] error al borrar las credenciales del usuario:', vaultErr)
+    res.status(500).json({ error: 'No se pudo borrar la cuenta.' })
     return
   }
 
   // 2. auth.users (service_role): cascada sobre diagrams + user_llm_config.
   const { error: delErr } = await supabaseService().auth.admin.deleteUser(userId)
   if (delErr) {
-    res.status(500).json({ error: `No se pudo eliminar la cuenta: ${delErr.message}` })
+    console.error('[account] error al eliminar el usuario de auth.users:', delErr)
+    res.status(500).json({ error: 'No se pudo borrar la cuenta.' })
     return
   }
 
