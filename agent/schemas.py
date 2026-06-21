@@ -34,7 +34,8 @@ class EdgeType(str, Enum):
     ONE_TO_ONE   = "one_to_one"
     INHERITS     = "inherits"    # herencia UML / generalización de actores (triángulo hueco)
     CALLS        = "calls"
-    SEQUENCE     = "sequence"    # mensaje en diagrama de secuencia
+    SEQUENCE     = "sequence"    # mensaje de llamada en secuencia (sólido, flecha rellena)
+    SEQUENCE_REPLY = "sequence_reply"  # respuesta/retorno en secuencia (discontinua, flecha abierta)
     DEPENDS_ON   = "depends_on"
     ASSOCIATION  = "association" # línea sólida actor↔caso de uso / mindmap
     FLOW         = "flow"        # flowchart (encadenado simple entre pasos)
@@ -145,7 +146,7 @@ ALLOWED_NODE_TYPES: dict[DiagramType, set[NodeType]] = {
 
 ALLOWED_EDGE_TYPES: dict[DiagramType, set[EdgeType]] = {
     DiagramType.ERD:          {EdgeType.ONE_TO_ONE, EdgeType.ONE_TO_MANY, EdgeType.MANY_TO_MANY},
-    DiagramType.SEQUENCE:     {EdgeType.SEQUENCE},
+    DiagramType.SEQUENCE:     {EdgeType.SEQUENCE, EdgeType.SEQUENCE_REPLY},
     DiagramType.FLOWCHART:    {EdgeType.FLOW, EdgeType.CONDITIONAL},
     DiagramType.ARCHITECTURE: {EdgeType.CALLS, EdgeType.DEPENDS_ON},
     DiagramType.MINDMAP:      {EdgeType.ASSOCIATION},

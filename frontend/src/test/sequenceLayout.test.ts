@@ -29,6 +29,19 @@ describe('sequenceLayout', () => {
     })
   })
 
+  it('actors carry seeded measured dims so fitView always includes the headers', () => {
+    // Regresión: sin `measured`, el actor llega al encuadre sin medir (su alto se
+    // mide tras pintar) y queda fuera del bounding box → fitView ancla en la
+    // cabecera de la lifeline y recorta los nodos de inicio por arriba.
+    const { nodes } = sequenceLayout(diagram)
+    const actors = nodes.filter((n) => n.type === 'sequenceActor')
+    expect(actors).toHaveLength(3)
+    actors.forEach((node) => {
+      expect(node.measured?.width).toBeGreaterThan(0)
+      expect(node.measured?.height).toBeGreaterThan(0)
+    })
+  })
+
   it('messages are ordered in Y by array position', () => {
     const { edges } = sequenceLayout(diagram)
     expect(edges).toHaveLength(2)
@@ -138,10 +151,11 @@ describe('sequenceLayout', () => {
     diagram.edges.forEach((schemaEdge) => {
       const activation = activations.find((n) => n.id === `activation-${schemaEdge.id}`)
       expect(activation).toBeDefined()
-      // The activation Y should match the arrow Y minus half ROW_H
+      // The activation top edge aligns with the arrow Y: the message arrow must
+      // reach the TOP of the bar (UML: execution starts when the message arrives).
       const flowEdge = edges.find((e) => e.id === schemaEdge.id)!
       const arrowY = (flowEdge.data as { y: number }).y
-      expect(activation!.position.y).toBe(arrowY - ROW_H / 2)
+      expect(activation!.position.y).toBe(arrowY)
     })
   })
 })

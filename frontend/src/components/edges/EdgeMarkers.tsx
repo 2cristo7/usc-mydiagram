@@ -46,6 +46,18 @@ export function EdgeMarkers() {
         >
           <path d="M1,1 L9,5 L1,9" fill="none" stroke="var(--color-ink)" strokeWidth={1.5} />
         </marker>
+        {/* Triángulo RELLENO (mensaje de llamada en secuencia, estilo UML). */}
+        <marker
+          id="arrowFilled"
+          markerWidth={12}
+          markerHeight={12}
+          refX={9}
+          refY={5}
+          orient="auto-start-reverse"
+          markerUnits="userSpaceOnUse"
+        >
+          <path d="M1,1 L9,5 L1,9 Z" fill="var(--color-ink)" stroke="var(--color-ink)" strokeWidth={1} strokeLinejoin="round" />
+        </marker>
         {/* Triángulo hueco UML (generalización de actores — inherits).
             Relleno blanco para que el fondo del diagrama no se «filtre» por dentro. */}
         <marker

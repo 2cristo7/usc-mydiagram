@@ -88,13 +88,18 @@ Ejemplo:
  {"id": "base_datos", "label": "Base de Datos", "node_type": "actor", "attributes": []}]"""
 
 _SEQUENCE_EDGE_PROMPT = """Cada arista es un mensaje entre dos participantes, en orden cronológico.
-- edge_type: siempre "sequence".
-- label: el mensaje / llamada al método ("login(usuario, clave)", "validar token", "devolver sesión").
+- edge_type:
+  - "sequence" para un mensaje de LLAMADA (invocar una operación): línea sólida, flecha rellena.
+  - "sequence_reply" para una RESPUESTA / retorno (el valor que devuelve una llamada anterior):
+    línea discontinua, flecha abierta. Su source/target van intercambiados respecto a la llamada.
+- label: el mensaje / llamada al método ("login(usuario, clave)", "validar token") o el valor
+  devuelto en una respuesta ("sesión", "token válido", "ok").
 - Crea una arista por mensaje; emítelas en el orden en que ocurren.
-- Una respuesta es su propia arista, con source/target intercambiados.
+- Usa "sequence_reply" SOLO cuando el retorno aporte información; no añadas respuestas triviales a todo.
 Ejemplo:
 [{"id": "e1", "source": "usuario", "target": "servicio_auth", "label": "login(usuario, clave)", "edge_type": "sequence"},
- {"id": "e2", "source": "servicio_auth", "target": "base_datos", "label": "buscar usuario", "edge_type": "sequence"}]"""
+ {"id": "e2", "source": "servicio_auth", "target": "base_datos", "label": "buscar usuario", "edge_type": "sequence"},
+ {"id": "e3", "source": "base_datos", "target": "servicio_auth", "label": "usuario", "edge_type": "sequence_reply"}]"""
 
 
 # Extracción de FRAGMENTOS combinados (S10.4) — tercera pasada, solo secuencia.

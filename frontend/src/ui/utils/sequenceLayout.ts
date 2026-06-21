@@ -14,6 +14,13 @@ export const PADDING = 40
 export const ACTOR_CX_OFFSET = 80
 export const ACTOR_W = ACTOR_CX_OFFSET * 2
 
+// S10.3 — self-message (un actor que se manda un mensaje a sí mismo): se dibuja
+// como un bucle a la derecha de la lifeline (SequenceMessageEdge). La barra de
+// activación va SIEMPRE centrada en la lifeline (también en el self); en el self
+// solo se baja SELF_LOOP_H para que sea la caja "destino" a la que retorna el bucle.
+export const SELF_LOOP_H = 28   // bajada del bucle hasta la flecha de retorno
+const SELF_EXTRA_H = 30         // reserva vertical extra de una fila self-message
+
 // S10.4 — reserva vertical/horizontal de los marcos de fragmento combinado.
 const FRAG_HEADER_H = 24   // banda superior del marco (pestaña kind + guarda)
 const FRAG_PAD_BOTTOM = 12 // aire bajo el último mensaje de un fragmento
@@ -92,6 +99,9 @@ export function sequenceLayout(diagram: DiagramSchema): { nodes: Node[]; edges: 
 
     rowYCenter[k] = y + ROW_H / 2
     y += ROW_H
+    // Un self-message necesita aire extra debajo para el bucle + la activación
+    // anidada, que se extienden bajo la flecha.
+    if (messages[k].source === messages[k].target) y += SELF_EXTRA_H
 
     const closing = drawable
       .filter((f) => spanOf.get(f.id)!.end === k)
@@ -119,6 +129,17 @@ export function sequenceLayout(diagram: DiagramSchema): { nodes: Node[]; edges: 
       data: { label: actor.label, nodeType: actor.node_type },
       draggable: true,
       zIndex: 10,
+      // Sembramos `measured` para que el actor SIEMPRE entre en el bounding box
+      // del fitView. React Flow solo encuadra los nodos ya medidos (getFitViewNodes
+      // exige measured.width && measured.height); el actor tiene ancho fijo pero su
+      // ALTO se mide tras pintar (depende de la fuente/etiqueta), así que llega
+      // medido una fracción de frame más tarde que las lifelines/activaciones (que
+      // sí traen width/height en `style`). Si el encuadre se dispara en esa ventana,
+      // el actor queda fuera y la vista se ancla en la cabecera de la lifeline
+      // (y=HEADER_H), recortando los nodos de inicio por arriba. Con esta semilla
+      // el actor cuenta desde el frame 0; el ResizeObserver la sustituye por el alto
+      // real al montar (es metadato, no fija el tamaño del DOM ni recorta etiquetas).
+      measured: { width: ACTOR_W, height: HEADER_H },
     })
 
     // Lifeline como HIJO del actor: posición relativa a la caja (centrada en
@@ -134,6 +155,12 @@ export function sequenceLayout(diagram: DiagramSchema): { nodes: Node[]; edges: 
       selectable: false,
       zIndex: 4,
       style: { width: 16, height: totalHeight },
+      // La lifeline define el ALTO total del diagrama. Sembramos su `measured` para
+      // que el encuadre con anclaje superior (useFitDiagramView) mida la extensión
+      // vertical completa desde el frame 0, sin depender de cuándo el ResizeObserver
+      // mide cada lifeline (getNodesBounds usa measured/width). El observer la
+      // confirma al montar con el mismo tamaño que ya impone `style`.
+      measured: { width: 16, height: totalHeight },
     })
   })
 
@@ -142,6 +169,10 @@ export function sequenceLayout(diagram: DiagramSchema): { nodes: Node[]; edges: 
     const arrowY = rowYCenter[k]
     const x1 = actorCenterX.get(edge.source) ?? 0
     const x2 = actorCenterX.get(edge.target) ?? 0
+    const isSelf = edge.source === edge.target
+    // "Respuesta/retorno" es semántica de CONTRATO (edge_type), no estilo visual: así
+    // el agente puede generarla y sobrevive al refine (data se stripea, edge_type no).
+    const isReply = edge.edge_type === 'sequence_reply'
 
     resultEdges.push({
       id: edge.id,
@@ -149,21 +180,27 @@ export function sequenceLayout(diagram: DiagramSchema): { nodes: Node[]; edges: 
       target: `lifeline-${edge.target}`,
       type: 'sequenceMessage',
       label: edge.label,
-      data: { x1, x2, y: arrowY },
+      data: { x1, x2, y: arrowY, self: isSelf, reply: isReply },
     })
 
     // Activación como HIJO del actor destino: igual que la lifeline, así la barra
     // de activación viaja con el actor al arrastrarlo. Si el destino no es un actor
     // conocido, cae a posición absoluta (sin parentId) para no romper React Flow.
+    // El borde SUPERIOR se alinea con arrowY (no el centro): en UML la ejecución
+    // comienza cuando llega el mensaje, así que la flecha toca el techo de la barra.
     const hasTarget = actorCenterX.has(edge.target)
     const targetCx = actorCenterX.get(edge.target) ?? 0
+    // La barra va SIEMPRE centrada en la lifeline (x = centro − 8). En un self-message
+    // solo se baja SELF_LOOP_H: es la caja "destino" del bucle, a la que retorna la
+    // flecha; queda apilada bajo la activación de quien llama, no desplazada.
+    const actDy = isSelf ? SELF_LOOP_H : 0
     resultNodes.push({
       id: `activation-${edge.id}`,
       type: 'activation',
       ...(hasTarget ? { parentId: edge.target } : {}),
       position: hasTarget
-        ? { x: ACTOR_CX_OFFSET - 8, y: arrowY - ROW_H / 2 }
-        : { x: targetCx - 8, y: arrowY - ROW_H / 2 },
+        ? { x: ACTOR_CX_OFFSET - 8, y: arrowY + actDy }
+        : { x: targetCx - 8, y: arrowY + actDy },
       data: {},
       draggable: false,
       selectable: false,
