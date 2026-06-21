@@ -212,11 +212,44 @@ describe('architectureLayoutSync', () => {
   })
 })
 
-// ── Rejilla de grupos ─────────────────────────────────────────────────────────
+// ── Disposición con dagre (sigue las aristas) ─────────────────────────────────
+
+describe('architectureLayoutSync — grupos siguen las aristas (dagre LR)', () => {
+  // DIAGRAM_3G encadena Borde → Backend → Datos. Con dagre en dirección LR los
+  // contenedores deben quedar en ese orden de izquierda a derecha (x creciente),
+  // no repartidos en una rejilla ciega como hacía el layout anterior.
+  test('los contenedores conectados se ordenan izquierda→derecha por el flujo', () => {
+    const { nodes } = architectureLayoutSync(DIAGRAM_3G)
+    const x = (id: string) => nodes.find((n) => n.id === id)!.position.x
+    expect(x('group__Borde')).toBeLessThan(x('group__Backend'))
+    expect(x('group__Backend')).toBeLessThan(x('group__Datos'))
+  })
+
+  test('los contenedores no se solapan entre sí', () => {
+    const { nodes } = architectureLayoutSync(DIAGRAM_3G)
+    const boxes = nodes
+      .filter((n) => n.type === 'architectureGroup')
+      .map((n) => {
+        const s = n.style as { width: number; height: number }
+        return { x: n.position.x, y: n.position.y, w: s.width, h: s.height }
+      })
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j]
+        const overlap =
+          a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+        expect(overlap).toBe(false)
+      }
+    }
+  })
+})
+
+// ── Rejilla de grupos (fallback sin aristas) ──────────────────────────────────
 
 describe('architectureLayoutSync — grupos en rejilla', () => {
   // Diagrama con 4 grupos SIN aristas entre ellos: el caso que antes producía una
-  // columna vertical. Con la rejilla (cols = ⌈√4⌉ = 2) deben quedar en 2×2.
+  // columna vertical y para el que dagre no tiene flujo que seguir. Se cae a la
+  // rejilla (cols = ⌈√4⌉ = 2) y deben quedar en 2×2.
   const FOUR_GROUPS: DiagramSchema = {
     title: 'Cuatro grupos', diagram_type: 'architecture',
     nodes: [

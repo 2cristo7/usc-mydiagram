@@ -1,4 +1,5 @@
 import type { Node, Edge } from '@xyflow/react'
+import dagre from '@dagrejs/dagre'
 import type { DiagramSchema, NodeType } from '../../types'
 
 // Tamaños y espaciados del layout síncrono de arquitectura.
@@ -20,9 +21,14 @@ const NODE_ROW_GAP = 40
 const GROUP_PADDING = 30
 const GROUP_HEADER_H = 36
 const GROUP_COL_GAP = 80
-// Separación vertical entre filas de la rejilla de grupos.
+// Separación vertical entre filas de la rejilla de grupos (fallback sin aristas).
 const GROUP_ROW_GAP = 60
-const UNGROUPED_GAP = 60
+// Espaciado de dagre entre entidades de nivel superior (contenedores de grupo y
+// nodos sueltos): ranksep = avance entre capas del flujo; nodesep = separación
+// entre entidades de una misma capa. Generoso porque las cajas-grupo son grandes
+// y el ruteo de aristas (DiagramCanvas) necesita aire entre ellas.
+const ARCH_RANKSEP = 140
+const ARCH_NODESEP = 90
 
 const ARCH_NODE_TYPE_MAP: Partial<Record<NodeType, string>> = {
   person: 'archIcon',
@@ -82,18 +88,100 @@ function groupContainerId(groupName: string): string {
   return `group__${groupName.replace(/\s+/g, '_')}`
 }
 
+/** Caja-footprint de una entidad de nivel superior (contenedor o nodo suelto). */
+interface Entity {
+  id: string
+  w: number
+  h: number
+}
+
+/**
+ * Reparte entidades de nivel superior en una REJILLA cuasi-cuadrada (cols = ⌈√n⌉),
+ * con ancho de columna uniforme y alto de fila = el de la entidad más alta de esa
+ * fila (sin solapes). Es el fallback cuando NO hay aristas entre entidades: sin
+ * estructura que seguir, una rejilla ordenada es mejor que la columna única que
+ * produciría un layout jerárquico con nodos desconectados.
+ * Devuelve la esquina superior izquierda del footprint de cada entidad.
+ */
+function gridPlacement(entities: Entity[]): Map<string, { x: number; y: number }> {
+  const pos = new Map<string, { x: number; y: number }>()
+  const n = entities.length
+  if (n === 0) return pos
+
+  const cols = Math.max(1, Math.ceil(Math.sqrt(n)))
+  const rows = Math.ceil(n / cols)
+  const colW = Math.max(...entities.map((e) => e.w))
+  const rowHeights = Array.from({ length: rows }, (_, r) => {
+    let maxH = 0
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c
+      if (idx < n) maxH = Math.max(maxH, entities[idx].h)
+    }
+    return maxH
+  })
+  const rowY: number[] = []
+  let accY = 0
+  for (let r = 0; r < rows; r++) {
+    rowY.push(accY)
+    accY += rowHeights[r] + GROUP_ROW_GAP
+  }
+
+  entities.forEach((e, idx) => {
+    const col = idx % cols
+    const row = Math.floor(idx / cols)
+    pos.set(e.id, { x: col * (colW + GROUP_COL_GAP), y: rowY[row] })
+  })
+  return pos
+}
+
+/**
+ * Coloca las entidades de nivel superior con dagre (layered, izquierda→derecha)
+ * siguiendo las aristas inferidas entre ellas, replicando el flujo del antiguo
+ * layout ELK pero de forma SÍNCRONA. dagre devuelve el centro de cada caja; lo
+ * convertimos a esquina superior izquierda del footprint.
+ */
+function dagrePlacement(
+  entities: Entity[],
+  interEdges: Array<[string, string]>,
+): Map<string, { x: number; y: number }> {
+  const graph = new dagre.graphlib.Graph()
+  graph.setGraph({
+    rankdir: 'LR',
+    nodesep: ARCH_NODESEP,
+    ranksep: ARCH_RANKSEP,
+    marginx: 40,
+    marginy: 40,
+  })
+  graph.setDefaultEdgeLabel(() => ({}))
+
+  for (const e of entities) graph.setNode(e.id, { width: e.w, height: e.h })
+  for (const [s, t] of interEdges) graph.setEdge(s, t)
+
+  dagre.layout(graph)
+
+  const pos = new Map<string, { x: number; y: number }>()
+  for (const e of entities) {
+    const g = graph.node(e.id)
+    pos.set(e.id, { x: g.x - e.w / 2, y: g.y - e.h / 2 })
+  }
+  return pos
+}
+
 /**
  * Layout síncrono determinista para diagramas de arquitectura.
  * Produce nodos contenedor (architectureGroup) con sus hijos anidados (parentId/extent).
  * Los nodos sin group: van al nivel raíz. Respeta node.position del usuario y la
  * geometría manual de los contenedores (group_layout).
  *
- * Los GRUPOS se disponen en una REJILLA (cols = ⌈√n⌉) en lugar de en una fila o
- * columna, para que queden ordenados aunque no haya aristas entre ellos. Como las
- * aristas no se rutean aquí (DiagramCanvas las recalcula desde las cajas medidas),
- * basta con posicionar nodos y dimensionar contenedores. Al ser función PURA de
- * `diagram`, reconciliar rfNodes desde su salida refleja cualquier cambio
- * (mover/redimensionar contenedor, mover hijo, undo/redo, navegar a otra versión).
+ * Las ENTIDADES de nivel superior (contenedores de grupo + nodos sueltos) se disponen
+ * con dagre (layered, izquierda→derecha) SIGUIENDO las aristas entre ellas: las
+ * aristas grupo→grupo se infieren de las aristas nodo→nodo. Si no hay aristas entre
+ * entidades, se cae a una rejilla cuasi-cuadrada (mejor que la columna única que daría
+ * dagre con nodos desconectados). Como las aristas no se rutean aquí (DiagramCanvas las
+ * recalcula desde las cajas medidas), basta con posicionar nodos y dimensionar
+ * contenedores. Al ser función PURA de `diagram`, reconciliar rfNodes desde su salida
+ * refleja cualquier cambio (mover/redimensionar contenedor, mover hijo, undo/redo,
+ * navegar a otra versión).
  */
 export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[]; edges: Edge[] } {
   const { groups, ungrouped } = parseGroups(diagram)
@@ -113,44 +201,46 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
     return { groupName, containerId: groupContainerId(groupName), children, groupW, groupH }
   })
 
-  // 2) Rejilla cuasi-cuadrada: cols = ⌈√n⌉. Ancho de columna uniforme (todos los
-  //    grupos miden lo mismo de ancho); alto de cada fila = el del grupo más alto de
-  //    esa fila, para que ninguno se solape con el de la fila siguiente.
-  const n = groupEntries.length
-  const cols = Math.max(1, Math.ceil(Math.sqrt(n)))
-  const rows = Math.ceil(n / cols)
-  const colW = n > 0 ? Math.max(...groupEntries.map((g) => g.groupW)) : 0
-  const rowHeights = Array.from({ length: rows }, (_, r) => {
-    let maxH = 0
-    for (let c = 0; c < cols; c++) {
-      const idx = r * cols + c
-      if (idx < n) maxH = Math.max(maxH, groupEntries[idx].groupH)
-    }
-    return maxH
-  })
-  // Y acumulada del inicio de cada fila.
-  const rowY: number[] = []
-  let accY = 0
-  for (let r = 0; r < rows; r++) {
-    rowY.push(accY)
-    accY += rowHeights[r] + GROUP_ROW_GAP
+  // 2) Entidades de nivel superior: un contenedor por grupo + cada nodo suelto, en
+  //    ese orden (determina las celdas de la rejilla en el fallback).
+  const entities: Entity[] = [
+    ...groupEntries.map((g) => ({ id: g.containerId, w: g.groupW, h: g.groupH })),
+    ...ungrouped.map((id) => ({ id, w: NODE_W, h: NODE_H })),
+  ]
+
+  // 3) Aristas entre entidades: cada arista nodo→nodo se proyecta a su entidad de
+  //    nivel superior (contenedor del grupo o el propio nodo suelto). Se descartan
+  //    las internas a un grupo (mismo origen y destino) y los pares duplicados.
+  const entityOf = new Map<string, string>()
+  for (const g of groupEntries) for (const c of g.children) entityOf.set(c.id, g.containerId)
+  for (const id of ungrouped) entityOf.set(id, id)
+
+  const interEdges: Array<[string, string]> = []
+  const seenPair = new Set<string>()
+  for (const edge of diagram.edges) {
+    const s = entityOf.get(edge.source)
+    const t = entityOf.get(edge.target)
+    if (s === undefined || t === undefined || s === t) continue
+    const key = `${s} ${t}`
+    if (seenPair.has(key)) continue
+    seenPair.add(key)
+    interEdges.push([s, t])
   }
-  // Borde inferior de la rejilla (sin el último gap sobrante).
-  const gridBottom = n > 0 ? accY - GROUP_ROW_GAP : 0
 
-  groupEntries.forEach((g, idx) => {
-    const col = idx % cols
-    const row = Math.floor(idx / cols)
+  // 4) Posición (esquina superior izquierda del footprint) de cada entidad: dagre si
+  //    hay aristas que seguir, rejilla si no.
+  const entityPos =
+    interEdges.length > 0 ? dagrePlacement(entities, interEdges) : gridPlacement(entities)
 
+  groupEntries.forEach((g) => {
     // Override manual: si el usuario redimensionó/movió el contenedor, su geometría
-    // guardada (group_layout) gana a la posición/tamaño de la rejilla.
+    // guardada (group_layout) gana a la posición/tamaño calculados.
     const ov = diagram.group_layout?.[g.containerId]
+    const auto = entityPos.get(g.containerId) ?? { x: 0, y: 0 }
     rfNodes.push({
       id: g.containerId,
       type: 'architectureGroup',
-      position: ov
-        ? { x: ov.x, y: ov.y }
-        : { x: col * (colW + GROUP_COL_GAP), y: rowY[row] },
+      position: ov ? { x: ov.x, y: ov.y } : auto,
       data: { label: g.groupName },
       style: ov ? { width: ov.width, height: ov.height } : { width: g.groupW, height: g.groupH },
     } as Node)
@@ -178,12 +268,12 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
     }
   })
 
-  // Nodos sin grupo: en fila horizontal debajo de la rejilla de grupos.
-  const ungroupedY = n > 0 ? gridBottom + UNGROUPED_GAP : 0
-  let uX = 0
+  // Nodos sin grupo: en la posición que les asignó dagre/rejilla. El footprint mide
+  // NODE_W de ancho y el icono va centrado dentro (ICON_X_OFFSET), igual que un hijo.
   for (const nodeId of ungrouped) {
     const node = nodeById.get(nodeId)!
-    const pos = node.position ?? { x: uX + ICON_X_OFFSET, y: ungroupedY }
+    const auto = entityPos.get(nodeId) ?? { x: 0, y: 0 }
+    const pos = node.position ?? { x: auto.x + ICON_X_OFFSET, y: auto.y }
 
     rfNodes.push({
       id: node.id,
@@ -195,8 +285,6 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
         attributes: filterGroupAttribs(node.attributes),
       },
     } as Node)
-
-    uX += NODE_W + UNGROUPED_GAP
   }
 
   const rfEdges: Edge[] = diagram.edges.map((edge) => ({
