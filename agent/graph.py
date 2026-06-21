@@ -7,9 +7,24 @@ from nodes.extract_nodes import make_extract_nodes
 from nodes.extract_edges import make_extract_edges
 from nodes.extract_fragments import make_extract_fragments
 from nodes.synthesize import synthesize
-from nodes.validate_edges import validate_edges
-from nodes.validate_nodes import validate_nodes
-from nodes.validate_schema import validate_schema
+from nodes.validate_edges import validate_edges, MAX_RETRIES
+from nodes.validate_nodes import validate_nodes, MAX_NODE_RETRIES
+from nodes.validate_schema import validate_schema, MAX_SCHEMA_RETRIES
+
+
+# Límite de recursión del grafo de GENERACIÓN. El default de LangGraph (25) se
+# queda corto: hay TRES bucles de feedback (nodos, aristas, estructura) de hasta
+# MAX_*_RETRIES vueltas cada uno, y cada vuelta atraviesa varios nodos (p. ej.
+# extract→validate, o el bucle estructural reentrando a extract_nodes→…→
+# validate_schema). Sin un tope holgado, un modelo que no converge dispararía
+# GraphRecursionError, que main.py captura como `internal_error` genérico —
+# enmascarando la causa real (el LLM no logró un diagrama válido). Cota superior
+# generosa: cada vuelta de cualquier bucle cuesta como mucho ~6 transiciones de
+# nodo (peor caso del bucle estructural), por la suma de los tres presupuestos,
+# más holgura para los nodos de un solo paso (guard/classify/synthesize).
+GENERATION_RECURSION_LIMIT = (
+    (MAX_NODE_RETRIES + MAX_RETRIES + MAX_SCHEMA_RETRIES) * 6 + 20
+)
 
 
 def route_after_guard(state: DiagramState) -> str:

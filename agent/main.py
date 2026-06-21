@@ -3,12 +3,13 @@ load_dotenv()
 
 import asyncio
 import json
+import time
 import uuid
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
-from graph import build_graph, initial_generation_state
+from graph import build_graph, initial_generation_state, GENERATION_RECURSION_LIMIT
 from outcome import classify_outcome, llm_error_event
 from schemas import CompactDiagram, DiagramType
 from llm import LLMConfig, LLMRuntime, LLMError
@@ -29,11 +30,16 @@ _SENTINEL = object()
 # "cerebro a medio pensar" del agente) por thread_id y los restaura al reanudar.
 # Round-tripear ese estado por el cliente expondría internals del LLM y abriría
 # manipulación → vive en memoria del proceso, acotado: un MemorySaver singleton +
-# el workspace pendiente por thread_id. DEUDA consciente de statelessness (TTL/
-# limpieza de sesiones abandonadas → pendientes.md; en S8 el checkpointer puede
-# ser Postgres sobre Supabase y el proceso vuelve a ser stateless).
+# el workspace pendiente por thread_id. La statelessness plena (checkpointer
+# Postgres sobre Supabase) sigue pendiente; mientras tanto un TTL en memoria acota
+# el crecimiento: una clarificación que el usuario nunca responde (cierra la
+# pestaña, abandona) caduca y se purga junto al thread del checkpointer.
 _checkpointer = None  # lazy: import de langgraph solo si se usa /refine
-_pending_clarifications: dict = {}  # thread_id -> DiagramWorkspace pausado
+# thread_id -> (DiagramWorkspace pausado, deadline monotónico de expiración)
+_pending_clarifications: dict = {}
+# TTL de una clarificación pendiente: pasado este margen sin /resume, se considera
+# abandonada y se purga en el siguiente barrido perezoso.
+_CLARIFICATION_TTL_SECONDS = 30 * 60
 
 
 def _get_checkpointer():
@@ -42,6 +48,39 @@ def _get_checkpointer():
         from langgraph.checkpoint.memory import InMemorySaver
         _checkpointer = InMemorySaver()
     return _checkpointer
+
+
+async def _forget_thread(thread_id: str) -> None:
+    """Olvida el estado retenido por el checkpointer para un thread (best-effort).
+
+    Tanto las clarificaciones caducadas como los refinamientos ya cerrados dejan de
+    necesitar su checkpoint; sin esto los threads del InMemorySaver crecen sin cota.
+    Defensivo: si el checkpointer no está inicializado o no expone adelete_thread se
+    ignora (no es un error crítico, solo deja de liberar memoria)."""
+    cp = _checkpointer
+    if cp is None:
+        return
+    deleter = getattr(cp, "adelete_thread", None)
+    if deleter is None:
+        return
+    try:
+        await deleter(thread_id)
+    except Exception as e:  # noqa: BLE001 — limpieza best-effort, nunca debe romper la respuesta
+        print(f"[refine] no se pudo purgar el thread {thread_id}: {e!r}")
+
+
+async def _sweep_expired_clarifications() -> None:
+    """Purga las clarificaciones cuyo TTL expiró (usuario que nunca respondió).
+
+    Barrido PEREZOSO: se ejecuta al registrar una nueva clarificación y al reanudar,
+    no en un timer de fondo (no hay loop propio que mantener y el coste es O(n) sobre
+    un dict pequeño). Cada entrada caducada se borra del dict y su thread del
+    checkpointer también."""
+    now = time.monotonic()
+    expired = [tid for tid, (_ws, deadline) in _pending_clarifications.items() if deadline <= now]
+    for tid in expired:
+        _pending_clarifications.pop(tid, None)
+        await _forget_thread(tid)
 
 
 def _build_runtime(llm_config: Optional[LLMConfig]) -> Optional[LLMRuntime]:
@@ -101,11 +140,28 @@ async def generate_stream(req: GenerateRequest):
         # La taxonomía de desenlaces vive en classify_outcome (S6.9): main.py es el
         # único punto que ve los tres casos (final limpio, guard-reject y crash).
         try:
-            result = await graph.ainvoke(initial_state)
+            # recursion_limit explícito y coherente con los tres bucles de feedback
+            # (ver GENERATION_RECURSION_LIMIT en graph.py): sin él, el default de
+            # LangGraph (25) dispararía GraphRecursionError enmascarado como
+            # internal_error en cuanto los reintentos se acumulan.
+            result = await graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": GENERATION_RECURSION_LIMIT},
+            )
             event = classify_outcome(result)
         except LLMError as e:
-            print(f"[generate_stream] llm error: {e!r}")
-            event = llm_error_event(e.message, req.llm_config.provider if req.llm_config else None)
+            # Incluimos provider y si la key llegó: un HTTP 401 con
+            # api_key_present=False NO es una key inválida, sino una key que no
+            # llegó al agente (race de reconexión o Vault transitorio en el
+            # gateway). Distinguirlo en el log evita perseguir credenciales que
+            # en realidad son correctas.
+            cfg = req.llm_config
+            print(
+                f"[generate_stream] llm error: {e!r} "
+                f"provider={cfg.provider if cfg else 'env'} "
+                f"api_key_present={bool(cfg and cfg.api_key)}"
+            )
+            event = llm_error_event(e.message, cfg.provider if cfg else None)
         except Exception as e:
             print(f"[generate_stream] graph error: {e!r}")
             event = classify_outcome(None, crashed=True)
@@ -168,7 +224,9 @@ async def _run_refine_agent(ws, graph_input, thread_id: str,
     if interrupt_payload is not None:
         # Grafo pausado en clarify: retenemos el workspace (ya mutado por las
         # tools previas al interrupt) hasta que llegue la respuesta del usuario.
-        _pending_clarifications[thread_id] = ws
+        # Aprovechamos para purgar clarificaciones abandonadas y anotamos el deadline.
+        await _sweep_expired_clarifications()
+        _pending_clarifications[thread_id] = (ws, time.monotonic() + _CLARIFICATION_TTL_SECONDS)
         yield {
             "_type": "clarification",
             "thread_id": thread_id,
@@ -190,6 +248,9 @@ async def _run_refine_agent(ws, graph_input, thread_id: str,
         "degraded": False,
         "degradations": [],
     }
+    # Refinamiento cerrado: el checkpoint de este thread ya no se necesita. Lo
+    # purgamos para que los threads del InMemorySaver no crezcan por cada /refine.
+    await _forget_thread(thread_id)
 
 
 def _log_refine_event(event: dict) -> None:
@@ -264,6 +325,38 @@ def _classify_provider_exception(e: Exception, provider: Optional[str] = None) -
             f"o revisa tu plan en el panel de {label}."
         )
 
+    # Conexión rechazada / timeout: el proveedor está caído o inalcanzable. El loop
+    # ReAct usa LangChain, que envuelve los errores httpx/SDK con nombres y mensajes
+    # distintos (APIConnectionError, ConnectError, ConnectTimeout, ReadTimeout…); sin
+    # esto caían en el `except Exception` genérico ("vuelve a intentarlo"), inútil si
+    # el servicio no responde. Detectamos por nombre de clase / texto para no
+    # acoplarnos a un SDK concreto (pueden no estar instalados).
+    name_l = name.lower()
+    is_conn = (
+        "connecterror" in name_l
+        or "connectionerror" in name_l
+        or "connecttimeout" in name_l
+        or "apiconnectionerror" in name_l
+        or "remoteprotocolerror" in name_l
+        or "connection refused" in text
+        or "connection error" in text
+        or "failed to connect" in text
+        or "max retries exceeded" in text
+        or "name or service not known" in text
+    )
+    is_timeout = (
+        "timeout" in name_l
+        or "timedout" in name_l
+        or "timed out" in text
+        or "timeout" in text
+    )
+    if is_conn or is_timeout:
+        return (
+            f"No se pudo conectar con el proveedor LLM ({label}) o tardó demasiado en "
+            f"responder. Revisa que el servicio esté disponible (si es local, que "
+            f"Ollama esté corriendo) y vuelve a intentarlo."
+        )
+
     return None
 
 
@@ -284,7 +377,11 @@ def _refine_response(ws, graph_input, thread_id: str,
                 "message": str(e),
             }) + "\n"
         except LLMError as e:
-            print(f"[refine_stream] llm error: {e!r}")
+            print(
+                f"[refine_stream] llm error: {e!r} "
+                f"provider={llm_config.provider if llm_config else 'env'} "
+                f"api_key_present={bool(llm_config and llm_config.api_key)}"
+            )
             yield json.dumps(llm_error_event(
                 e.message, llm_config.provider if llm_config is not None else None,
             )) + "\n"
@@ -332,11 +429,15 @@ async def refine_resume(req: ResumeRequest):
     # extrae de sesión (si vuelve a interrumpir, _run_refine_agent lo re-retiene).
     from langgraph.types import Command
 
-    ws = _pending_clarifications.pop(req.thread_id, None)
-    if ws is None:
+    # Purga primero las abandonadas: si esta misma respuesta llega pasado el TTL, el
+    # thread ya no estará y devolvemos 404 (mensaje ya contempla la expiración).
+    await _sweep_expired_clarifications()
+    entry = _pending_clarifications.pop(req.thread_id, None)
+    if entry is None:
         raise HTTPException(
             status_code=404,
             detail="No hay ninguna clarificación pendiente para ese thread_id (¿expiró o ya fue respondida?).",
         )
+    ws, _deadline = entry
     return _refine_response(ws, Command(resume=req.answer), req.thread_id,
                             llm_config=req.llm_config)

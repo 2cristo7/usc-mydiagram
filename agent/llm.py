@@ -27,6 +27,54 @@ class LLMError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Timeouts granulares por env (S10.x)
+# ---------------------------------------------------------------------------
+# Un único timeout total (httpx.AsyncClient(timeout=N)) no distingue «el servicio
+# está caído» (se nota en el connect) de «el modelo tarda en generar» (read largo
+# legítimo). Separamos ambos: un connect-timeout corto detecta rápido un proveedor
+# inalcanzable; un read-timeout largo tolera la generación. Configurables por env
+# con defaults sensatos (connect 10s; read distinto para Ollama local, que puede
+# cargar el modelo en la primera petición, vs las APIs comerciales).
+
+def _llm_timeout(default_read: float) -> "httpx.Timeout":
+    """Construye un httpx.Timeout granular configurable por env.
+
+    `default_read` es el read-timeout por defecto si no hay env var (más alto para
+    backends locales que cargan el modelo en frío). connect/write/pool comparten un
+    connect-timeout corto para detectar pronto un servicio caído."""
+    connect = float(os.environ.get("LLM_CONNECT_TIMEOUT", "10"))
+    read = float(os.environ.get("LLM_READ_TIMEOUT", str(default_read)))
+    return httpx.Timeout(connect=connect, read=read, write=connect, pool=connect)
+
+
+# Mensaje uniforme para un fallo de red genérico (corte de stream, reset de
+# conexión, error de protocolo…): todos los backends lo reutilizan. httpx.HTTPError
+# es la clase base que cubre ConnectError/TimeoutException/RemoteProtocolError/
+# ReadError/NetworkError/etc.; los except específicos (connect/timeout/status) van
+# ANTES para dar un mensaje más fino, y este captura el resto.
+def _network_llm_error(provider: str, exc: Exception) -> "LLMError":
+    return LLMError(
+        f"Se interrumpió la conexión con el proveedor LLM ({provider}). "
+        "Revisa que el servicio esté disponible y vuelve a intentarlo."
+    )
+
+
+def _require_non_empty(content: str, provider: str) -> str:
+    """Garantiza que el contenido devuelto por el modelo no esté vacío.
+
+    Una respuesta vacía o solo whitespace (truncado, cuota agotada, o qwen3 que gastó
+    todo el presupuesto en el bloque de razonamiento) NO debe propagarse como "" —
+    aguas abajo se confundiría con «0 nodos» perdiendo la causa real. Se convierte en
+    un LLMError accionable."""
+    if not content or not content.strip():
+        raise LLMError(
+            f"El proveedor LLM ({provider}) devolvió una respuesta vacía "
+            "(posible truncado, cuota agotada o límite de tokens). Vuelve a intentarlo."
+        )
+    return content
+
+
+# ---------------------------------------------------------------------------
 # Filtro de tokens de razonamiento (<think>...</think>) para modelos locales
 # ---------------------------------------------------------------------------
 
@@ -169,7 +217,7 @@ class OllamaBackend:
         print(f"\n[OLLAMA/{self.model}] system: {system[:80]}...")
         print(f"[OLLAMA/{self.model}] user:   {user[:120]}")
         try:
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with httpx.AsyncClient(timeout=_llm_timeout(300)) as client:
                 response = await client.post(self.url, json=payload)
                 response.raise_for_status()
             content = response.json()["message"]["content"]
@@ -183,8 +231,13 @@ class OllamaBackend:
             raise LLMError("El proveedor LLM (Ollama) tardó demasiado en responder.") from exc
         except (json.JSONDecodeError, KeyError, IndexError) as exc:
             raise LLMError("El proveedor LLM (Ollama) devolvió una respuesta inesperada.") from exc
+        except httpx.HTTPError as exc:
+            # Corte de conexión / error de red genérico (RemoteProtocolError,
+            # ReadError, NetworkError…): mensaje accionable, no internal_error.
+            raise _network_llm_error("Ollama", exc) from exc
         if "<think>" in content and "</think>" in content:
             content = content.split("</think>")[-1].strip()
+        content = _require_non_empty(content, "Ollama")
         print(f"[OLLAMA/{self.model}] reply:  {content[:200]}")
         return content
 
@@ -202,8 +255,9 @@ class OllamaBackend:
         print(f"\n[OLLAMA/{self.model}] stream system: {system[:80]}...")
 
         async def _raw():
+            dropped = 0  # líneas de streaming malformadas descartadas
             try:
-                async with httpx.AsyncClient(timeout=300) as client:
+                async with httpx.AsyncClient(timeout=_llm_timeout(300)) as client:
                     async with client.stream("POST", self.url, json=payload) as response:
                         try:
                             response.raise_for_status()
@@ -219,7 +273,7 @@ class OllamaBackend:
                                     if content:
                                         yield content
                                 except (json.JSONDecodeError, KeyError):
-                                    pass
+                                    dropped += 1
             except LLMError:
                 raise
             except httpx.ConnectError as exc:
@@ -230,6 +284,14 @@ class OllamaBackend:
                 raise LLMError(
                     "El proveedor LLM (Ollama) tardó demasiado en responder."
                 ) from exc
+            except httpx.HTTPError as exc:
+                # Corte a mitad de stream (RemoteProtocolError/ReadError) u otro
+                # error de red genérico: mensaje accionable, no internal_error.
+                raise _network_llm_error("Ollama", exc) from exc
+            if dropped:
+                # No tragar en silencio un formato de streaming sistemáticamente
+                # inesperado: dejamos señal del número de líneas descartadas.
+                print(f"[OLLAMA/{self.model}] stream: {dropped} línea(s) malformada(s) descartada(s)")
 
         async for chunk in _strip_think(_raw()):
             yield chunk
@@ -254,7 +316,7 @@ class OpenAIBackend:
         print(f"\n[OPENAI/{self.model}] system: {system[:80]}...")
         print(f"[OPENAI/{self.model}] user:   {user[:120]}")
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=_llm_timeout(120)) as client:
                 response = await client.post(self.url, json=payload, headers=headers)
                 response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
@@ -271,6 +333,10 @@ class OpenAIBackend:
             raise LLMError("El proveedor LLM (OpenAI) tardó demasiado en responder.") from exc
         except (json.JSONDecodeError, KeyError, IndexError) as exc:
             raise LLMError("El proveedor LLM (OpenAI) devolvió una respuesta inesperada.") from exc
+        except httpx.HTTPError as exc:
+            # Error de red genérico (corte, reset, protocolo): accionable, no interno.
+            raise _network_llm_error("OpenAI", exc) from exc
+        content = _require_non_empty(content, "OpenAI")
         print(f"[OPENAI/{self.model}] reply:  {content[:200]}")
         return content
 
@@ -286,8 +352,9 @@ class OpenAIBackend:
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
         print(f"\n[OPENAI/{self.model}] stream system: {system[:80]}...")
+        dropped = 0  # líneas SSE malformadas descartadas
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=_llm_timeout(120)) as client:
                 async with client.stream("POST", self.url, json=payload, headers=headers) as response:
                     try:
                         response.raise_for_status()
@@ -308,13 +375,19 @@ class OpenAIBackend:
                                 if content:
                                     yield content
                             except (json.JSONDecodeError, KeyError):
-                                pass
+                                dropped += 1
         except LLMError:
             raise
         except httpx.ConnectError as exc:
             raise LLMError("No se pudo conectar con el proveedor LLM (OpenAI).") from exc
         except httpx.TimeoutException as exc:
             raise LLMError("El proveedor LLM (OpenAI) tardó demasiado en responder.") from exc
+        except httpx.HTTPError as exc:
+            # Corte a mitad de stream (RemoteProtocolError/ReadError) u otro error de
+            # red genérico: mensaje accionable, no internal_error.
+            raise _network_llm_error("OpenAI", exc) from exc
+        if dropped:
+            print(f"[OPENAI/{self.model}] stream: {dropped} línea(s) SSE malformada(s) descartada(s)")
 
 
 class AnthropicBackend:
@@ -348,7 +421,7 @@ class AnthropicBackend:
         print(f"\n[ANTHROPIC/{self.model}] system: {system[:80]}...")
         print(f"[ANTHROPIC/{self.model}] user:   {user[:120]}")
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=_llm_timeout(120)) as client:
                 response = await client.post(
                     self.url,
                     json=self._payload(system, user, max_tokens),
@@ -371,6 +444,10 @@ class AnthropicBackend:
             raise LLMError(
                 "El proveedor LLM (Anthropic) devolvió una respuesta inesperada."
             ) from exc
+        except httpx.HTTPError as exc:
+            # Error de red genérico (corte, reset, protocolo): accionable, no interno.
+            raise _network_llm_error("Anthropic", exc) from exc
+        content = _require_non_empty(content, "Anthropic")
         print(f"[ANTHROPIC/{self.model}] reply:  {content[:200]}")
         return content
 
@@ -408,7 +485,7 @@ class GeminiBackend:
         print(f"\n[GEMINI/{self.model}] system: {system[:80]}...")
         print(f"\n[GEMINI/{self.model}] user:   {user[:120]}")
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=_llm_timeout(120)) as client:
                 response = await client.post(
                     self._url(),
                     json=self._payload(system, user, max_tokens),
@@ -430,6 +507,10 @@ class GeminiBackend:
             raise LLMError(
                 "El proveedor LLM (Gemini) devolvió una respuesta inesperada."
             ) from exc
+        except httpx.HTTPError as exc:
+            # Error de red genérico (corte, reset, protocolo): accionable, no interno.
+            raise _network_llm_error("Gemini", exc) from exc
+        content = _require_non_empty(content, "Gemini")
         print(f"[GEMINI/{self.model}] reply:  {content[:200]}")
         return content
 
@@ -482,7 +563,7 @@ class BrowserBackend:
         }
         headers = {"X-Internal-Token": self.internal_token}
         try:
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with httpx.AsyncClient(timeout=_llm_timeout(300)) as client:
                 response = await client.post(
                     f"{self.gateway_url}/internal/llm",
                     json=payload,
@@ -496,6 +577,9 @@ class BrowserBackend:
             raise LLMError(
                 "El proveedor LLM (BrowserProxy) tardó demasiado en responder."
             ) from exc
+        except httpx.HTTPError as exc:
+            # Error de red genérico (corte, reset, protocolo): accionable, no interno.
+            raise _network_llm_error("BrowserProxy", exc) from exc
         if response.status_code == 401:
             raise LLMError(
                 "La configuración del proxy interno del navegador es inválida (HTTP 401). "
@@ -531,6 +615,7 @@ class BrowserBackend:
             raise LLMError(
                 "El proveedor LLM (BrowserProxy) devolvió una respuesta inesperada."
             ) from exc
+        content = _require_non_empty(content, "BrowserProxy")
         print(f"[BROWSER/{self.model}] reply:  {content[:200]}")
         return content
 
