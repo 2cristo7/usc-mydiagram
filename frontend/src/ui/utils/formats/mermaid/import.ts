@@ -44,7 +44,10 @@ class SchemaBuilder {
   private nodes = new Map<string, DiagramNode>();
   private edges: DiagramEdge[] = [];
   private edgeSeq = 0;
-  constructor(private readonly diagramType: DiagramType) {}
+  private readonly diagramType: DiagramType;
+  constructor(diagramType: DiagramType) {
+    this.diagramType = diagramType;
+  }
 
   addNode(id: string, label: string, nodeType?: NodeType, attributes: string[] = []): void {
     const existing = this.nodes.get(id);

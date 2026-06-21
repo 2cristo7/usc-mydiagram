@@ -34,18 +34,6 @@ function estimateNodeSize(label: string, role: 'root' | 'branch' | 'leaf'): { w:
   return { w: Math.max(minW, label.length * charW + padX), h }
 }
 
-// Medio-extensión del nodo proyectada sobre la TANGENTE del anillo (perpendicular al
-// radio) en el ángulo θ. Es lo que "ocupa de ancho de arco" un nodo colocado en θ.
-function tangentialHalf(w: number, h: number, theta: number): number {
-  return (w / 2) * Math.abs(Math.sin(theta)) + (h / 2) * Math.abs(Math.cos(theta))
-}
-
-// Medio-extensión del nodo proyectada sobre el RADIO en el ángulo θ. Gobierna la
-// separación mínima entre anillos consecutivos (padre↔hijo).
-function radialHalf(w: number, h: number, theta: number): number {
-  return (w / 2) * Math.abs(Math.cos(theta)) + (h / 2) * Math.abs(Math.sin(theta))
-}
-
 // Grosor de rama decreciente por nivel (gruesa junto a la raíz, fina en hojas).
 // Antes vivía en MindmapBranchEdge; ahora se hornea en data.strokeWidth para que
 // el render unificado (EditableEdge) lo aplique sin un componente propio.

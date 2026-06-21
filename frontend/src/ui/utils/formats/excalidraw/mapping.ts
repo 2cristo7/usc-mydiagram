@@ -4,7 +4,6 @@
 // por tipo de diagrama, igual que hace el agente (CLAUDE.md · node_types por tipo).
 
 import type { DiagramType, NodeType, EdgeType } from '../../../../types';
-import type { ExcalidrawElementType } from './types';
 
 // node_types admitidos por tipo de diagrama (orden = preferencia de fallback).
 export const NODE_TYPES_BY_DIAGRAM: Record<DiagramType, NodeType[]> = {
@@ -28,7 +27,7 @@ export const EDGE_TYPES_BY_DIAGRAM: Record<DiagramType, EdgeType[]> = {
 
 // node_type → forma Excalidraw (export). Decision rómbica; terminadores, actores,
 // personas y bases de datos como elipse; el resto, rectángulo.
-export function shapeForNodeType(nodeType: NodeType): ExcalidrawElementType {
+export function shapeForNodeType(nodeType: NodeType): 'rectangle' | 'ellipse' | 'diamond' {
   switch (nodeType) {
     case 'decision':
       return 'diamond';
