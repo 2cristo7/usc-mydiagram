@@ -76,7 +76,11 @@ def make_classify(queue: asyncio.Queue | None = None):
 
         async def generate_title() -> str:
             llm_response_title = await call_llm(
-                system="Reply with a concise title for the diagram, no explanation.",
+                # En castellano: el título es texto VISIBLE para el usuario (header
+                # del diagrama, historial), a diferencia del clasificador de tipo que
+                # solo devuelve un valor de enum. Coherente con prompts.py, que exige
+                # labels en castellano para nodos/aristas.
+                system="Responde con un título conciso en castellano para el diagrama, sin explicaciones.",
                 user=state["prompt"],
                 tier="fast",
                 max_tokens=20,
