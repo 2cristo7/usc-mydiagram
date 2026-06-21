@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { LogIn, SearchX, Inbox, Trash2, Plus } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { LogIn, SearchX, Inbox, Trash2, Plus, AlertTriangle } from 'lucide-react'
 import { Drawer, Badge, Spinner, EmptyState } from '../ui/primitives'
 import { useUiStore } from '../store/ui'
 import { useAuthStore } from '../store/auth'
@@ -98,28 +98,36 @@ export function HistoryDrawer() {
     if (!drawerOpen) setTrashOpen(false)
   }, [drawerOpen])
 
-  useEffect(() => {
-    if (!drawerOpen || !user) return
-    Promise.resolve()
-      .then(() => {
-        setLoading(true)
-        setError(null)
-        return listDiagrams()
-      })
+  // Carga de la lista del historial. Extraída a función nombrada (no inline en el
+  // effect) para poder reusarla desde el botón "Reintentar" del estado de error.
+  const loadHistory = useCallback(() => {
+    setLoading(true)
+    setError(null)
+    listDiagrams()
       .then(setItems)
       .catch((e: Error) => setError(e.message ?? 'Error'))
       .finally(() => setLoading(false))
-  }, [drawerOpen, user])
+  }, [])
 
-  useEffect(() => {
-    if (!trashOpen || !user) return
+  // Carga de la papelera (mismo patrón que loadHistory: reutilizable por el reintento).
+  const loadTrash = useCallback(() => {
     setTrashLoading(true)
     setTrashError(null)
     listTrash()
       .then(setTrashItems)
       .catch((e: Error) => setTrashError(e.message ?? 'Error'))
       .finally(() => setTrashLoading(false))
-  }, [trashOpen, user])
+  }, [])
+
+  useEffect(() => {
+    if (!drawerOpen || !user) return
+    loadHistory()
+  }, [drawerOpen, user, loadHistory])
+
+  useEffect(() => {
+    if (!trashOpen || !user) return
+    loadTrash()
+  }, [trashOpen, user, loadTrash])
 
   const filtered = items.filter((item) =>
     item.title.toLowerCase().includes(search.toLowerCase()),
@@ -150,7 +158,11 @@ export function HistoryDrawer() {
       // igual con el diario vacío (degrada, no rompe).
       try {
         setVersions(await listVersions(id))
-      } catch {
+      } catch (e) {
+        // Degrada (abre con el diario vacío) pero no en silencio: traza en consola
+        // y aviso discreto de que se perdió el historial de versiones.
+        console.warn('[HistoryDrawer] no se pudo cargar el historial de versiones:', e)
+        toast.warning('No se pudo cargar el historial de versiones.')
         setVersions([])
       }
       useHistoryStore.getState().reset()
@@ -341,7 +353,14 @@ export function HistoryDrawer() {
                 <p className="text-center text-sm text-[var(--color-ink)]/50 py-8">Cargando...</p>
               )}
               {trashError && (
-                <p className="text-center text-sm text-[var(--color-danger)] py-8">{trashError}</p>
+                <EmptyState
+                  className="py-10"
+                  tone="danger"
+                  icon={<AlertTriangle size={36} />}
+                  title="No se pudo cargar la papelera"
+                  description={trashError}
+                  action={{ label: 'Reintentar', onClick: loadTrash }}
+                />
               )}
               {!trashLoading && !trashError && filteredTrash.length === 0 && (
                 trashSearch.trim() ? (
@@ -415,7 +434,14 @@ export function HistoryDrawer() {
                 <p className="text-center text-sm text-[var(--color-ink)]/50 py-8">Cargando...</p>
               )}
               {error && (
-                <p className="text-center text-sm text-[var(--color-danger)] py-8">{error}</p>
+                <EmptyState
+                  className="py-10"
+                  tone="danger"
+                  icon={<AlertTriangle size={36} />}
+                  title="No se pudo cargar el historial"
+                  description={error}
+                  action={{ label: 'Reintentar', onClick: loadHistory }}
+                />
               )}
               {!loading && !error && filtered.length === 0 && (
                 search.trim() ? (

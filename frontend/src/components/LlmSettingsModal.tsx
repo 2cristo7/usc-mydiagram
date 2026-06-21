@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Trash2 } from 'lucide-react'
 import { useLlmSettingsStore } from '../store/llmSettings'
+import { toast } from '../store/toast'
 import type { LlmConfigPayload } from '../lib/api'
-import { Button, Dropdown } from '../ui/primitives'
+import { Button, Dropdown, Spinner, AlertBanner } from '../ui/primitives'
 import type { DropdownOption } from '../ui/primitives'
 import { readTransientKey } from '../lib/transientLlmKey'
 import { hasPersistConsent, setPersistConsent } from '../lib/llmConsent'
@@ -119,8 +120,13 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
   const [fastCustom, setFastCustom] = useState('')
   const [capableSel, setCapableSel] = useState(CUSTOM)
   const [capableCustom, setCapableCustom] = useState('')
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'ok' | 'error'>('idle')
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'error'>('idle')
   const [saveError, setSaveError] = useState('')
+  // Estado LOCAL de guardado en curso. No dependemos solo del `loading` del store
+  // (que podría no levantarse síncronamente al entrar en saveConfig): este flag se
+  // pone a true al inicio de doSave y a false en su finally, cerrando la ventana de
+  // doble-submit (doble PUT de la API key) en el botón Guardar.
+  const [saving, setSaving] = useState(false)
   // Modelos Ollama instalados (GET /api/tags) para autocompletar y evitar typos.
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [ollamaTagsError, setOllamaTagsError] = useState(false)
@@ -368,6 +374,9 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
       base_url: transport === 'direct' && baseUrl.trim() ? baseUrl.trim() : undefined,
       api_key: persist ? typedKey : undefined,
     }
+    // Flag local: cierra la ventana de doble-submit aunque el `loading` del store
+    // no se levante de forma síncrona al entrar en saveConfig.
+    setSaving(true)
     try {
       await saveConfig(payload)
       if (typedKey) {
@@ -381,10 +390,15 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
           setTransientActive(true)
         }
       }
-      setSaveStatus('ok')
+      // Confirmación efímera vía toast (patrón del resto de la app) en lugar de un
+      // banner persistente: no deja ruido en el modal tras guardar.
+      setSaveStatus('idle')
+      toast.success('Configuración guardada correctamente.')
     } catch (err) {
       setSaveStatus('error')
       setSaveError((err as Error).message)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -578,7 +592,7 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
         {isOllama(provider) && (
           ollamaLoading && ollamaModels.length === 0 ? (
             <p className="text-xs opacity-60 text-[var(--color-ink)] -mb-2 flex items-center gap-1.5">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-[var(--color-ink)] border-t-transparent" />
+              <Spinner size={12} label="Detectando modelos" />
               Detectando modelos instalados…
             </p>
           ) : ollamaModels.length > 0 ? (
@@ -586,9 +600,10 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
               {ollamaModels.length} modelo{ollamaModels.length > 1 ? 's' : ''} instalado{ollamaModels.length > 1 ? 's' : ''} detectado{ollamaModels.length > 1 ? 's' : ''} · elígelo en la lista.
             </p>
           ) : ollamaTagsError ? (
-            <p className="text-xs opacity-60 text-[var(--color-danger)] -mb-2">
-              No se pudo leer tu Ollama local (¿está corriendo?). Usa «Otro…» para escribir el nombre a mano.
-            </p>
+            <AlertBanner
+              variant="error"
+              message="No se pudo leer tu Ollama local (¿está corriendo?). Usa «Otro…» para escribir el nombre a mano."
+            />
           ) : null
         )}
 
@@ -640,16 +655,14 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
           )}
         </div>
 
-        {/* Feedback */}
-        {saveStatus === 'ok' && (
-          <p className="text-sm font-semibold text-[var(--color-accent-3)] border-[2px] border-[var(--color-accent-3)] rounded-[var(--radius)] px-3 py-2">
-            ✓ Configuración guardada correctamente.
-          </p>
-        )}
+        {/* Feedback de error de guardado. El éxito se notifica vía toast.success
+            (patrón del resto de la app), no con un banner persistente. */}
         {saveStatus === 'error' && (
-          <p className="text-sm font-semibold text-[var(--color-danger)] border-[2px] border-[var(--color-danger)] rounded-[var(--radius)] px-3 py-2">
-            ✗ {saveError}
-          </p>
+          <AlertBanner
+            variant="error"
+            message={saveError}
+            onDismiss={() => { setSaveStatus('idle'); setSaveError('') }}
+          />
         )}
 
         {/* Save button — al guardar con una key nueva sin consentimiento previo,
@@ -657,10 +670,10 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
         <Button
           variant="primary"
           onClick={handleSaveClick}
-          disabled={loading || !hasUsableKey || !isDirty}
+          disabled={saving || loading || !hasUsableKey || !isDirty}
           className="w-full justify-center"
         >
-          {loading ? 'Guardando…' : 'Guardar configuración'}
+          {saving || loading ? 'Guardando…' : 'Guardar configuración'}
         </Button>
 
         {/* S10.3c — revocación de las keys guardadas en Vault (una por proveedor).

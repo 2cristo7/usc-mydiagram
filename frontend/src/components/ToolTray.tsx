@@ -1,6 +1,6 @@
 import { useStore } from '../store/index'
 import { useUiStore } from '../store/ui'
-import { Badge } from '../ui/primitives'
+import { Badge, Spinner } from '../ui/primitives'
 
 const TOOL_LABELS: Record<string, string> = {
   find_node: 'Buscando nodo',
@@ -14,24 +14,18 @@ const TOOL_LABELS: Record<string, string> = {
   regenerate_from_scratch: 'Regenerando desde cero',
 }
 
-function Spinner() {
-  return (
-    <span
-      className="inline-block h-3.5 w-3.5 border-[2px] border-[var(--color-ink)] border-t-transparent animate-spin rounded-full"
-      role="status"
-      aria-label="ejecutando"
-    />
-  )
-}
-
 export function ToolTray() {
   const toolTrace = useStore((s) => s.toolTrace)
   const { toolTrayExpanded, setToolTrayExpanded } = useUiStore()
 
   if (toolTrace.length === 0) return null
 
-  const hasRunning = toolTrace.some((e) => e.status === 'running')
-  const isExpanded = hasRunning || toolTrayExpanded
+  // Solo el toggle del usuario decide si está abierta (arranca cerrada). Antes se
+  // forzaba abierta mientras alguna tool corría (`hasRunning`), pero como los
+  // tool_call/tool_result llegan intercalados muy rápido el estado oscilaba y la
+  // lista parpadeaba durante el refinamiento. El detalle por nodo ya se ve en la
+  // tarjeta En curso; este panel es la traza CRUDA, ahora silenciosa por defecto.
+  const isExpanded = toolTrayExpanded
 
   return (
     <div className="border-t-[3px] border-[var(--color-ink)] bg-[var(--color-surface)]">
@@ -44,7 +38,7 @@ export function ToolTray() {
         <span className="ml-auto">{isExpanded ? '▲' : '▾'}</span>
       </button>
       {isExpanded && (
-        <div className="px-3 pb-2 space-y-0.5">
+        <div className="px-3 pb-2 space-y-0.5 max-h-56 overflow-y-auto scrollbar-brutal">
           {toolTrace.map((entry) => {
             const label = TOOL_LABELS[entry.tool] ?? entry.tool
             const detail = [entry.args?.label, entry.args?.query, entry.args?.id]
@@ -52,7 +46,7 @@ export function ToolTray() {
             const text = detail ? `${label} «${detail}»` : label
             return (
               <div key={entry.id} className="flex items-center gap-2 py-0.5 text-xs text-[var(--color-ink)]">
-                {entry.status === 'running' && <Spinner />}
+                {entry.status === 'running' && <Spinner size={14} label="ejecutando" />}
                 {entry.status === 'ok' && <span className="text-[var(--color-accent-3)]">✓</span>}
                 {entry.status === 'error' && <span className="text-[var(--color-warn)]">⚠</span>}
                 <span>{text}</span>
