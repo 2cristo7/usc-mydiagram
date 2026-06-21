@@ -24,7 +24,7 @@ const h = vi.hoisted(() => {
     removeEdge: vi.fn(), applyDiagram: vi.fn(), traceToolCall: vi.fn(),
     traceToolResult: vi.fn(), clearToolTrace: vi.fn(),
     setGenerationPhase: vi.fn(), clearDiagramContent: vi.fn(), setPendingTypeChoice: vi.fn(),
-    addVersion: vi.fn(), setActiveOperation: store.setActiveOperation,
+    addVersion: vi.fn(), setActiveOperation: store.setActiveOperation, setStreamingType: vi.fn(),
   }
   return {
     handlers,

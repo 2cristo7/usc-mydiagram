@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { ConnectionState, Degradation, DegradationCategory, AgentToolCall, AgentToolResult, DiagramNode, DiagramEdge } from "../types";
 import { diagramSchema } from "../types";
 import { io, Socket } from "socket.io-client";
-import { useStore } from "../store/index";
+import { useStore, selectPromptDraft } from "../store/index";
 import { useAuthStore } from "../store/auth";
 import { supabase } from "../lib/supabase";
 import { signOut } from "./useAuth";
@@ -10,6 +10,7 @@ import { diagramToJson } from "../ui/utils/diagramToJson";
 import { persistCurrentDiagram } from "../lib/api";
 import { toast } from "../store/toast";
 import { useLlmSettingsStore } from "../store/llmSettings";
+import { useUiStore } from "../store/ui";
 import { readTransientKey } from "../lib/transientLlmKey";
 
 // Render diferenciado por categoría (S6.9 P4): cada degradación se traduce a un
@@ -39,6 +40,18 @@ const LIVE_MIN_STEP = 45;
 const LIVE_MAX_STEP = 120;
 const clampLiveStep = (ms: number) => Math.max(LIVE_MIN_STEP, Math.min(LIVE_MAX_STEP, ms));
 
+// Timeout del proxy a Ollama en el navegador (transporte ollama-browser). Más
+// holgado que el de las REST (api.ts) porque una completion de un modelo local
+// puede tardar bastante; pero acotado para no dejar al agente del backend esperando
+// indefinidamente una respuesta que nunca llegará si el servidor de Ollama se cuelga.
+const OLLAMA_PROXY_TIMEOUT_MS = 120_000;
+
+// Tope de espera del ACK de registro de la key transitoria (ver ensureTransientKey).
+// El round-trip navegador↔gateway es de pocos ms; este tope es solo una red de
+// seguridad para no bloquear la generación si el ack no llega (p. ej. un backend
+// sin soporte de ack durante un despliegue): pasado el tope, se emite igualmente.
+const TRANSIENT_KEY_ACK_TIMEOUT_MS = 2500;
+
 // Payload de `diagram:done` (campos que consume processDone; el resto se valida con
 // diagramSchema antes de aplicarse).
 type DoneData = {
@@ -53,6 +66,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         addNode, addEdge, setUiState, setPendingClarification,
         updateNode, removeNode, removeEdge, applyDiagram,
         traceToolCall, traceToolResult, clearToolTrace,
+        pushLiveOp, clearLiveOps,
         setGenerationPhase, clearDiagramContent, setPendingTypeChoice,
         addVersion, setActiveOperation, setStreamingType,
     } = useStore();
@@ -98,6 +112,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // intento de reconexión consecutivo. Se resetea al conectar con éxito.
     const connectErrorToastedRef = useRef(false);
 
+    // #4 — true mientras Socket.IO está en su ciclo de reconexión (entre
+    // reconnect_attempt y reconnect/reconnect_failed). connect_error se dispara en
+    // CADA intento fallido; sin este flag pisaría 'reconnecting' con 'error' y el
+    // aviso de "reconectando" nunca sería visible.
+    const reconnectingRef = useRef(false);
+
     // Arranca el temporizador de generación. Llámalo justo antes de setUiState('generating').
     // Si ya había uno pendiente (caso raro: doble emisión), lo cancela primero.
     const startGenTimeout = () => {
@@ -107,7 +127,8 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             resetLiveStream();
             setGenerationPhase('idle');
             setUiState('error');
-            toast.error('La generación está tardando demasiado. Inténtalo de nuevo.');
+            restoreFailedPrompt();
+            useUiStore.getState().setGenerationError('La generación está tardando demasiado. Inténtalo de nuevo.');
         }, 90_000);
     };
 
@@ -116,6 +137,30 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         if (genTimeoutRef.current) {
             clearTimeout(genTimeoutRef.current);
             genTimeoutRef.current = null;
+        }
+    };
+
+    // Devuelve el prompt en vuelo al input y lo enfoca. El draft se vació al emitir
+    // (sendMessage), así que sin esto un error dejaría el input vacío y el usuario
+    // perdería lo que escribió. Restaurarlo es lo que hace útil el botón "Reintentar":
+    // reenvía justo este texto (que además queda editable). Solo restaura si el draft
+    // está vacío, para no pisar algo que el usuario ya empezó a escribir de nuevo.
+    const restoreFailedPrompt = () => {
+        const prompt = lastPromptRef.current;
+        if (!prompt) return;
+        if (selectPromptDraft(useStore.getState()).trim()) return;
+        useStore.getState().setPromptDraft(prompt);
+        useUiStore.getState().focusPrompt();
+    };
+
+    // #5 — al (re)conectar, saca el uiState del estado 'error' si quedó ahí por una
+    // caída de conexión, devolviéndolo a reposo ('idle'). Solo actúa sobre 'error':
+    // un 'generating' en curso (raro tras una reconexión, pero posible) lo cierra su
+    // propio desenlace (done/error/timeout), no este reseteo. Lee el estado FRESCO
+    // del store para no depender de un closure obsoleto.
+    const recoverConnectionError = () => {
+        if (useStore.getState().uiState === 'error') {
+            setUiState('idle');
         }
     };
 
@@ -180,7 +225,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         }
 
         const [item] = q.splice(idx, 1);
-        if (item.kind === 'node') addNode(item.node);
+        // La lista en vivo "va saliendo" al MISMO ritmo que el canvas: cada nodo que
+        // la bomba revela durante la GENERACIÓN se añade a liveOps (las aristas no se
+        // listan). El refinamiento alimenta liveOps por su propia vía (tool_result).
+        if (item.kind === 'node') { addNode(item.node); pushLiveOp({ kind: 'add', label: item.node.label }); }
         else addEdge(item.edge);
 
         const remaining = q.length;
@@ -217,7 +265,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 fragments: data.diagram.fragments,
             });
             if (!parseResult.success) {
-                toast.error('El diagrama recibido no es válido.');
+                useUiStore.getState().setGenerationError('El diagrama recibido no es válido.');
                 setActiveOperation(null);
                 setGenerationPhase('idle');
                 setUiState('error');
@@ -300,6 +348,14 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             socketRef.current = io(wsUrl, {
                 transports: ['websocket'],
                 auth: token ? { token } : {},
+                // Reconexión explícita: Socket.IO reintenta solo, pero fijamos límites
+                // razonables para que el estado 'reconnecting' (visible en el panel)
+                // tenga un final claro (reconnect_failed → 'error') en vez de reintentar
+                // en silencio para siempre.
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
             });
             const socket = socketRef.current;
 
@@ -319,6 +375,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             // de identidad): avisamos y deslogueamos para forzar un login limpio.
             socket.on('auth:expired', () => {
                 toast.error('Tu sesión ha expirado. Vuelve a iniciar sesión.');
+                useUiStore.getState().setGenerationError(null);
                 setActiveOperation(null);
                 setUiState('error');
                 void signOut();
@@ -329,6 +386,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 // #4 — nueva conexión exitosa: permitir de nuevo el toast de error
                 // en la siguiente racha de fallos.
                 connectErrorToastedRef.current = false;
+                // #5 — auto-recuperación: si el uiState quedó en 'error' por una caída
+                // de conexión (connect_error / disconnect), al (re)conectar vuelve a
+                // reposo. NO pisamos un 'generating' legítimo (el done/error lo cerrará).
+                recoverConnectionError();
                 console.log("WebSocket connected");
                 // S10.3b — Key transitoria: registramos el emisor para que el modal
                 // de ajustes pueda empujar una key nueva al socket vivo, y
@@ -339,6 +400,36 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 });
                 const stored = readTransientKey();
                 if (stored) socket.emit('llm:set_transient_key', { provider: stored.provider, api_key: stored.key });
+            });
+
+            // #4 — Reconexión visible: Socket.IO emite estos eventos en su Manager
+            // (socket.io), no en el socket. Sin handlers, la reconexión es invisible y
+            // el usuario solo ve 'disconnected'/'error'. Aquí reflejamos el ciclo:
+            //   · reconnect_attempt → 'reconnecting' (aviso temporal en el panel)
+            //   · reconnect          → vuelta a la normalidad (el handler 'connect' del
+            //                          socket también se dispara y pone 'connected')
+            //   · reconnect_failed   → agotados los intentos: estado 'error' definitivo.
+            // El `?.` protege contra un socket falso sin Manager (mocks de test).
+            socket.io?.on('reconnect_attempt', () => {
+                reconnectingRef.current = true;
+                setConnectionState('reconnecting');
+            });
+            socket.io?.on('reconnect', () => {
+                reconnectingRef.current = false;
+                setConnectionState('connected');
+                connectErrorToastedRef.current = false;
+                // #5 — la reconexión limpia el uiState de 'error' si lo dejó la caída.
+                recoverConnectionError();
+            });
+            socket.io?.on('reconnect_failed', () => {
+                reconnectingRef.current = false;
+                setConnectionState('error');
+                setUiState('error');
+                useUiStore.getState().setGenerationError(null);
+                if (!connectErrorToastedRef.current) {
+                    connectErrorToastedRef.current = true;
+                    toast.error('No se pudo reconectar con el servidor.');
+                }
             });
 
             // Montaje en vivo: los nodos/aristas NO se aplican al instante, se encolan
@@ -384,12 +475,24 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                     // Acumula el delta para el resumen del done. El label del
                     // borrado se lee ANTES de aplicar removeNode (luego ya no está).
                     const changes = refineChangesRef.current;
+                    // El delta por NODO se acumula en dos sitios: `changes` (resumen
+                    // agregado del done → op_summary persistido) y `liveOps` (lista
+                    // cronológica que "va saliendo" en la tarjeta En curso). Las
+                    // aristas solo cuentan; el find no entra en ninguno de los dos.
                     switch (data?.tool) {
                         case 'add_node':
-                            if (data.node) { addNode(data.node); changes.added.push(data.node.label); }
+                            if (data.node) {
+                                addNode(data.node);
+                                changes.added.push(data.node.label);
+                                pushLiveOp({ kind: 'add', label: data.node.label });
+                            }
                             break;
                         case 'update_node':
-                            if (data.node) { updateNode(data.node.id, data.node); changes.updated.push(data.node.label); }
+                            if (data.node) {
+                                updateNode(data.node.id, data.node);
+                                changes.updated.push(data.node.label);
+                                pushLiveOp({ kind: 'update', label: data.node.label });
+                            }
                             break;
                         case 'add_edge':
                             if (data.edge) { addEdge(data.edge); changes.addedEdges++; }
@@ -399,6 +502,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                                 const id = result.deleted_node;
                                 const label = useStore.getState().currentDiagram?.nodes.find((n) => n.id === id)?.label ?? id;
                                 changes.deleted.push(label);
+                                pushLiveOp({ kind: 'delete', label });
                                 removeNode(id, Array.isArray(result.deleted_edges) ? result.deleted_edges : []);
                             }
                             break;
@@ -487,19 +591,25 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                         detail: data.error ?? 'Error del modelo de lenguaje.',
                         provider: data.provider,
                     });
+                    // El detalle ya viaja en el banner superior de LLM (ollamaError):
+                    // no duplicar en el banner del canvas.
+                    useUiStore.getState().setGenerationError(null);
                     resetLiveStream();
                     setActiveOperation(null);
                     setGenerationPhase('idle');
                     setUiState('error');
+                    restoreFailedPrompt();
                     return;
                 }
 
-                // Un error no es una operación → no va al diario; toast efímero.
-                toast.error(data?.error ?? 'Error generando el diagrama');
+                // Un error no es una operación → no va al diario. Su detalle se muestra
+                // en el banner anclado al borde superior del canvas (no en un toast).
+                useUiStore.getState().setGenerationError(data?.error ?? 'Error generando el diagrama');
                 resetLiveStream();
                 setActiveOperation(null);
                 setGenerationPhase('idle');
                 setUiState('error');
+                restoreFailedPrompt();
             });
 
             // Proxy del LLM en el navegador (transporte ollama-browser): el gateway
@@ -515,6 +625,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             }) => {
                 const { request_id, model, messages, options, think } = req;
                 const setOllamaError = useLlmSettingsStore.getState().setOllamaError;
+                // Timeout vía AbortController: si Ollama acepta la conexión pero no
+                // responde (modelo colgado), sin esto la promesa quedaría pendiente
+                // para siempre y el agente del backend esperaría indefinidamente una
+                // respuesta que nunca llega.
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), OLLAMA_PROXY_TIMEOUT_MS);
                 try {
                     const res = await fetch('http://localhost:11434/api/chat', {
                         method: 'POST',
@@ -522,6 +638,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                         // `think` se reenvía tal cual lo manda el agente: para modelos de
                         // razonamiento (qwen3) viaja `false`, si no el content vuelve vacío.
                         body: JSON.stringify({ model, messages, stream: false, think, options }),
+                        signal: controller.signal,
                     });
                     if (!res.ok) {
                         const error_code = res.status === 404 ? 'model_missing' : 'unknown';
@@ -540,9 +657,17 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                     setOllamaError(null);
                     socket.emit('llm:response', { request_id, content });
                 } catch (err) {
-                    const detail = (err as Error).message;
+                    // El aborto por timeout se mapea al MISMO error_code que un Ollama
+                    // inalcanzable (ollama_unreachable: el navegador no obtuvo respuesta
+                    // útil), pero con un detalle que distingue la causa para el usuario.
+                    const aborted = err instanceof DOMException && err.name === 'AbortError';
+                    const detail = aborted
+                        ? `Ollama no respondió en ${OLLAMA_PROXY_TIMEOUT_MS / 1000}s. El modelo puede estar sobrecargado.`
+                        : (err as Error).message;
                     setOllamaError({ error_code: 'ollama_unreachable', detail, model });
                     socket.emit('llm:error', { request_id, error_code: 'ollama_unreachable', detail, model });
+                } finally {
+                    clearTimeout(timer);
                 }
             });
 
@@ -562,6 +687,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 cancelGenTimeout();
                 // Caída de conexión: aviso efímero (toast), no una entrada del diario.
                 toast.error('Conexión perdida durante la generación. Inténtalo de nuevo.');
+                useUiStore.getState().setGenerationError(null);
                 resetLiveStream();
                 setActiveOperation(null);
                 setGenerationPhase('idle');
@@ -569,9 +695,17 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             });
 
             socket.on('connect_error', (error) => {
+                console.error("WebSocket error:", error);
+                // #4 — durante el ciclo de reconexión, connect_error se dispara en cada
+                // intento fallido: NO lo tratamos como error definitivo (mantenemos
+                // 'reconnecting' visible). El desenlace lo marca reconnect/reconnect_failed.
+                if (reconnectingRef.current) {
+                    setConnectionState('reconnecting');
+                    return;
+                }
                 setConnectionState('error');
                 setUiState('error');
-                console.error("WebSocket error:", error);
+                useUiStore.getState().setGenerationError(null);
                 // #4 — un solo toast por racha de fallos para no spamear al usuario.
                 // connectErrorToastedRef se resetea en el handler 'connect' (éxito).
                 if (!connectErrorToastedRef.current) {
@@ -596,6 +730,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             useLlmSettingsStore.getState().registerTransientEmitter(null);
             authUnsub?.();
             if (socketRef.current) {
+                // #4 — soltamos los listeners del Manager (reconnect_*) además del
+                // disconnect del socket, para no acumularlos al recrear la conexión.
+                // El `?.` protege contra un socket falso sin Manager (mocks de test).
+                socketRef.current.io?.off('reconnect_attempt');
+                socketRef.current.io?.off('reconnect');
+                socketRef.current.io?.off('reconnect_failed');
                 socketRef.current.disconnect();
             }
         }
@@ -603,7 +743,35 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [url, userId]);
 
-    const sendMessage = (text: string) => {
+    // Cierra la carrera reconexión↔generación. La API key transitoria vive solo en
+    // memoria del socket del BACKEND y se pierde cuando el WebSocket se reconecta
+    // (idle largo, suspensión…): el socket nuevo nace con `socket.data` vacío. El
+    // navegador, en cambio, la conserva en sessionStorage. Por eso, ANTES de cada
+    // generación, la reenviamos al socket y ESPERAMOS el ack del gateway: el orden
+    // de Socket.IO garantiza que la generación emitida tras el ack se procese
+    // DESPUÉS del registro de la key, así resolveLlmConfig nunca la ve como null
+    // (que en un proveedor comercial daba un 401 «que se arreglaba al recargar»).
+    // No-op si no hay key transitoria (Ollama, key en Vault o ninguna) o no hay
+    // conexión: en esos casos no hay nada que registrar y se emite sin esperar.
+    const ensureTransientKey = (): Promise<void> => {
+        const stored = readTransientKey();
+        const socket = socketRef.current;
+        if (!stored || !socket?.connected) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+            let settled = false;
+            const done = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve();
+            };
+            // Red de seguridad: si el ack no llega (backend sin soporte), seguir igual.
+            const timer = setTimeout(done, TRANSIENT_KEY_ACK_TIMEOUT_MS);
+            socket.emit('llm:set_transient_key', { provider: stored.provider, api_key: stored.key }, done);
+        });
+    };
+
+    const sendMessage = async (text: string) => {
         if (!text.trim()) return;
 
         // El comando entra como operación EN VUELO (se pinta como tarjeta "en
@@ -625,7 +793,11 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         // capturar un currentDiagram obsoleto en el closure.
         // S7.5 — run nuevo: la traza del anterior se descarta.
         clearToolTrace();
+        clearLiveOps();
         lastPromptRef.current = text;
+        // El envío progresa (hay conexión): ahora sí vaciamos el input. Si más
+        // tarde la operación falla, restoreFailedPrompt() lo repone desde lastPromptRef.
+        useStore.getState().setPromptDraft('');
 
         const { currentDiagram, setCurrentDiagramId, setLastGenerationPrompt,
                 selectedDiagramType, setLastGenerationType } = useStore.getState();
@@ -638,7 +810,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             setUiState('generating');
             // #2 — arrancar timeout ANTES de emitir para cubrir cualquier cuelgue.
             startGenTimeout();
-            socketRef.current.emit('message:refine', {
+            // Garantiza la key transitoria registrada en el socket antes de emitir.
+            await ensureTransientKey();
+            socketRef.current?.emit('message:refine', {
                 prompt: text,
                 diagram: diagramToJson(currentDiagram),
             });
@@ -659,7 +833,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             startLiveStream();
             // #2 — arrancar timeout ANTES de emitir.
             startGenTimeout();
-            socketRef.current.emit('message:send', {
+            // Garantiza la key transitoria registrada en el socket antes de emitir.
+            await ensureTransientKey();
+            socketRef.current?.emit('message:send', {
                 prompt: text,
                 diagram_type: selectedDiagramType ?? undefined,
             });
@@ -669,7 +845,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // S9.3b — Redo: regenera el prompt que originó el diagrama, IGNORANDO la
     // caché (el backend sobrescribe su entrada con el nuevo resultado). Solo tiene
     // sentido si ese prompt existe (diagrama generado en esta sesión).
-    const regenerate = () => {
+    const regenerate = async () => {
         const { lastGenerationPrompt: prompt, lastGenerationType } = useStore.getState();
         if (!prompt) return;
 
@@ -681,6 +857,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
         setActiveOperation('Regenerar diagrama');
         clearToolTrace();
+        clearLiveOps();
         lastPromptRef.current = prompt;
         isRefiningRef.current = false;
         // Limpiar el canvas ANTES de emitir: los nodos/aristas viejos desaparecen
@@ -693,8 +870,10 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         startLiveStream();
         // #2 — arrancar timeout ANTES de emitir.
         startGenTimeout();
+        // Garantiza la key transitoria registrada en el socket antes de emitir.
+        await ensureTransientKey();
         // S10.2 — conserva el tipo forzado del diagrama original (o auto si null).
-        socketRef.current.emit('message:regenerate', {
+        socketRef.current?.emit('message:regenerate', {
             prompt,
             diagram_type: lastGenerationType ?? undefined,
         });
@@ -702,7 +881,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
 
     // S7.4 — responder a la clarificación pendiente (botón u texto libre): la
     // respuesta viaja con el thread_id para reanudar ESA ejecución pausada.
-    const sendClarificationAnswer = (answer: string) => {
+    const sendClarificationAnswer = async (answer: string) => {
         if (!answer.trim()) return;
         const { pendingClarification, setPendingClarification, setUiState } = useStore.getState();
         if (!pendingClarification) return;
@@ -714,13 +893,18 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             return;
         }
 
+        // La respuesta progresa: vaciamos el input (su clearing ya no lo hace el
+        // componente, sino el punto de emisión, para no perder texto sin conexión).
+        useStore.getState().setPromptDraft('');
         // La respuesta continúa la operación en vuelo (no es una entrada aparte).
         setPendingClarification(null);
         setUiState('generating');
         // #2 — arrancar timeout: la clarificación reanuda el agente, que puede
         // volver a colgarse igual que en la generación inicial.
         startGenTimeout();
-        socketRef.current.emit('message:clarification_answer', {
+        // Garantiza la key transitoria registrada en el socket antes de emitir.
+        await ensureTransientKey();
+        socketRef.current?.emit('message:clarification_answer', {
             thread_id: pendingClarification.thread_id,
             answer,
         });
@@ -730,7 +914,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // Re-lanza la generación con el prompt ORIGINAL (último mensaje de usuario) y el
     // tipo elegido, sin añadir un mensaje de usuario duplicado. Limpia la elección
     // pendiente y reactiva el estado de generación.
-    const chooseDiagramType = (diagramTypeValue: string) => {
+    const chooseDiagramType = async (diagramTypeValue: string) => {
         const { setPendingTypeChoice, setSelectedDiagramType,
                 setUiState, setLastGenerationType, setLastGenerationPrompt,
                 setCurrentDiagramId, lastGenerationPrompt } = useStore.getState();
@@ -757,6 +941,7 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         // desaparezcan inmediatamente y no se pueda pulsar dos veces.
         setPendingTypeChoice(null);
         clearToolTrace();
+        clearLiveOps();
         lastPromptRef.current = originalPrompt;
         isRefiningRef.current = false;
 
@@ -768,12 +953,28 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
         // #2 — arrancar timeout ANTES de emitir.
         startGenTimeout();
 
-        socketRef.current.emit('message:regenerate', {
+        // Garantiza la key transitoria registrada en el socket antes de emitir.
+        await ensureTransientKey();
+        socketRef.current?.emit('message:regenerate', {
             prompt: originalPrompt,
             diagram_type: diagramTypeValue,
         });
     };
 
-    return {connectionState, sendMessage, sendClarificationAnswer, regenerate, chooseDiagramType };
+    // Reintenta la última operación fallida. Reenvía lo que haya en el input (el
+    // prompt restaurado por restoreFailedPrompt, que el usuario puede haber editado)
+    // a través de sendMessage, que YA decide generar-vs-refinar según exista diagrama:
+    // un refinamiento fallido conserva el diagrama → vuelve a refinar; una generación
+    // desde cero fallida lo dejó en null → vuelve a generar. Si no quedó texto en el
+    // input, cae al último prompt en vuelo. Limpia primero el banner de error de LLM
+    // (p. ej. 401): es un intento nuevo; si reaparece, su handler lo repondrá.
+    const retry = () => {
+        const prompt = selectPromptDraft(useStore.getState()).trim() || lastPromptRef.current;
+        if (!prompt) return;
+        useLlmSettingsStore.getState().setOllamaError(null);
+        sendMessage(prompt);
+    };
+
+    return {connectionState, sendMessage, sendClarificationAnswer, regenerate, chooseDiagramType, retry };
 }
 

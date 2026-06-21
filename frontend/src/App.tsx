@@ -9,8 +9,12 @@ import { TopBar } from "./components/TopBar";
 import { EditToolbar } from "./components/EditToolbar";
 import { FloatingPrompt } from "./components/FloatingPrompt";
 import { AlertBanner, Toaster } from "./ui/primitives";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useLlmSettingsStore } from "./store/llmSettings";
+import { useStore } from "./store";
+import { useUiStore } from "./store/ui";
 import { isSupabaseConfigured } from "./lib/supabase";
+import { AlertTriangle, RotateCcw } from "lucide-react";
 
 // Pantalla de configuración: si faltan las VITE_SUPABASE_* el cliente no puede
 // autenticar. Antes esto lanzaba a nivel de módulo (pantalla en blanco); ahora
@@ -53,8 +57,13 @@ function ollamaErrorMessage(err: { error_code: string; detail: string; model?: s
 function App() {
   useAuth();
   useUndoRedoShortcuts();
-  const { connectionState, sendMessage, sendClarificationAnswer, regenerate, chooseDiagramType } = useWebSocket();
+  const { connectionState, sendMessage, sendClarificationAnswer, regenerate, chooseDiagramType, retry } = useWebSocket();
   const { ollamaError, setOllamaError, openModal } = useLlmSettingsStore();
+  // Error de generación/refinamiento: se muestra en una franja anclada al borde
+  // superior del canvas (no como tarjeta central ni toast). Se condiciona a
+  // uiState==='error' para que un mensaje residual quede inerte fuera de un fallo activo.
+  const uiState = useStore((s) => s.uiState);
+  const generationError = useUiStore((s) => s.generationError);
 
   // Early return después de todos los hooks para no romper las reglas de React
   if (!isSupabaseConfigured) return <ConfigError />;
@@ -91,21 +100,48 @@ function App() {
         {/* Row 2, Col 1 — EditToolbar */}
         <EditToolbar />
 
-        {/* Row 2, Col 2 — Canvas with FloatingPrompt overlay */}
+        {/* Row 2, Col 2 — Canvas with FloatingPrompt overlay. Boundary por sección:
+            un throw de render del canvas no debe tumbar toda la app (el chat sigue). */}
         <div className="relative min-h-0">
-          <DiagramCanvas />
+          <ErrorBoundary compact>
+            <DiagramCanvas />
+          </ErrorBoundary>
+          {/* Franja de error anclada al borde superior del canvas. Cubre tanto la
+              generación desde cero (canvas vacío) como el refinamiento (diagrama en
+              pantalla, que no se tapa). El contenedor no captura clics
+              (pointer-events-none) para no bloquear el pan/selección bajo la franja;
+              solo el botón los recupera. */}
+          {generationError && uiState === 'error' && (
+            <div className="pointer-events-none absolute top-0 left-0 right-0 z-20 flex items-start gap-2 border-b-[3px] border-[var(--color-danger)] bg-[var(--color-surface)] px-4 py-2 shadow-[0_3px_0_var(--color-danger)]">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
+              <p className="flex-1 text-xs font-semibold leading-snug text-[var(--color-ink)]">
+                {generationError}
+              </p>
+              <button
+                onClick={retry}
+                className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-[var(--radius)] border-2 border-[var(--color-ink)] bg-[var(--color-accent)] px-2 py-1 text-[11px] font-bold text-white transition-[filter] hover:brightness-110"
+              >
+                <RotateCcw size={12} />
+                Reintentar
+              </button>
+            </div>
+          )}
           <FloatingPrompt
             onSendMessage={sendMessage}
             onSendClarificationAnswer={sendClarificationAnswer}
           />
         </div>
 
-        {/* Row 2, Col 3 — ChatPanel */}
-        <ChatPanel connectionState={connectionState} onChooseDiagramType={chooseDiagramType} />
+        {/* Row 2, Col 3 — ChatPanel (boundary por sección, aislado del canvas) */}
+        <ErrorBoundary compact>
+          <ChatPanel connectionState={connectionState} onChooseDiagramType={chooseDiagramType} />
+        </ErrorBoundary>
       </div>
 
-      {/* Overlay — HistoryDrawer */}
-      <HistoryDrawer />
+      {/* Overlay — HistoryDrawer (boundary por sección: aislado del resto) */}
+      <ErrorBoundary compact>
+        <HistoryDrawer />
+      </ErrorBoundary>
 
       {/* Notificaciones efímeras (errores, confirmaciones) */}
       <Toaster />

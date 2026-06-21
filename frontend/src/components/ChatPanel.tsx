@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAutoAnimate } from '@formkit/auto-animate/react'
-import { ChevronDown, Sparkles, Wand2, RotateCcw, Undo2, Copy, Check } from 'lucide-react'
+import { ChevronDown, ListTree, Sparkles, Wand2, RotateCcw, Undo2, Copy, Check } from 'lucide-react'
 import { ToolTray } from './ToolTray'
+import { NodeOpList } from './NodeOpList'
 import { TypeChoiceButtons } from './TypeChoiceButtons'
-import type { ConnectionState, VersionMeta, VersionOrigin, OpSummary } from '../types'
+import type { ConnectionState, NodeOp, VersionMeta, VersionOrigin, OpSummary } from '../types'
 import { useStore } from '../store/index'
 import { useHistoryNav } from '../hooks/useHistoryNav'
 import { EmptyState, Spinner } from '../ui/primitives'
@@ -18,6 +19,8 @@ interface ChatPanelProps {
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
   connecting: 'Conectando...',
   connected: 'Conectado',
+  // Contrato 2: useWebSocket emite 'reconnecting' durante el ciclo de reconexión.
+  reconnecting: 'Reconectando…',
   disconnected: 'Desconectado',
   error: 'Error',
 }
@@ -25,6 +28,8 @@ const CONNECTION_LABELS: Record<ConnectionState, string> = {
 const CONNECTION_COLORS: Record<ConnectionState, string> = {
   connecting: 'var(--color-warn)',
   connected: 'var(--color-accent-3)',
+  // Ámbar (mismo color que 'connecting'): reconexión en curso, no es un fallo aún.
+  reconnecting: 'var(--color-warn)',
   disconnected: 'var(--color-danger)',
   error: 'var(--color-danger)',
 }
@@ -83,6 +88,9 @@ function OperationCard({
   onRestore: () => void
 }) {
   const [open, setOpen] = useState(false)
+  // Desplegable independiente (debajo del del prompt) con la lista por nodo del
+  // delta. Arranca cerrado: es un "ver más", no la vista por defecto.
+  const [opsOpen, setOpsOpen] = useState(false)
   // ¿El prompt se corta en una línea? Solo entonces tiene sentido el desplegable
   // (si cabe entero, no se ofrece expandir). Se mide sobre el <p> truncado.
   const [overflows, setOverflows] = useState(false)
@@ -95,7 +103,7 @@ function OperationCard({
   // Feedback de copia: el icono pasa a ✓ durante ~1.5s y vuelve a Copy. Inline,
   // sin toast de éxito, para no apilar avisos al copiar varios prompts seguidos.
   const [copied, setCopied] = useState(false)
-  const copyTimer = useRef<ReturnType<typeof setTimeout>>()
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => {
     if (copyTimer.current) clearTimeout(copyTimer.current)
   }, [])
@@ -116,6 +124,19 @@ function OperationCard({
   const Icon = meta.icon
   const receipt = summaryText(version.op_summary)
   const expandable = overflows || open
+
+  // Lista por nodo derivada del resumen persistido: altas, ediciones y bajas, cada
+  // una con su nombre. Agrupada por tipo (op_summary no guarda el orden cronológico,
+  // solo tres arrays). Las aristas quedan fuera (solo hay conteo, no nombre).
+  const ops = useMemo<NodeOp[]>(() => {
+    const s = version.op_summary
+    if (!s) return []
+    return [
+      ...(s.added ?? []).map((label): NodeOp => ({ kind: 'add', label })),
+      ...(s.updated ?? []).map((label): NodeOp => ({ kind: 'update', label })),
+      ...(s.deleted ?? []).map((label): NodeOp => ({ kind: 'delete', label })),
+    ]
+  }, [version.op_summary])
 
   return (
     <div className="border-2 border-[var(--color-ink)] bg-[var(--color-surface)] rounded-[var(--radius)] overflow-hidden">
@@ -175,6 +196,28 @@ function OperationCard({
         </div>
       )}
 
+      {/* ── Sección 2b: lista por nodo del delta (desplegable propio) ────────
+          Debajo del desplegable del prompt. Solo si hubo cambios de nodo (las
+          aristas no se listan: op_summary solo guarda su conteo). */}
+      {ops.length > 0 && (
+        <div className="px-2.5 pb-2">
+          <button
+            onClick={() => setOpsOpen((o) => !o)}
+            className="flex w-full items-center gap-1.5 text-left text-[11px] font-semibold text-[var(--color-ink)]/60 hover:text-[var(--color-accent)] transition-colors"
+          >
+            <ListTree size={13} className="flex-shrink-0" />
+            <span>{ops.length} nodo{ops.length > 1 ? 's' : ''}</span>
+            <ChevronDown
+              size={13}
+              className={`ml-auto flex-shrink-0 transition-transform ${opsOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+          {opsOpen && (
+            <NodeOpList ops={ops} className="mt-1.5 max-h-40 overflow-y-auto scrollbar-brutal" />
+          )}
+        </div>
+      )}
+
       {/* ── Sección 3: botón (con hover) ──────────────────────────────────── */}
       <button
         onClick={onRestore}
@@ -195,6 +238,7 @@ function OperationCard({
 export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelProps) {
   const uiState = useStore((s) => s.uiState)
   const activeOperation = useStore((s) => s.activeOperation)
+  const liveOps = useStore((s) => s.liveOps)
   const versions = useStore((s) => s.versions)
   const currentVersionSeq = useStore((s) => s.currentVersionSeq)
   const headVersionId = useStore((s) => s.headVersionId)
@@ -221,11 +265,12 @@ export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelPro
       .map((v, i) => [v.id, i + 1]),
   )
 
-  // El scroll baja al fondo cuando se crea una versión nueva (reorden) o entra una
-  // operación en vuelo; navegar no fuerza el scroll (la lista no se reordena).
+  // El scroll baja al fondo cuando se crea una versión nueva (reorden), entra una
+  // operación en vuelo, o se revela una operación por nodo en vivo (así el item
+  // recién aparecido queda visible). Navegar no fuerza el scroll (no se reordena).
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [operations.length, activeOperation, headVersionId])
+  }, [operations.length, activeOperation, headVersionId, liveOps.length])
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--color-bg)] border-l-[3px] border-[var(--color-ink)]">
@@ -261,8 +306,12 @@ export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelPro
           />
         ))}
 
-        {/* Operación en vuelo: el comando enviado aún sin terminar */}
-        {activeOperation && uiState === 'generating' && (
+        {/* Operación en vuelo: el comando enviado aún sin terminar. Se muestra en
+            cuanto uiState pasa a 'generating', AUNQUE activeOperation aún sea null:
+            al elegir un tipo de diagrama (chooseDiagramType) la generación arranca
+            sin fijar activeOperation, así que sin este fallback no habría feedback
+            "En curso…" entre el clic y la llegada del primer evento. */}
+        {uiState === 'generating' && (
           <div className="border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-accent)]/5 p-2.5 rounded-[var(--radius)]">
             <div className="flex items-center gap-2 mb-1">
               <Spinner />
@@ -270,7 +319,24 @@ export function ChatPanel({ connectionState, onChooseDiagramType }: ChatPanelPro
                 En curso…
               </span>
             </div>
-            <p className="break-words text-xs text-[var(--color-ink)]">{activeOperation}</p>
+            <p className="break-words text-xs text-[var(--color-ink)]">
+              {activeOperation ?? 'Generando diagrama…'}
+            </p>
+          </div>
+        )}
+
+        {/* Lista por nodo EN VIVO: bloque propio justo DEBAJO de la tarjeta "En
+            curso". Cada item va apareciendo según el agente trabaja —en generación
+            al ritmo de la bomba de revelado, en refinamiento según llegan los
+            tool_result—. Mismo componente (icono + nombre) que la tarjeta de versión
+            persistida; aquí siempre visible (no desplegable): la idea es verla nacer.
+            El -mt-1 la pega a la tarjeta de arriba para leerse como su continuación. */}
+        {uiState === 'generating' && liveOps.length > 0 && (
+          <div className="-mt-1 border-2 border-dashed border-t-0 border-[var(--color-accent)] bg-[var(--color-accent)]/5 rounded-b-[var(--radius)] overflow-hidden">
+            <NodeOpList
+              ops={liveOps}
+              className="p-2.5 max-h-56 overflow-y-auto scrollbar-brutal"
+            />
           </div>
         )}
 

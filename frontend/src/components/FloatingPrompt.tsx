@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Send } from 'lucide-react'
-import { useStore } from '../store/index'
+import { useStore, selectPromptDraft } from '../store/index'
 import { useUiStore } from '../store/ui'
 import { toast } from '../store/toast'
 
@@ -16,10 +16,21 @@ interface FloatingPromptProps {
 }
 
 export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: FloatingPromptProps) {
-  const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { currentDiagram, pendingClarification, uiState, generationPhase } = useStore()
+  // El borrador vive en el store y es POR DIAGRAMA (memoria de input): al cambiar de
+  // diagrama, selectPromptDraft resuelve el slot del diagrama abierto, así que el
+  // input muestra lo que se dejó escrito-sin-enviar en cada uno. Además, un envío
+  // fallido lo repone para que "Reintentar" reenvíe justo lo que hay escrito.
+  const value = useStore(selectPromptDraft)
+  const setValue = useStore((s) => s.setPromptDraft)
   const promptFocusNonce = useUiStore((s) => s.promptFocusNonce)
+  // Guard transitorio para la respuesta de clarificación: entre el primer Enter y
+  // el cambio de estado del hook (limpia pendingClarification / pasa a 'generating')
+  // hay una ventana en la que dos Enter muy seguidos enviarían dos veces. Lo
+  // marcamos al enviar y lo liberamos cuando la clarificación deja de estar
+  // pendiente (éxito) — análogo al guard de 'generating'.
+  const [answeringClarification, setAnsweringClarification] = useState(false)
 
   // El CTA del canvas vacío incrementa promptFocusNonce: enfocamos el textarea.
   // Ignoramos el valor inicial (0) para no robar foco al montar.
@@ -33,7 +44,18 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
   // siguiendo la fase, no la mera existencia de currentDiagram.
   const minimapVisible = generationPhase === 'live' || generationPhase === 'done'
 
-  const disabled = uiState === 'generating'
+  // Libera el guard de clarificación en cuanto la pregunta deja de estar pendiente:
+  // el hook limpió pendingClarification (la respuesta se cursó) o llegó otra. Si el
+  // envío no progresó (p. ej. sin conexión: el hook hace early return y la
+  // clarificación sigue pendiente), el guard queda activo y el efecto lo libera al
+  // siguiente render con pendingClarification aún presente → permitimos reintentar.
+  useEffect(() => {
+    if (answeringClarification && !pendingClarification) setAnsweringClarification(false)
+  }, [answeringClarification, pendingClarification])
+
+  // Deshabilita el envío mientras se genera o mientras se procesa una respuesta de
+  // clarificación (estado transitorio): cierra la ventana de doble envío del Enter.
+  const disabled = uiState === 'generating' || answeringClarification
 
   const placeholder = pendingClarification
     ? 'Responde a la pregunta del agente...'
@@ -48,6 +70,12 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
     el.style.height = Math.min(el.scrollHeight, 24 * 8) + 'px'
   }
 
+  // Re-mide la altura cuando el valor cambia POR FUERA del onChange: al cambiar de
+  // diagrama (carga el borrador de ese diagrama), al reponer un prompt fallido o al
+  // vaciarse tras emitir. Sin esto el textarea no crecería con texto multilínea ni
+  // encogería al limpiarse.
+  useEffect(() => { autoResize() }, [value])
+
   function send() {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
@@ -58,12 +86,23 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
       return
     }
     if (pendingClarification) {
+      // Activa el guard ANTES de llamar al callback: cualquier Enter posterior en
+      // este mismo tick ya verá disabled === true y no reenviará.
+      setAnsweringClarification(true)
       onSendClarificationAnswer(trimmed)
+      // Salvaguarda para el fallo silencioso del hook (sin conexión: hace early
+      // return y deja pendingClarification intacta, así que el efecto de liberación
+      // no dispararía). Tras el tick, si la respuesta no se cursó, liberamos el
+      // guard para que el usuario pueda reintentar.
+      queueMicrotask(() => {
+        if (useStore.getState().pendingClarification) setAnsweringClarification(false)
+      })
     } else {
       onSendMessage(trimmed)
     }
-    setValue('')
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+    // El vaciado del input ya NO se hace aquí: lo hace el punto de emisión real
+    // (sendMessage / sendClarificationAnswer, tras pasar el guard de conexión). Así,
+    // si el envío no progresa (sin conexión) o falla luego, el texto no se pierde.
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
