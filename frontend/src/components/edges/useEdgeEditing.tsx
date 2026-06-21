@@ -585,23 +585,58 @@ export function useEdgeEditing(args: {
         const ownNode = nodeLookup.get(ownId)
         if (ownNode) {
           let norm = projectToNodePerimeter(ownNode as never, flowPos)
-          // Pegado al punto medio del lado más cercano cuando entra en el radio.
-          const mid = nearestSideMidpoint(norm)
-          const here = getAnchorPoint(ownNode as never, norm)
-          const midAbs = getAnchorPoint(ownNode as never, mid)
-          const flash = Math.hypot(here.x - midAbs.x, here.y - midAbs.y) <= MIDPOINT_SNAP
-          if (flash) norm = mid
+          const otherEndpoint = which === 'source' ? tgtPtRef.current : srcPtRef.current
+          const wpsNow = dataRef.current.waypoints ?? []
+
+          // Alineación con la geometría de la propia arista (solo ortogonales): el
+          // mismo "encaje" que al arrastrar un tramo, ahora al deslizar el extremo.
+          // Su coordenada en el eje de salida (perpendicular al lado) se pega a la de
+          // otro vértice/extremo para que el tramo pegado al nodo quede recto y
+          // colineal con el resto, y el extremo flasha. La esquina contigua se
+          // arrastra con el extremo, así que se excluye como objetivo (alinearse con
+          // uno mismo no aporta nada y congelaría el deslizamiento).
+          let aligned = false
+          if (segmentEditing) {
+            const exitAxis: Axis = isVerticalSide(anchorToPosition(norm)) ? 'x' : 'y'
+            const targets = (
+              wpsNow.length
+                ? [...(which === 'source' ? wpsNow.slice(1) : wpsNow.slice(0, -1)), otherEndpoint]
+                : [otherEndpoint]
+            ).map((p) => p[exitAxis])
+            const here = getAnchorPoint(ownNode as never, norm)
+            const snapped = snapToAlignment(
+              here[exitAxis],
+              targets,
+              ALIGN_SNAP_PX / (storeApi.getState().transform[2] || 1)
+            )
+            if (snapped !== here[exitAxis]) {
+              norm = projectToNodePerimeter(ownNode as never, { ...here, [exitAxis]: snapped })
+              aligned = true
+            }
+          }
+
+          // Pegado al punto medio del lado más cercano cuando entra en el radio (si
+          // no se ha alineado ya con la geometría de la arista, que tiene prioridad).
+          let flash = aligned
+          if (!aligned) {
+            const mid = nearestSideMidpoint(norm)
+            const here = getAnchorPoint(ownNode as never, norm)
+            const midAbs = getAnchorPoint(ownNode as never, mid)
+            if (Math.hypot(here.x - midAbs.x, here.y - midAbs.y) <= MIDPOINT_SNAP) {
+              norm = mid
+              flash = true
+            }
+          }
           setAnchorFlash(flash)
+
           // En aristas ortogonales con codos, arrastra la esquina contigua junto al
           // anclaje para que el tramo pegado al nodo se traslade RECTO en vez de
           // escalonarse. El eje que se ajusta es el de salida (perpendicular al
           // lado): Top/Bottom → x; Left/Right → y.
           const patch: Record<string, unknown> = { ...dataRef.current, [anchorKey]: norm }
-          const wpsNow = dataRef.current.waypoints ?? []
           if (segmentEditing && wpsNow.length) {
             const anchorAbs = getAnchorPoint(ownNode as never, norm)
-            const side = anchorToPosition(norm)
-            const exitAxis: Axis = side === Position.Top || side === Position.Bottom ? 'x' : 'y'
+            const exitAxis: Axis = isVerticalSide(anchorToPosition(norm)) ? 'x' : 'y'
             const cornerIdx = which === 'source' ? 0 : wpsNow.length - 1
             const wps = wpsNow.map((p) => ({ ...p }))
             if (wps[cornerIdx]) wps[cornerIdx][exitAxis] = anchorAbs[exitAxis]
@@ -649,7 +684,7 @@ export function useEdgeEditing(args: {
       window.addEventListener('pointermove', onMove)
       window.addEventListener('pointerup', onUp)
     },
-    [id, updateEdge, screenToFlowPosition, storeApi]
+    [id, updateEdge, screenToFlowPosition, storeApi, segmentEditing]
   )
 
   // Doble clic en un extremo → restaura el anclaje flotante automático.
