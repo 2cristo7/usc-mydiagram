@@ -18,6 +18,7 @@ import type { DiagramMeta } from '../lib/api'
 import { useStore } from '../store/index'
 import { useHistoryStore } from '../store/history'
 import { DIAGRAM_TYPE_OPTIONS } from '../types'
+import { filterHistory } from '../ui/utils/historyFilter'
 import { toast } from '../store/toast'
 
 // Etiquetas en español, reutilizando el mismo origen que las tarjetas de
@@ -129,12 +130,10 @@ export function HistoryDrawer() {
     loadTrash()
   }, [trashOpen, user, loadTrash])
 
-  const filtered = items.filter((item) =>
-    item.title.toLowerCase().includes(search.toLowerCase()),
-  )
-  const filteredTrash = trashItems.filter((item) =>
-    item.title.toLowerCase().includes(trashSearch.toLowerCase()),
-  )
+  // Filtra por título O por tipo de diagrama (con acepciones: "ERD", "base de
+  // datos", "tablas"… casan todos con un diagrama erd). Lógica en historyFilter.
+  const filtered = filterHistory(items, search)
+  const filteredTrash = filterHistory(trashItems, trashSearch)
 
   // Arranca un diagrama nuevo en blanco desde el historial: limpia el workspace
   // vivo (canvas + chat), resetea el diario undo/redo y cierra el cajón para dejar
@@ -334,7 +333,7 @@ export function HistoryDrawer() {
             <div className="px-4 py-3 border-b-[3px] border-[var(--color-ink)]">
               <input
                 type="search"
-                placeholder="Buscar por título..."
+                placeholder="Buscar por título o tipo..."
                 value={trashSearch}
                 onChange={(e) => setTrashSearch(e.target.value)}
                 className="block w-full border-[3px] border-[var(--color-ink)] p-2 text-sm bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] text-[var(--color-ink)]"
@@ -415,7 +414,7 @@ export function HistoryDrawer() {
             <div className="flex items-stretch gap-2 px-4 py-3 border-b-[3px] border-[var(--color-ink)]">
               <input
                 type="search"
-                placeholder="Buscar por título..."
+                placeholder="Buscar por título o tipo..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="block min-w-0 flex-1 border-[3px] border-[var(--color-ink)] p-2 text-sm bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] text-[var(--color-ink)]"
