@@ -120,6 +120,23 @@
     .pill.blue { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
 
     .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+    /* Catálogo de componentes */
+    .cat { margin: 1.4rem 0 2.4rem; }
+    .cat .intro { font-size: 0.98rem; margin: 0.2rem 0 0.9rem; }
+    .cat .card { margin: 0; height: 100%; }
+    .cat .card h4 { margin: 0 0 0.6rem; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    dl.legend { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.45rem 0.7rem; align-items: start; }
+    dl.legend dt { display: flex; align-items: center; }
+    dl.legend dd { margin: 0; font-size: 0.85rem; line-height: 1.4; }
+    dl.legend dd b { font-weight: 700; }
+    .sym {
+      display: inline-grid; place-items: center; flex: none;
+      width: 1.9rem; height: 1.9rem; font-size: 1rem;
+      border: 2px solid var(--ink); border-radius: var(--radius);
+      background: var(--surface); box-shadow: 2px 2px 0 0 var(--ink);
+    }
+    .tname { font-family: var(--mono); font-size: 0.72rem; opacity: 0.65; }
     @media (max-width: 860px) {
       .wrap { grid-template-columns: 1fr; }
       nav.toc { position: static; max-height: none; border: var(--border); border-radius: var(--radius); background: var(--surface); padding: 0.75rem; box-shadow: var(--shadow); }
@@ -147,7 +164,17 @@
             <li><a href="#uso-exportar">Exportar</a></li>
           </ol>
         </li>
-        <li><a href="#llm">2 · Configurar el modelo (LLM)</a>
+        <li><a href="#catalogo">2 · Catálogo de componentes</a>
+          <ol class="sub">
+            <li><a href="#cat-erd">Entidad-Relación</a></li>
+            <li><a href="#cat-flowchart">Diagrama de flujo</a></li>
+            <li><a href="#cat-architecture">Arquitectura</a></li>
+            <li><a href="#cat-mindmap">Mapa mental</a></li>
+            <li><a href="#cat-sequence">Secuencia</a></li>
+            <li><a href="#cat-use_case">Casos de uso</a></li>
+          </ol>
+        </li>
+        <li><a href="#llm">3 · Configurar el modelo (LLM)</a>
           <ol class="sub">
             <li><a href="#llm-intro">¿Qué motor usa?</a></li>
             <li><a href="#llm-ollama">Opción A · Ollama (local)</a></li>
@@ -155,8 +182,8 @@
             <li><a href="#llm-modos">Transitoria vs. guardada</a></li>
           </ol>
         </li>
-        <li><a href="#seguridad">3 · Seguridad</a></li>
-        <li><a href="#rgpd">4 · Privacidad y RGPD</a></li>
+        <li><a href="#seguridad">4 · Seguridad</a></li>
+        <li><a href="#rgpd">5 · Privacidad y RGPD</a></li>
       </ol>
     </nav>
 
@@ -233,9 +260,230 @@
         </figure>
       </section>
 
+      <!-- ============================ CATÁLOGO ============================ -->
+      <section id="catalogo">
+        <h2><span class="num">2</span> Catálogo de componentes</h2>
+        <p class="lead">MydIAgram trabaja con seis tipos de diagrama. Cada uno tiene sus propias
+        piezas: distintos <strong>tipos de nodo</strong>, distintos <strong>tipos de relación</strong> entre
+        ellos y, en algunos casos, elementos extra como grupos, líneas de vida o fragmentos. Esta sección
+        es la referencia visual de todo lo que puedes construir; las imágenes son capturas reales del lienzo.</p>
+
+        <!-- ---------- ERD ---------- -->
+        <div class="cat" id="cat-erd">
+          <h3>Entidad-Relación (ERD)</h3>
+          <p class="intro">Modela datos: tablas con sus columnas y las relaciones entre ellas. Útil para
+          diseñar el esquema de una base de datos.</p>
+          <figure>
+            <img src="/help/catalog/erd.png" alt="Diagrama entidad-relación de ejemplo" data-shot />
+            <figcaption>Tablas con columnas (PK/FK) unidas por relaciones con cardinalidad.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card">
+              <h4>Nodos</h4>
+              <dl class="legend">
+                <dt><span class="sym">▦</span></dt>
+                <dd><b>Tabla</b> <span class="tname">table</span><br>Entidad con sus columnas. El icono 🔑 marca
+                la clave primaria (<code>PK</code>) y 🔗 una clave foránea (<code>FK</code>).</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h4>Relaciones</h4>
+              <dl class="legend">
+                <dt><span class="sym">1:1</span></dt>
+                <dd><b>Uno a uno</b> <span class="tname">one_to_one</span></dd>
+                <dt><span class="sym">1:N</span></dt>
+                <dd><b>Uno a muchos</b> <span class="tname">one_to_many</span></dd>
+                <dt><span class="sym">N:M</span></dt>
+                <dd><b>Muchos a muchos</b> <span class="tname">many_to_many</span></dd>
+              </dl>
+              <p style="margin:.7rem 0 0; font-size:.82rem; opacity:.75">La cardinalidad es semántica: se
+              refleja en la etiqueta de la relación.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- FLOWCHART ---------- -->
+        <div class="cat" id="cat-flowchart">
+          <h3>Diagrama de flujo</h3>
+          <p class="intro">Representa un proceso paso a paso, con bifurcaciones según condiciones.</p>
+          <figure>
+            <img src="/help/catalog/flowchart.png" alt="Diagrama de flujo de ejemplo" data-shot />
+            <figcaption>Inicio y fin, pasos y una decisión con sus salidas Sí/No.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card">
+              <h4>Nodos</h4>
+              <dl class="legend">
+                <dt><span class="sym">⬭</span></dt>
+                <dd><b>Inicio / Fin</b> <span class="tname">terminator</span><br>Píldora que abre o cierra el flujo.</dd>
+                <dt><span class="sym">▭</span></dt>
+                <dd><b>Paso</b> <span class="tname">step</span><br>Una acción o tarea del proceso.</dd>
+                <dt><span class="sym">◇</span></dt>
+                <dd><b>Decisión</b> <span class="tname">decision</span><br>Rombo del que salen ramas condicionadas.</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h4>Relaciones</h4>
+              <dl class="legend">
+                <dt><span class="sym">→</span></dt>
+                <dd><b>Flujo</b> <span class="tname">flow</span><br>Avance de un paso al siguiente.</dd>
+                <dt><span class="sym">?</span></dt>
+                <dd><b>Condicional</b> <span class="tname">conditional</span><br>Salida de una decisión, etiquetada
+                (p. ej. <em>Sí</em> / <em>No</em>).</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- ARCHITECTURE ---------- -->
+        <div class="cat" id="cat-architecture">
+          <h3>Arquitectura</h3>
+          <p class="intro">Muestra los componentes de un sistema software y cómo se comunican. Cada tipo
+          tiene su propio icono.</p>
+          <figure>
+            <img src="/help/catalog/architecture.png" alt="Diagrama de arquitectura de ejemplo" data-shot />
+            <figcaption>Ocho tipos de nodo con icono, organizados en grupos, con relaciones de llamada y dependencia.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card">
+              <h4>Nodos</h4>
+              <dl class="legend">
+                <dt><span class="sym">◯</span></dt><dd><b>Persona</b> <span class="tname">person</span></dd>
+                <dt><span class="sym">◈</span></dt><dd><b>Gateway</b> <span class="tname">gateway</span></dd>
+                <dt><span class="sym">⬜</span></dt><dd><b>Servicio</b> <span class="tname">service</span></dd>
+                <dt><span class="sym">◧</span></dt><dd><b>Componente</b> <span class="tname">component</span></dd>
+                <dt><span class="sym">⬡</span></dt><dd><b>Base de datos</b> <span class="tname">database</span></dd>
+                <dt><span class="sym">▷</span></dt><dd><b>Cola</b> <span class="tname">queue</span></dd>
+                <dt><span class="sym">⬛</span></dt><dd><b>Sistema</b> <span class="tname">system</span></dd>
+                <dt><span class="sym">▢</span></dt><dd><b>Contenedor</b> <span class="tname">container</span></dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h4>Relaciones</h4>
+              <dl class="legend">
+                <dt><span class="sym">→</span></dt>
+                <dd><b>Llama a</b> <span class="tname">calls</span><br>Línea sólida: una invocación directa.</dd>
+                <dt><span class="sym">⇢</span></dt>
+                <dd><b>Depende de</b> <span class="tname">depends_on</span><br>Línea discontinua: una dependencia.</dd>
+              </dl>
+              <div class="callout info" style="margin-top:.9rem">
+                <span class="tag">Extra · Grupos</span>
+                <p style="margin:.2rem 0 0">Los nodos pueden agruparse en contenedores con borde discontinuo
+                y cabecera (en el ejemplo: <em>Plataforma</em>, <em>Servicios</em>, <em>Datos</em>). Sirven
+                para encuadrar subsistemas y se pueden redimensionar.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- MINDMAP ---------- -->
+        <div class="cat" id="cat-mindmap">
+          <h3>Mapa mental</h3>
+          <p class="intro">Organiza ideas de forma radial a partir de un tema central. Hay un único tipo de
+          nodo (<span class="tname">topic</span>) que adopta tres roles según su posición en el árbol.</p>
+          <figure>
+            <img src="/help/catalog/mindmap.png" alt="Mapa mental de ejemplo" data-shot />
+            <figcaption>Raíz central, ramas de colores y hojas tintadas del color de su rama.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card">
+              <h4>Nodos (roles)</h4>
+              <dl class="legend">
+                <dt><span class="sym" style="background:var(--ink);color:#fff">●</span></dt>
+                <dd><b>Raíz</b><br>El tema central del que parte todo.</dd>
+                <dt><span class="sym" style="background:var(--accent-2);color:#fff;border-color:var(--accent-2)">●</span></dt>
+                <dd><b>Rama</b><br>Subtema directo de la raíz; cada una recibe un color.</dd>
+                <dt><span class="sym" style="border-color:var(--accent-2)">○</span></dt>
+                <dd><b>Hoja</b><br>Detalle final, tintado del color de su rama.</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h4>Relaciones</h4>
+              <dl class="legend">
+                <dt><span class="sym">⌒</span></dt>
+                <dd><b>Rama</b> <span class="tname">association</span><br>Curva que une un nodo con su padre. El
+                color identifica la rama y el grosor decrece con la profundidad.</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- SEQUENCE ---------- -->
+        <div class="cat" id="cat-sequence">
+          <h3>Secuencia</h3>
+          <p class="intro">Describe la conversación temporal entre participantes: quién envía qué mensaje y
+          en qué orden (de arriba abajo).</p>
+          <figure>
+            <img src="/help/catalog/sequence.png" alt="Diagrama de secuencia de ejemplo" data-shot />
+            <figcaption>Actores con su línea de vida y activaciones, mensajes, respuestas y un fragmento alt.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card">
+              <h4>Nodos y elementos</h4>
+              <dl class="legend">
+                <dt><span class="sym">◎</span></dt>
+                <dd><b>Actor</b> <span class="tname">actor</span><br>Participante; encabeza una <b>línea de vida</b>
+                vertical discontinua.</dd>
+                <dt><span class="sym">▮</span></dt>
+                <dd><b>Activación</b><br>Barra que marca cuándo el actor está procesando. Es automática.</dd>
+                <dt><span class="sym">⊏</span></dt>
+                <dd><b>Fragmento</b> <span class="tname">alt · opt · loop · par</span><br>Marco con guardas que
+                envuelve mensajes (condicionales, bucles…).</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h4>Relaciones</h4>
+              <dl class="legend">
+                <dt><span class="sym">→</span></dt>
+                <dd><b>Mensaje</b> <span class="tname">sequence</span><br>Flecha sólida: una llamada.</dd>
+                <dt><span class="sym">⇠</span></dt>
+                <dd><b>Respuesta</b> <span class="tname">sequence_reply</span><br>Flecha discontinua de retorno.</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- USE CASE ---------- -->
+        <div class="cat" id="cat-use_case">
+          <h3>Casos de uso</h3>
+          <p class="intro">Captura qué puede hacer cada actor con el sistema, en notación UML.</p>
+          <figure>
+            <img src="/help/catalog/use_case.png" alt="Diagrama de casos de uso de ejemplo" data-shot />
+            <figcaption>Actores fuera del subsistema; casos de uso dentro, con include, extend y generalización.</figcaption>
+          </figure>
+          <div class="two">
+            <div class="card">
+              <h4>Nodos</h4>
+              <dl class="legend">
+                <dt><span class="sym">◯</span></dt>
+                <dd><b>Actor</b> <span class="tname">actor</span><br>Monigote: quien usa el sistema.</dd>
+                <dt><span class="sym">⬭</span></dt>
+                <dd><b>Caso de uso</b> <span class="tname">use_case</span><br>Elipse: una funcionalidad.</dd>
+                <dt><span class="sym">▭</span></dt>
+                <dd><b>Subsistema</b> <span class="tname">system</span><br>Caja que agrupa los casos de uso.</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h4>Relaciones</h4>
+              <dl class="legend">
+                <dt><span class="sym">—</span></dt>
+                <dd><b>Asociación</b> <span class="tname">association</span><br>Une un actor con un caso de uso.</dd>
+                <dt><span class="sym">⇢</span></dt>
+                <dd><b>«include»</b> <span class="tname">include</span><br>Un caso siempre usa a otro.</dd>
+                <dt><span class="sym">⇢</span></dt>
+                <dd><b>«extend»</b> <span class="tname">extend</span><br>Un caso amplía a otro opcionalmente.</dd>
+                <dt><span class="sym">▷</span></dt>
+                <dd><b>Generalización</b> <span class="tname">inherits</span><br>Triángulo hueco: un actor o caso
+                hereda de otro.</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============================ LLM ============================ -->
       <section id="llm">
-        <h2><span class="num">2</span> Configurar el modelo de lenguaje</h2>
+        <h2><span class="num">3</span> Configurar el modelo de lenguaje</h2>
 
         <h3 id="llm-intro">¿Qué motor usa MydIAgram?</h3>
         <p>El agente que genera los diagramas necesita un <strong>modelo de lenguaje (LLM)</strong> detrás.
@@ -415,7 +663,7 @@
 
       <!-- ============================ SEGURIDAD ============================ -->
       <section id="seguridad">
-        <h2><span class="num">3</span> Cómo protegemos tus datos</h2>
+        <h2><span class="num">4</span> Cómo protegemos tus datos</h2>
         <p>Estos son los criterios de seguridad que sigue la aplicación, descritos tal y como están
         implementados:</p>
 
@@ -462,7 +710,7 @@
 
       <!-- ============================ RGPD ============================ -->
       <section id="rgpd">
-        <h2><span class="num">4</span> Privacidad y derechos RGPD</h2>
+        <h2><span class="num">5</span> Privacidad y derechos RGPD</h2>
         <p>MydIAgram trata datos personales mínimos y te da herramientas para ejercer tus derechos del
         Reglamento General de Protección de Datos directamente desde la app.</p>
 
