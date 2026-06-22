@@ -184,7 +184,7 @@ export interface ArrowMarker {
     y: number;
     /** Ángulo (rad) hacia el que apunta la flecha, ya en sentido «hacia afuera». */
     angle: number;
-    /** Id del marker SVG (`arrow` / `arrowReverse` / `arrowHollow`). */
+    /** Id del marker SVG (`arrow` / `arrowReverse` / `arrowHollow` / `arrowFilled`). */
     id: string;
 }
 
@@ -257,10 +257,13 @@ function getPathMarkers(path: SVGPathElement, cs: CSSStyleDeclaration): ArrowMar
 // en el origen tras trasladar/rotar el canvas). Replica los <marker> de
 // EdgeMarkers.tsx: la punta abierta (#arrow/#arrowReverse) es una «V» sin
 // relleno; la hueca (#arrowHollow) un triángulo relleno con el color del fondo.
-const MARKER_SHAPES: Record<string, { fill: boolean; pts: [number, number][] }> = {
-    arrow: { fill: false, pts: [[-8, -4], [0, 0], [-8, 4]] },
-    arrowReverse: { fill: false, pts: [[-8, -4], [0, 0], [-8, 4]] },
-    arrowHollow: { fill: true, pts: [[-12, -6], [0, 0], [-12, 6]] },
+const MARKER_SHAPES: Record<string, { fill: 'none' | 'surface' | 'ink'; pts: [number, number][] }> = {
+    arrow: { fill: 'none', pts: [[-8, -4], [0, 0], [-8, 4]] },
+    arrowReverse: { fill: 'none', pts: [[-8, -4], [0, 0], [-8, 4]] },
+    arrowHollow: { fill: 'surface', pts: [[-12, -6], [0, 0], [-12, 6]] },
+    // Triángulo relleno con el color de tinta (mensaje 'calls' de arquitectura y
+    // llamada de secuencia); por eso fill diferencia 'surface' (hueca) de 'ink'.
+    arrowFilled: { fill: 'ink', pts: [[-9, -4.5], [0, 0], [-9, 4.5]] },
 };
 
 /**
@@ -283,9 +286,9 @@ export function drawArrowMarker(
     ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.strokeStyle = inkColor;
-    if (shape.fill) {
+    if (shape.fill !== 'none') {
         ctx.closePath();
-        ctx.fillStyle = surfaceColor;
+        ctx.fillStyle = shape.fill === 'ink' ? inkColor : surfaceColor;
         ctx.fill();
     }
     ctx.stroke();

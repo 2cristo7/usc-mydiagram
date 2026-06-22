@@ -1,6 +1,7 @@
 import type { Node, Edge } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
 import type { DiagramSchema, NodeType } from '../../types'
+import { edgeTypeStyle } from './edgeDefaults'
 
 // Tamaños y espaciados del layout síncrono de arquitectura.
 // ArchIconNode: la hitbox real (medida por React Flow) es solo el icono 64×64;
@@ -293,13 +294,15 @@ export function architectureLayoutSync(diagram: DiagramSchema): { nodes: Node[];
     target: edge.target,
     sourceHandle: edge.sourceHandle ?? null,
     targetHandle: edge.targetHandle ?? null,
-    // Un único modelo de edge (EditableEdge, type 'default'): elbow ortogonal, y
-    // las dependencias (todo lo que no sea 'calls') discontinuas. data.shape solo
-    // es default; si el usuario fijó otra forma, su data persistida la respeta.
+    // Un único modelo de edge (EditableEdge, type 'default'): elbow ortogonal. El
+    // estilo según la semántica (calls sólida con punta rellena, dependencias
+    // discontinuas con punta abierta) lo decide edgeTypeStyle, la misma fuente que
+    // usan buildFlowEdges y el menú contextual. data.shape solo es default; si el
+    // usuario fijó otra forma, su data persistida la respeta.
     data: {
       label: edge.label ?? '',
       shape: 'elbow' as const,
-      strokeStyle: (edge.edge_type ?? 'calls') === 'calls' ? ('normal' as const) : ('dashed' as const),
+      ...edgeTypeStyle(edge.edge_type, 'architecture'),
       ...(edge.data ?? {}),
     },
     type: 'default',

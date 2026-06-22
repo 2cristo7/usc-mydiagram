@@ -30,11 +30,30 @@ export function edgeTypeStyle(
     targetArrow: true,
     markerEndId: undefined,
     markerStartId: undefined,
+    sourceCardinality: undefined,
+    targetCardinality: undefined,
   }
-  // Arquitectura: 'calls' es sólida; cualquier otra relación (dependencia) va
-  // discontinua. Aquí el edge_type concreto importa menos que ese binario.
+  // Arquitectura: 'calls' es flujo directo (sólida, punta RELLENA); cualquier otra
+  // relación (dependencia) es discontinua con punta abierta, al estilo de la
+  // dependencia UML entre componentes.
   if (diagramType === 'architecture') {
-    return { ...base, strokeStyle: (edgeType ?? 'calls') === 'calls' ? 'normal' : 'dashed' }
+    return (edgeType ?? 'calls') === 'calls'
+      ? { ...base, markerEndId: 'arrowFilled' }
+      : { ...base, strokeStyle: 'dashed' }
+  }
+  // ERD: línea sin flecha con etiqueta de cardinalidad en cada extremo. La
+  // semántica del edge_type se traduce a los símbolos clásicos 1 / N / M.
+  if (diagramType === 'erd') {
+    const card =
+      edgeType === 'one_to_many' ? { source: '1', target: 'N' } :
+      edgeType === 'many_to_many' ? { source: 'M', target: 'N' } :
+      { source: '1', target: '1' } // one_to_one o sin tipo asignado
+    return {
+      ...base,
+      targetArrow: false,
+      sourceCardinality: card.source,
+      targetCardinality: card.target,
+    }
   }
   switch (edgeType) {
     // Casos de uso UML:

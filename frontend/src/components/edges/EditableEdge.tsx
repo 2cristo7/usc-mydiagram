@@ -37,6 +37,8 @@ export function EditableEdge({
   const arrowEnd = edgeData.targetArrow ?? true
   const markerEndId = edgeData.markerEndId
   const markerStartId = edgeData.markerStartId
+  const srcCardinality = edgeData.sourceCardinality
+  const tgtCardinality = edgeData.targetCardinality
 
   const updateEdge = useStore((s) => s.updateEdge)
   const gridEnabled = useUiStore((s) => s.gridEnabled)
@@ -131,6 +133,30 @@ export function EditableEdge({
     }
   }, [labelX, labelY, labelT])
 
+  // Cardinalidad de ERD: dos píldoras pequeñas ancladas a cada extremo, ligeramente
+  // metidas hacia adentro del path para no solaparse con el borde del nodo.
+  const hasCardinality = !!srcCardinality || !!tgtCardinality
+  const [cardPos, setCardPos] = useState<{
+    src: { x: number; y: number }
+    tgt: { x: number; y: number }
+  } | null>(null)
+  useLayoutEffect(() => {
+    const el = pathRef.current
+    if (!el || !hasCardinality) {
+      setCardPos(null)
+      return
+    }
+    try {
+      const total = el.getTotalLength()
+      const off = Math.min(18, total / 3)
+      const s = el.getPointAtLength(off)
+      const t = el.getPointAtLength(total - off)
+      setCardPos({ src: { x: s.x, y: s.y }, tgt: { x: t.x, y: t.y } })
+    } catch {
+      setCardPos(null)
+    }
+  }, [edgePath, hasCardinality])
+
   const { isEditing, startEditing, inputProps, containerProps } = useInlineEdit({
     initialValue: label,
     onCommit: (newLabel) => {
@@ -199,6 +225,34 @@ export function EditableEdge({
             ) : (
               label
             )}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+      {cardPos && srcCardinality && (
+        <EdgeLabelRenderer>
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${cardPos.src.x}px,${cardPos.src.y}px)`,
+              pointerEvents: 'none',
+            }}
+            className="bg-[var(--color-surface)] border-2 border-[var(--color-ink)] px-1.5 py-0.5 text-xs font-bold leading-none text-[var(--color-ink)] shadow-[2px_2px_0_var(--color-ink)]"
+          >
+            {srcCardinality}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+      {cardPos && tgtCardinality && (
+        <EdgeLabelRenderer>
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${cardPos.tgt.x}px,${cardPos.tgt.y}px)`,
+              pointerEvents: 'none',
+            }}
+            className="bg-[var(--color-surface)] border-2 border-[var(--color-ink)] px-1.5 py-0.5 text-xs font-bold leading-none text-[var(--color-ink)] shadow-[2px_2px_0_var(--color-ink)]"
+          >
+            {tgtCardinality}
           </div>
         </EdgeLabelRenderer>
       )}

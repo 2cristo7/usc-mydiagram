@@ -172,6 +172,11 @@ export const edgeVisualDataSchema = z.object({
     // para la generalización UML de actores en casos de uso).
     markerEndId: z.string().optional(),
     markerStartId: z.string().optional(),
+    // Etiqueta de cardinalidad en cada extremo (ERD): '1', 'N', 'M'. La deriva
+    // edgeTypeStyle del edge_type ('one_to_many' → 1…N, 'many_to_many' → M…N) y
+    // EditableEdge la pinta como una píldora pequeña junto a cada nodo.
+    sourceCardinality: z.string().optional(),
+    targetCardinality: z.string().optional(),
 });
 
 export const diagramEdgeSchema = z.object({
@@ -332,4 +337,6 @@ export interface EdgeVisualData {
   targetAnchor?: { x: number; y: number }
   markerEndId?: string
   markerStartId?: string
+  sourceCardinality?: string
+  targetCardinality?: string
 }

@@ -469,6 +469,16 @@ describe('drawArrowMarker', () => {
         expect(ctx.stroke).toHaveBeenCalled();
     });
 
+    test('punta rellena (#arrowFilled): triángulo cerrado, relleno con ink', () => {
+        const ctx = mockCtx();
+        const marker: ArrowMarker = { x: 0, y: 0, angle: 0, id: 'arrowFilled' };
+        drawArrowMarker(ctx as never, marker, '#111111', '#ffffff');
+        expect(ctx.closePath).toHaveBeenCalled();
+        expect(ctx.fill).toHaveBeenCalled();
+        expect(ctx.fillStyle).toBe('#111111');
+        expect(ctx.stroke).toHaveBeenCalled();
+    });
+
     test('id desconocido cae al shape de #arrow', () => {
         const ctx = mockCtx();
         drawArrowMarker(ctx as never, { x: 0, y: 0, angle: 0, id: 'desconocido' }, '#000', '#fff');
