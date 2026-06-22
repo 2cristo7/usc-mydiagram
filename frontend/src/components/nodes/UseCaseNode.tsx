@@ -38,10 +38,21 @@ export function UseCaseNode({ data, id, selected }: NodeProps<UseCaseNodeType>) 
 
   return (
     <div
-      className={`relative flex items-center justify-center bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] shadow-[var(--shadow-brutal)] px-8 py-4 min-w-[120px] min-h-[52px] text-center ${containerProps.className}`}
-      style={{ borderRadius: '50%', maxWidth: MAX_W }}
+      className={`relative flex items-center justify-center px-8 py-4 min-w-[120px] min-h-[52px] text-center ${containerProps.className}`}
+      style={{ maxWidth: MAX_W }}
       onDoubleClick={containerProps.onDoubleClick}
     >
+      {/* La elipse (fondo + borde + sombra) en una capa de fondo. La sombra es un
+          drop-shadow (no un box-shadow): sigue la silueta real de la elipse, así
+          que html-to-image la rasteriza bien al exportar a PNG, en lugar del
+          contorno rectangular desplazado que produce el box-shadow recortado al
+          50%. Va aquí, sin el texto, para que el drop-shadow no duplique también
+          las letras. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-[var(--color-surface)] border-[3px] border-[var(--color-ink)] pointer-events-none"
+        style={{ borderRadius: '50%', filter: 'drop-shadow(4px 4px 0 var(--color-ink))' }}
+      />
       {isEditing ? (
         <textarea
           {...inputProps}
@@ -51,11 +62,11 @@ export function UseCaseNode({ data, id, selected }: NodeProps<UseCaseNodeType>) 
           style={{ width: '100%' }}
           onInput={(e) => grow(e.currentTarget)}
           onFocus={(e) => e.target.select()}
-          className="text-sm font-semibold text-[var(--color-ink)] text-center bg-transparent border-none outline-none resize-none w-full overflow-hidden whitespace-pre-wrap break-words"
+          className="relative z-[1] text-sm font-semibold text-[var(--color-ink)] text-center bg-transparent border-none outline-none resize-none w-full overflow-hidden whitespace-pre-wrap break-words"
           rows={1}
         />
       ) : (
-        <span className="text-sm font-semibold text-[var(--color-ink)] leading-tight whitespace-pre-wrap break-words">{data.label}</span>
+        <span className="relative z-[1] text-sm font-semibold text-[var(--color-ink)] leading-tight whitespace-pre-wrap break-words">{data.label}</span>
       )}
       <Handle type="target" position={Position.Top} />
       <Handle type="source" position={Position.Bottom} />
