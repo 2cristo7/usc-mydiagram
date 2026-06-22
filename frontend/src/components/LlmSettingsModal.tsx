@@ -8,6 +8,7 @@ import type { DropdownOption } from '../ui/primitives'
 import { readTransientKey } from '../lib/transientLlmKey'
 import { hasPersistConsent, setPersistConsent } from '../lib/llmConsent'
 import { ApiKeyPrivacyModal } from './ApiKeyPrivacyModal'
+import { useAuthStore } from '../store/auth'
 
 interface LlmSettingsModalProps {
   open: boolean
@@ -109,6 +110,9 @@ function providerDefaults(provider: Provider): { fast: string; capable: string }
 
 export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
   const { config, loading, loadConfig, saveConfig, forceProvider, setTransientKey, clearTransient, deleteApiKey } = useLlmSettingsStore()
+  // Sin sesión, la config (y la key) solo viven en este navegador: no hay Vault
+  // donde persistir la key, así que el flujo de consentimiento no aplica.
+  const loggedIn = useAuthStore((s) => Boolean(s.session))
 
   // Local form state
   const [provider, setProvider] = useState<Provider>('ollama')
@@ -410,6 +414,12 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
     setSaveStatus('idle')
     setSaveError('')
     if (!validate()) return
+    // Sin sesión no hay persistencia en Vault: la key (si la hay) se queda siempre
+    // transitoria en este navegador, sin pedir consentimiento.
+    if (!loggedIn) {
+      void doSave(false)
+      return
+    }
     if (typedKey && !hasPersistConsent()) {
       setConsentOpen(true)
       return
@@ -574,7 +584,13 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
             {/* S10.3b — texto informativo según el modo de guardado activo. Sin
                 enlaces: el consentimiento salta solo al guardar; la revocación
                 está debajo del botón de guardar. */}
-            {providerHasSavedKey ? (
+            {!loggedIn ? (
+              <p className="text-xs opacity-70 text-[var(--color-ink)]">
+                Sin sesión iniciada tu API key se queda <strong>solo en este navegador</strong> y
+                se borra al cerrar la pestaña. <strong>Inicia sesión</strong> si quieres guardarla
+                de forma permanente y cifrada.
+              </p>
+            ) : providerHasSavedKey ? (
               <p className="text-xs opacity-70 text-[var(--color-ink)]">
                 Tu API key está <strong>guardada de forma permanente</strong> y cifrada.
               </p>

@@ -12,6 +12,7 @@ import { toast } from "../store/toast";
 import { useLlmSettingsStore } from "../store/llmSettings";
 import { useUiStore } from "../store/ui";
 import { readTransientKey } from "../lib/transientLlmKey";
+import { readLocalConfig } from "../lib/localLlmConfig";
 
 // Render diferenciado por categoría (S6.9 P4): cada degradación se traduce a un
 // aviso de chat legible. Fallback genérico para una categoría futura sin etiqueta.
@@ -400,6 +401,14 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 });
                 const stored = readTransientKey();
                 if (stored) socket.emit('llm:set_transient_key', { provider: stored.provider, api_key: stored.key });
+                // Modo sin login: la config completa la posee el navegador. Registramos
+                // su emisor (para que el modal la empuje al guardar) y reenviamos la
+                // guardada en localStorage, que el backend pierde en cada reconexión.
+                useLlmSettingsStore.getState().registerLocalConfigEmitter((payload) => {
+                    if (socket.connected) socket.emit('llm:set_local_config', payload);
+                });
+                const localConfig = readLocalConfig();
+                if (localConfig) socket.emit('llm:set_local_config', localConfig);
             });
 
             // #4 — Reconexión visible: Socket.IO emite estos eventos en su Manager
@@ -726,8 +735,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             cancelGenTimeout();
             // Limpiar cualquier montaje en vivo en curso (timer de la bomba + colas).
             resetLiveStream();
-            // S10.3b — el socket muere: el emisor transitorio ya no es válido.
+            // S10.3b — el socket muere: los emisores ya no son válidos.
             useLlmSettingsStore.getState().registerTransientEmitter(null);
+            useLlmSettingsStore.getState().registerLocalConfigEmitter(null);
             authUnsub?.();
             if (socketRef.current) {
                 // #4 — soltamos los listeners del Manager (reconnect_*) además del
@@ -753,11 +763,11 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // (que en un proveedor comercial daba un 401 «que se arreglaba al recargar»).
     // No-op si no hay key transitoria (Ollama, key en Vault o ninguna) o no hay
     // conexión: en esos casos no hay nada que registrar y se emite sin esperar.
-    const ensureTransientKey = (): Promise<void> => {
-        const stored = readTransientKey();
-        const socket = socketRef.current;
-        if (!stored || !socket?.connected) return Promise.resolve();
-        return new Promise<void>((resolve) => {
+    // Reenvía con ACK un evento que el backend perdió al reconectar y ESPERA su
+    // confirmación, para que la generación emitida después lo vea ya registrado.
+    // Red de seguridad: si el ack no llega (backend sin soporte), sigue igual.
+    const emitAndAck = (socket: Socket, event: string, payload: unknown): Promise<void> =>
+        new Promise<void>((resolve) => {
             let settled = false;
             const done = () => {
                 if (settled) return;
@@ -765,10 +775,22 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 clearTimeout(timer);
                 resolve();
             };
-            // Red de seguridad: si el ack no llega (backend sin soporte), seguir igual.
             const timer = setTimeout(done, TRANSIENT_KEY_ACK_TIMEOUT_MS);
-            socket.emit('llm:set_transient_key', { provider: stored.provider, api_key: stored.key }, done);
+            socket.emit(event, payload, done);
         });
+
+    const ensureTransientKey = (): Promise<void> => {
+        const socket = socketRef.current;
+        if (!socket?.connected) return Promise.resolve();
+        const pushes: Promise<void>[] = [];
+        // La API key transitoria (sessionStorage) vive solo en memoria del socket
+        // del backend y se pierde al reconectar.
+        const stored = readTransientKey();
+        if (stored) pushes.push(emitAndAck(socket, 'llm:set_transient_key', { provider: stored.provider, api_key: stored.key }));
+        // Modo sin login: la config completa también se pierde en la reconexión.
+        const localConfig = readLocalConfig();
+        if (localConfig) pushes.push(emitAndAck(socket, 'llm:set_local_config', localConfig));
+        return pushes.length ? Promise.all(pushes).then(() => undefined) : Promise.resolve();
     };
 
     const sendMessage = async (text: string) => {

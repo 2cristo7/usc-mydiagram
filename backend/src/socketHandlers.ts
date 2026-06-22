@@ -157,10 +157,43 @@ export function createInternalLlmRouter(io: Server) {
 // strings. Si crece, conviene extraerla a un módulo compartido.
 const COMMERCIAL_PROVIDERS = ['openai', 'anthropic', 'gemini']
 
+// Campos de la config LLM que el navegador empuja en modo sin login.
+interface LocalLlmConfig {
+  provider: string
+  transport: string
+  model_fast: string
+  model_capable: string
+  base_url?: string | null
+}
+
 async function resolveLlmConfig(socket: Socket): Promise<LlmConfig | undefined> {
   const userId = socket.data.userId as string | null
+
+  // Modo sin login: no hay fila en BD. La config (proveedor/transporte/modelos) la
+  // posee el navegador y la empujó por `llm:set_local_config`; la API key, si la
+  // hay, llega por la vía transitoria (`llm:set_transient_key`), igual que para un
+  // usuario con sesión. Sin config local empujada → undefined (defaults del agente).
+  if (!userId) {
+    const local = socket.data.localLlmConfig as LocalLlmConfig | undefined
+    if (!local) return undefined
+    let api_key: string | null = null
+    if (COMMERCIAL_PROVIDERS.includes(local.provider)) {
+      const transient = socket.data.transientApiKey as { provider: string; key: string } | undefined
+      if (transient && transient.provider === local.provider) api_key = transient.key
+    }
+    return {
+      provider: local.provider,
+      transport: local.transport,
+      model_fast: local.model_fast,
+      model_capable: local.model_capable,
+      base_url: local.base_url ?? null,
+      api_key,
+      proxy_session: local.transport === 'browser' ? socket.id : null,
+    }
+  }
+
   const token = socket.handshake.auth?.token as string | undefined
-  if (!userId || !token) return undefined
+  if (!token) return undefined
 
   try {
     const supabase = supabaseForUser(token)
@@ -340,6 +373,32 @@ export function attachAgentHandlers(io: Server, deps: Partial<AgentHandlerDeps> 
         socket.data.transientApiKey = { provider: payload.provider, key: payload.api_key }
       } else {
         delete socket.data.transientApiKey
+      }
+      if (typeof ack === 'function') ack({ ok: true })
+    })
+
+    // Config LLM completa del modo sin login: una conexión anónima no tiene fila en
+    // BD, así que el navegador (única fuente de verdad) empuja aquí proveedor,
+    // transporte, modelos y base_url. Se guarda SOLO en memoria del socket y solo la
+    // usa resolveLlmConfig cuando la conexión es anónima (con sesión manda la BD).
+    // El ACK cierra la carrera reconexión↔generación igual que la key transitoria.
+    socket.on('llm:set_local_config', (payload, ack) => {
+      if (
+        payload &&
+        typeof payload.provider === 'string' &&
+        typeof payload.transport === 'string' &&
+        typeof payload.model_fast === 'string' &&
+        typeof payload.model_capable === 'string'
+      ) {
+        socket.data.localLlmConfig = {
+          provider: payload.provider,
+          transport: payload.transport,
+          model_fast: payload.model_fast,
+          model_capable: payload.model_capable,
+          base_url: typeof payload.base_url === 'string' ? payload.base_url : null,
+        }
+      } else {
+        delete socket.data.localLlmConfig
       }
       if (typeof ack === 'function') ack({ ok: true })
     })

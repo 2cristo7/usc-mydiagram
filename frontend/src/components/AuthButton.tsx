@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { HelpCircle, LogOut, Settings as SettingsIcon, ShieldCheck, User } from 'lucide-react'
+import { HelpCircle, LogIn, LogOut, Settings as SettingsIcon, ShieldCheck, User } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 import { signOut } from '../hooks/useAuth'
 import { useStore } from '../store/index'
@@ -10,9 +10,10 @@ import { AccountDataModal } from './AccountDataModal'
 import { useLlmSettingsStore } from '../store/llmSettings'
 import { Spinner } from '../ui/primitives'
 
-// Botón de perfil para el pie de la barra lateral. Invitado: icono genérico que
-// abre el modal de login con Google. Sesión iniciada: avatar (o icono) que cierra
-// sesión, avisando antes si hay contenido sin guardar.
+// Botón de perfil para el pie de la barra lateral. Mismo desplegable con y sin
+// sesión (ahí se mete la API key): invitado → Configuración, Ayuda e Iniciar
+// sesión; sesión iniciada → Configuración, datos/privacidad, Ayuda y Cerrar
+// sesión (avisando antes si hay contenido sin guardar).
 export function AuthButton() {
   const user = useAuthStore((s) => s.user)
   const initialized = useAuthStore((s) => s.initialized)
@@ -58,24 +59,8 @@ export function AuthButton() {
     )
   }
 
-  if (!user) {
-    return (
-      <>
-        <button
-          onClick={() => setLoginOpen(true)}
-          className={frame}
-          title="Iniciar sesión"
-          aria-label="Iniciar sesión con Google"
-        >
-          <User size={18} />
-        </button>
-        <GoogleLoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
-      </>
-    )
-  }
-
   const avatarUrl =
-    typeof user.user_metadata?.avatar_url === 'string'
+    typeof user?.user_metadata?.avatar_url === 'string'
       ? user.user_metadata.avatar_url
       : undefined
 
@@ -104,8 +89,8 @@ export function AuthButton() {
       <button
         onClick={() => setMenuOpen((o) => !o)}
         className={frame}
-        title="Mi perfil"
-        aria-label="Mi perfil"
+        title={user ? 'Mi perfil' : 'Perfil y configuración'}
+        aria-label={user ? 'Mi perfil' : 'Perfil y configuración'}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
       >
@@ -142,17 +127,19 @@ export function AuthButton() {
             <SettingsIcon size={14} />
             Configuración
           </button>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setMenuOpen(false)
-              setAccountOpen(true)
-            }}
-            className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 whitespace-nowrap text-[var(--color-ink)] hover:bg-[var(--color-accent)]/10"
-          >
-            <ShieldCheck size={14} />
-            Mis datos y privacidad
-          </button>
+          {user && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false)
+                setAccountOpen(true)
+              }}
+              className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 whitespace-nowrap text-[var(--color-ink)] hover:bg-[var(--color-accent)]/10"
+            >
+              <ShieldCheck size={14} />
+              Mis datos y privacidad
+            </button>
+          )}
           <button
             role="menuitem"
             onClick={openHelp}
@@ -161,18 +148,33 @@ export function AuthButton() {
             <HelpCircle size={14} />
             Ayuda
           </button>
-          <button
-            role="menuitem"
-            onClick={handleSignOut}
-            className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 whitespace-nowrap text-[var(--color-ink)] hover:bg-[var(--color-accent)]/10"
-          >
-            <LogOut size={14} />
-            Cerrar sesión
-          </button>
+          {user ? (
+            <button
+              role="menuitem"
+              onClick={handleSignOut}
+              className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 whitespace-nowrap text-[var(--color-ink)] hover:bg-[var(--color-accent)]/10"
+            >
+              <LogOut size={14} />
+              Cerrar sesión
+            </button>
+          ) : (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false)
+                setLoginOpen(true)
+              }}
+              className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 whitespace-nowrap text-[var(--color-ink)] hover:bg-[var(--color-accent)]/10"
+            >
+              <LogIn size={14} />
+              Iniciar sesión
+            </button>
+          )}
         </div>
       )}
       <LlmSettingsModal open={llmModalOpen} onClose={closeLlmModal} />
       <AccountDataModal open={accountOpen} onClose={() => setAccountOpen(false)} />
+      <GoogleLoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
     </div>
   )
 }
