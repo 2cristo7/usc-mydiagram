@@ -158,10 +158,14 @@
         <li><a href="#uso">1 · Cómo usar la app</a>
           <ol class="sub">
             <li><a href="#uso-generar">Generar un diagrama</a></li>
+            <li><a href="#uso-herramientas">La barra de herramientas</a></li>
             <li><a href="#uso-editar">Editar el diagrama</a></li>
+            <li><a href="#uso-aristas">Ajustar las aristas</a></li>
+            <li><a href="#uso-atajos">Atajos de teclado</a></li>
+            <li><a href="#uso-deshacer">Deshacer y rehacer</a></li>
             <li><a href="#uso-chat">Refinar con el chat</a></li>
-            <li><a href="#uso-historial">Historial y papelera</a></li>
-            <li><a href="#uso-exportar">Exportar</a></li>
+            <li><a href="#uso-historial">Historial, versiones y papelera</a></li>
+            <li><a href="#uso-exportar">Exportar e importar</a></li>
           </ol>
         </li>
         <li><a href="#catalogo">2 · Catálogo de componentes</a>
@@ -217,20 +221,93 @@
         <h3 id="uso-generar">Generar un diagrama</h3>
         <p>Escribe en el campo de texto qué quieres representar y pulsa <kbd>Enter</kbd>. Por ejemplo:
         <em>«una base de datos para una tienda online con clientes, pedidos y productos»</em>. El agente
-        clasifica el tipo de diagrama, extrae las entidades y las relaciones, y dibuja el resultado.</p>
+        clasifica el tipo de diagrama, extrae las entidades y las relaciones, y dibuja el resultado, que
+        va apareciendo en el lienzo a medida que se genera.</p>
+        <p>Si ya sabes qué tipo de diagrama quieres, puedes <strong>elegirlo antes de escribir</strong> en
+        las tarjetas de tipo (o dejar <code>Auto</code> para que lo decida el agente). El mensaje admite
+        hasta 2000 caracteres. Al iniciar sesión, cada diagrama se <strong>guarda solo</strong> mientras lo
+        editas.</p>
         <figure>
           <img src="/help/prompt.png" alt="Campo de texto para describir el diagrama" data-shot />
           <figcaption>Describe el diagrama en lenguaje natural y pulsa Enter.</figcaption>
         </figure>
 
+        <h3 id="uso-herramientas">La barra de herramientas</h3>
+        <p>La barra vertical de la izquierda reúne las acciones sobre el lienzo:</p>
+        <table class="grid">
+          <thead><tr><th>Botón</th><th>Qué hace</th></tr></thead>
+          <tbody>
+            <tr><td>Nuevo diagrama</td><td>Vacía el lienzo y el chat para empezar de cero.</td></tr>
+            <tr><td>Añadir nodo</td><td>Abre la <strong>paleta de nodos</strong> con las piezas propias del tipo de diagrama, para arrastrarlas al lienzo.</td></tr>
+            <tr><td>Recalcular disposición</td><td>Reorganiza el diagrama automáticamente y lo reencuadra.</td></tr>
+            <tr><td>Deshacer / Rehacer</td><td>Revierte o repite tus últimos cambios (ver <a href="#uso-deshacer">más abajo</a>).</td></tr>
+            <tr><td>Ajustar a la vista</td><td>Encuadra todo el diagrama en la pantalla.</td></tr>
+            <tr><td>Acercar / Alejar</td><td>Zoom del lienzo (también con la rueda del ratón).</td></tr>
+            <tr><td>Rejilla</td><td>Activa el ajuste a una cuadrícula al mover nodos.</td></tr>
+            <tr><td>Bloquear</td><td>Fija el lienzo para no mover nada sin querer.</td></tr>
+          </tbody>
+        </table>
+
         <h3 id="uso-editar">Editar el diagrama</h3>
-        <p>Todo lo generado es editable: arrastra los nodos para recolocarlos, haz doble clic sobre un
-        texto para renombrarlo, y usa la barra de herramientas para añadir nodos, cambiar el tipo de
-        relación de una arista o reorganizar el diseño automáticamente.</p>
+        <p>Todo lo generado es editable; el diagrama es un modelo de datos vivo, no una imagen:</p>
+        <ul>
+          <li><strong>Mover</strong>: arrastra un nodo para recolocarlo, o traza una caja de selección para
+          mover varios a la vez.</li>
+          <li><strong>Renombrar</strong>: haz doble clic sobre un texto, o con un nodo seleccionado empieza a
+          escribir. <kbd>Enter</kbd> confirma y <kbd>Esc</kbd> cancela.</li>
+          <li><strong>Atributos</strong>: en las tablas (entidad-relación) y en los iconos de arquitectura
+          puedes añadir, editar y quitar filas (columnas, campos) desde el menú contextual «Editar».</li>
+          <li><strong>Paleta de nodos</strong>: el botón «Añadir nodo» ofrece las piezas propias del tipo de
+          diagrama para arrastrarlas al lienzo.</li>
+          <li><strong>Menú contextual</strong> (clic derecho): sobre un nodo permite editarlo o eliminarlo;
+          sobre una arista, cambiar su etiqueta, tipo, forma y estilo.</li>
+          <li><strong>Grupos</strong>: en arquitectura, secuencia y casos de uso hay contenedores que puedes
+          mover y redimensionar para encuadrar subsistemas.</li>
+        </ul>
         <figure>
           <img src="/help/canvas-edit.png" alt="Edición de nodos y aristas en el lienzo" data-shot />
-          <figcaption>Arrastra, renombra y reconecta — el diagrama es un modelo de datos vivo, no una imagen.</figcaption>
+          <figcaption>Arrastra, renombra y reconecta: el diagrama es un modelo de datos vivo, no una imagen.</figcaption>
         </figure>
+
+        <h3 id="uso-aristas">Ajustar las aristas</h3>
+        <p>Las relaciones también son manipulables, no solo líneas fijas:</p>
+        <ul>
+          <li><strong>Crear</strong>: arrastra desde el borde de un nodo hasta otro.</li>
+          <li><strong>Curvar</strong>: arrastra la línea para desviarla; un doble clic sobre ella añade un
+          punto de paso y un doble clic sobre un punto lo elimina.</li>
+          <li><strong>Reconectar</strong>: arrastra un extremo de la arista hasta otro nodo. Un doble clic en
+          el extremo restaura el anclaje automático.</li>
+          <li><strong>Etiqueta</strong>: arrástrala a lo largo de la línea para recolocarla.</li>
+          <li><strong>Forma y estilo</strong>: desde el menú contextual de la arista eliges recta, en codo o
+          curva; trazo continuo, discontinuo o punteado; y las flechas de cada extremo.</li>
+        </ul>
+
+        <h3 id="uso-atajos">Atajos de teclado</h3>
+        <table class="grid">
+          <thead><tr><th>Atajo</th><th>Acción</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>Enter</kbd></td><td>Enviar el mensaje del chat, o confirmar la edición de un texto.</td></tr>
+            <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Salto de línea en el mensaje (no lo envía).</td></tr>
+            <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Z</kbd></td><td>Deshacer.</td></tr>
+            <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>Rehacer.</td></tr>
+            <tr><td><kbd>Supr</kbd> / <kbd>Backspace</kbd></td><td>Borrar los nodos y aristas seleccionados.</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Cancelar la edición en curso, o cerrar el menú o la ventana abierta.</td></tr>
+            <tr><td>Escribir con un nodo seleccionado</td><td>Empieza a editar su etiqueta con ese texto.</td></tr>
+          </tbody>
+        </table>
+        <div class="callout info">
+          <span class="tag">Nota</span>
+          <p style="margin:.2rem 0 0">Los atajos de edición se ignoran mientras escribes en un campo de
+          texto. No hay copiar y pegar de nodos ni «seleccionar todo»; el zoom se hace con los botones o la
+          rueda del ratón.</p>
+        </div>
+
+        <h3 id="uso-deshacer">Deshacer y rehacer</h3>
+        <p>Cada cambio en el lienzo se puede revertir con <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Z</kbd> (o el
+        botón de la barra) y repetir con <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>. Se
+        recuerdan hasta <strong>50 pasos</strong>. Es un historial local de tu sesión de edición: se reinicia
+        al abrir otro diagrama o recargar la página. Es distinto del <a href="#uso-historial">diario de
+        versiones</a>, que sí queda guardado con el diagrama.</p>
 
         <h3 id="uso-chat">Refinar con el chat</h3>
         <p>En lugar de editar a mano, puedes pedir cambios en lenguaje natural: <em>«añade una entidad
@@ -241,22 +318,36 @@
           <figcaption>Conversa para refinar el diagrama sin tocar el lienzo.</figcaption>
         </figure>
 
-        <h3 id="uso-historial">Historial y papelera</h3>
-        <p>Si inicias sesión con Google, tus diagramas se guardan automáticamente y aparecen en el
-        historial, desde donde puedes reabrirlos. Los diagramas eliminados van primero a una
-        <strong>papelera</strong> desde la que puedes restaurarlos o borrarlos definitivamente.</p>
+        <h3 id="uso-historial">Historial, versiones y papelera</h3>
+        <p>Si inicias sesión con Google, tus diagramas se <strong>guardan automáticamente</strong> y aparecen
+        en el <strong>historial</strong>, desde donde puedes buscarlos por título, reabrirlos y renombrarlos.</p>
+        <p>Además, cada generación o refinamiento crea una <strong>versión</strong>. Desde el panel de
+        operaciones puedes usar <strong>«Volver a esta versión»</strong> para recuperar un estado anterior del
+        diagrama; a diferencia de deshacer y rehacer, estas versiones quedan guardadas junto al diagrama.</p>
+        <p>Los diagramas eliminados van primero a una <strong>papelera</strong> desde la que puedes
+        restaurarlos, borrarlos definitivamente o vaciarla por completo.</p>
         <figure>
           <img src="/help/history.png" alt="Cajón de historial de diagramas" data-shot />
           <figcaption>El historial guarda tus diagramas; la papelera permite restaurar.</figcaption>
         </figure>
+        <div class="callout info">
+          <span class="tag">Sin cuenta</span>
+          <p style="margin:.2rem 0 0">Puedes usar la app y generar diagramas sin iniciar sesión. El historial,
+          el guardado automático y guardar tu API key requieren una cuenta.</p>
+        </div>
 
-        <h3 id="uso-exportar">Exportar</h3>
-        <p>Desde el menú de exportación puedes descargar el diagrama como imagen <strong>PNG</strong> o
-        como archivo <strong>.mdia</strong> (el formato propio, que conserva el modelo de datos para
-        reabrirlo más tarde).</p>
+        <h3 id="uso-exportar">Exportar e importar</h3>
+        <p>Desde el menú de exportación puedes descargar el diagrama como imagen <strong>PNG</strong> o como
+        archivo de texto en varios formatos: el formato propio <strong>.mdia</strong> (conserva el modelo de
+        datos y el diseño para reabrirlo tal cual), <strong>Mermaid</strong> (<code>.mmd</code>),
+        <strong>draw.io</strong> (<code>.drawio</code>) y <strong>Excalidraw</strong> (<code>.excalidraw</code>).</p>
+        <p>También puedes <strong>importar</strong> un diagrama desde archivo con el botón de importar: la app
+        detecta el formato automáticamente (nativo <code>.mdia</code>/<code>.json</code>, Mermaid, draw.io o
+        Excalidraw) y lo abre como un diagrama nuevo. Los formatos externos son de importación experimental y
+        pueden perder parte de la forma; el <code>.mdia</code> propio se reabre idéntico.</p>
         <figure>
           <img src="/help/export.png" alt="Menú de exportación" data-shot />
-          <figcaption>Exporta a PNG (imagen) o .mdia (editable).</figcaption>
+          <figcaption>Exporta a PNG o a varios formatos de texto; reimporta el <code>.mdia</code> para seguir editando.</figcaption>
         </figure>
       </section>
 
@@ -578,6 +669,20 @@
           ninguna API key</strong> (Ollama no la necesita). En modo «navegador» el texto del prompt y el
           resultado sí transitan por el servidor para coordinar la llamada, pero el modelo nunca se ejecuta
           en la nube.</p>
+        </div>
+
+        <div class="callout warn" id="llm-refinar-navegador">
+          <span class="tag">El modo «navegador» no permite refinar</span>
+          <p style="margin:.2rem 0 0">Con el transporte <span class="pill">navegador</span> puedes
+          <strong>generar</strong> diagramas, pero <strong>no refinarlos</strong> con el chat (pedir cambios
+          sobre un diagrama ya creado). El refinamiento usa un agente con <em>herramientas</em>
+          (<em>tool-calling</em>) que el puente con el navegador no implementa, así que la app lo deshabilita
+          en ese modo. Para refinar tienes dos opciones:</p>
+          <ul style="margin:.4rem 0 0">
+            <li>Cambia el transporte de Ollama a <span class="pill">directo</span> (Ajustes → Proveedor →
+            Transporte).</li>
+            <li>O usa un <strong>proveedor con API key</strong> (OpenAI, Anthropic o Gemini).</li>
+          </ul>
         </div>
 
         <!-- ---------- PROVEEDORES ---------- -->
