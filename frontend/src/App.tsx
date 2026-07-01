@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAuth } from "./hooks/useAuth";
 import { useUndoRedoShortcuts } from "./hooks/useUndoRedoShortcuts";
@@ -11,6 +12,7 @@ import { FloatingPrompt } from "./components/FloatingPrompt";
 import { AlertBanner, Toaster } from "./ui/primitives";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useLlmSettingsStore } from "./store/llmSettings";
+import { useAuthStore } from "./store/auth";
 import { useStore } from "./store";
 import { useUiStore } from "./store/ui";
 import { isSupabaseConfigured } from "./lib/supabase";
@@ -59,6 +61,19 @@ function App() {
   useUndoRedoShortcuts();
   const { connectionState, sendMessage, sendClarificationAnswer, regenerate, chooseDiagramType, retry } = useWebSocket();
   const { ollamaError, setOllamaError, openModal } = useLlmSettingsStore();
+  // Carga la config LLM en el store al arrancar y al cambiar la sesión. Sin esto,
+  // `config` solo se poblaba al abrir el modal de ajustes (único sitio que llamaba
+  // a loadConfig), así que componentes como FloatingPrompt no conocían el
+  // transporte activo (lo leían como undefined) aunque la generación sí lo usara
+  // (el socket lee localStorage/BD por su cuenta). Al cargarlo aquí, el store pasa
+  // a ser fuente de verdad del transporte para toda la UI.
+  const loadLlmConfig = useLlmSettingsStore((s) => s.loadConfig);
+  const authInitialized = useAuthStore((s) => s.initialized);
+  const sessionToken = useAuthStore((s) => s.session?.access_token ?? null);
+  useEffect(() => {
+    if (!authInitialized) return;
+    loadLlmConfig();
+  }, [authInitialized, sessionToken, loadLlmConfig]);
   // Error de generación/refinamiento: se muestra en una franja anclada al borde
   // superior del canvas (no como tarjeta central ni toast). Se condiciona a
   // uiState==='error' para que un mensaje residual quede inerte fuera de un fallo activo.

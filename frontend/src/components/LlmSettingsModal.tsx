@@ -540,6 +540,12 @@ export function LlmSettingsModal({ open, onClose }: LlmSettingsModalProps) {
                 </button>
               ))}
             </div>
+            {transport === 'browser' && (
+              <AlertBanner
+                variant="warning"
+                message="«En mi navegador» solo permite generar diagramas. El refinamiento conversacional (editar un diagrama existente con instrucciones) no está disponible con este transporte: para refinar, usa «Servidor directo» o un proveedor comercial."
+              />
+            )}
           </div>
         )}
 

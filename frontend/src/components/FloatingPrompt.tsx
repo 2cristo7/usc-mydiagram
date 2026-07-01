@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { Send } from 'lucide-react'
+import { Send, HelpCircle } from 'lucide-react'
 import { useStore, selectPromptDraft } from '../store/index'
 import { useUiStore } from '../store/ui'
+import { useLlmSettingsStore } from '../store/llmSettings'
 import { toast } from '../store/toast'
+
+// El transporte Ollama 'browser' (modelo en el navegador) no soporta el
+// tool-calling de LangChain que usa el agente ReAct de refinamiento, así que el
+// backend rechaza esas peticiones. Lo replicamos en el cliente: con un diagrama
+// ya creado y este transporte, el input de refinamiento se deshabilita en vez de
+// dejar enviar una petición condenada a error. La sección de ayuda lo explica.
+const REFINE_HELP_ANCHOR = '/help.html#llm-refinar-navegador'
 
 // Límite razonable para que el agente no reciba prompts desproporcionados.
 // 2000 caracteres cubre cualquier descripción detallada de diagrama real.
@@ -25,6 +33,7 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
   const value = useStore(selectPromptDraft)
   const setValue = useStore((s) => s.setPromptDraft)
   const promptFocusNonce = useUiStore((s) => s.promptFocusNonce)
+  const transport = useLlmSettingsStore((s) => s.config?.transport)
   // Guard transitorio para la respuesta de clarificación: entre el primer Enter y
   // el cambio de estado del hook (limpia pendingClarification / pasa a 'generating')
   // hay una ventana en la que dos Enter muy seguidos enviarían dos veces. Lo
@@ -53,15 +62,34 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
     if (answeringClarification && !pendingClarification) setAnsweringClarification(false)
   }, [answeringClarification, pendingClarification])
 
+  // Refinar (= ya hay un diagrama) con el transporte 'browser' no es posible: el
+  // agente ReAct depende de tool-calling que el puente con el navegador no ofrece.
+  // Bloqueamos el input en ese caso para no cursar una petición que el backend
+  // rechazaría. La generación inicial (sin diagrama) sí funciona en 'browser'.
+  //
+  // Es derivado del store, así que se reevalúa solo en los dos momentos en que el
+  // estado cambia: al ENTRAR a un diagrama (setCurrentDiagram desde el historial o
+  // la papelera) y al COMPLETAR una generación (currentDiagram queda poblado). Se
+  // excluye 'generating' para que el aviso no parpadee mientras el diagrama aún se
+  // está montando en streaming (durante ese tramo el input ya está disabled).
+  const refineBlocked =
+    currentDiagram !== null && transport === 'browser' && uiState !== 'generating'
+
   // Deshabilita el envío mientras se genera o mientras se procesa una respuesta de
   // clarificación (estado transitorio): cierra la ventana de doble envío del Enter.
-  const disabled = uiState === 'generating' || answeringClarification
+  const disabled = uiState === 'generating' || answeringClarification || refineBlocked
 
-  const placeholder = pendingClarification
+  const placeholder = refineBlocked
+    ? 'Introduce una API Key o pasa a servidor directo para poder refinar'
+    : pendingClarification
     ? 'Responde a la pregunta del agente...'
     : currentDiagram
     ? 'Refina el diagrama...'
     : 'Describe un diagrama...'
+
+  function openRefineHelp() {
+    window.open(REFINE_HELP_ANCHOR, '_blank', 'noopener,noreferrer')
+  }
 
   function autoResize() {
     const el = textareaRef.current
@@ -122,7 +150,23 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
       }`}
     >
       {/* translate-x nudges the box right so it reads as centered once the 4px brutal drop-shadow (which sits on the right) is discounted */}
-      <div className="flex items-end gap-3 w-full max-w-[680px] translate-x-[12px]">
+      <div className="flex flex-col items-stretch gap-2 w-full max-w-[680px] translate-x-[12px]">
+        {refineBlocked && (
+          <div className="flex items-center gap-2 border-[3px] border-[var(--color-ink)] bg-[var(--color-warn,#fde68a)] text-[var(--color-ink)] shadow-[var(--shadow-brutal)] rounded-[var(--radius)] px-3 py-2 text-xs">
+            <span className="flex-1">
+              El modo <strong>«En mi navegador»</strong> solo permite generar. Para refinar este
+              diagrama, usa una API Key o cambia a servidor directo.
+            </span>
+            <button
+              onClick={openRefineHelp}
+              className="flex-shrink-0 inline-flex items-center gap-1 border-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] rounded-[var(--radius)] px-2 py-1 font-semibold shadow-[var(--shadow-brutal)] hover:-translate-y-px hover:shadow-[var(--shadow-brutal-lg)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all duration-75"
+            >
+              <HelpCircle size={13} />
+              Cómo refinar
+            </button>
+          </div>
+        )}
+        <div className="flex items-end gap-3 w-full">
         <div className="relative flex-1 border-[3px] border-[var(--color-ink)] bg-[var(--color-surface)] shadow-[var(--shadow-brutal)] focus-within:shadow-[var(--shadow-brutal-lg)] focus-within:-translate-y-px transition-all duration-75 rounded-[var(--radius)]">
           <textarea
             ref={textareaRef}
@@ -157,6 +201,7 @@ export function FloatingPrompt({ onSendMessage, onSendClarificationAnswer }: Flo
         >
           <Send size={14} className="-ml-px" />
         </button>
+        </div>
       </div>
     </div>
   )
