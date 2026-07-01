@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Grafo de Refinamiento ReAct</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación del proyecto</p>
+        <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a class="active" href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+  <main>
+  <div class="content">
+    <header class="hero">
+      <div class="eyebrow">agent/agent_graph.py</div>
+      <h1>Grafo ReAct de Refinamiento</h1>
+      <p class="lede">El agente conversacional que edita diagramas existentes vía tool calls:
+        loop <code>agent ↔ tools</code>, fin por ausencia de <code>tool_calls</code>,
+        rama <code>regenerate</code> como escape hatch y pausa real <code>clarify</code>
+        con <code>interrupt()</code> de LangGraph.</p>
+      <div class="meta-row">
+        <span class="pill"><b>Archivo</b> agent/agent_graph.py</span>
+        <span class="pill"><b>Tools</b> agent/tools.py</span>
+        <span class="pill"><b>Framework</b> LangGraph StateGraph</span>
+      </div>
+    </header>
+
+    <!-- ================================================================ -->
+    <!-- 1. VISIÓN GENERAL -->
+    <!-- ================================================================ -->
+    <section id="vision">
+      <div class="sec-head">
+        <div class="badge">&#8634;</div>
+        <div>
+          <h2>Visión general del grafo</h2>
+          <p class="sec-sub">agent/agent_graph.py · build_agent_graph()</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>El grafo de refinamiento implementa el patrón <strong>ReAct</strong> (Reason + Act) sobre LangGraph.
+        A diferencia del grafo de generación, que es un pipeline lineal append-only, este grafo es
+        un <strong>loop controlado</strong>: el LLM razona sobre el diagrama actual y decide qué tool
+        invocar; el resultado de la tool (observación) se añade al historial y el LLM decide de nuevo,
+        hasta que responde sin llamar a ninguna tool.</p>
+
+        <div class="def">
+          El loop termina cuando el LLM produce una <code>AIMessage</code> <strong>sin</strong>
+          <code>tool_calls</code> — no existe un marcador explícito de fin. <code>tools_condition</code>
+          de LangGraph inspecciona el último mensaje y enruta a <code>END</code> si no hay calls pendientes.
+        </div>
+
+        <p>El grafo se <strong>construye por petición</strong> (<code>build_agent_graph(ws)</code>):
+        las tools cierran (<em>closure</em>) sobre el <code>DiagramWorkspace</code> de esa petición
+        concreta. Dos refinamientos concurrentes compilan grafos distintos y nunca comparten
+        el mismo workspace. (Decisión en <code>docs/vision-global.md §3</code>.)</p>
+      </div>
+
+      <!-- SVG diagrama principal del grafo -->
+      <div class="card" style="padding:30px 20px">
+        <h3>Topología completa del grafo</h3>
+
+        <svg viewBox="0 0 800 540" width="100%" xmlns="http://www.w3.org/2000/svg" style="font-family:'JetBrains Mono',monospace;display:block;min-width:600px">
+          <defs>
+            <marker id="arr" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+              <polygon points="0 0, 9 3.5, 0 7" fill="#111"/>
+            </marker>
+            <marker id="arr-ok" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+              <polygon points="0 0, 9 3.5, 0 7" fill="#16a34a"/>
+            </marker>
+            <marker id="arr-warn" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+              <polygon points="0 0, 9 3.5, 0 7" fill="#b07c00"/>
+            </marker>
+            <marker id="arr-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+              <polygon points="0 0, 9 3.5, 0 7" fill="#2563eb"/>
+            </marker>
+          </defs>
+
+          <!-- ════ ARISTAS (debajo de los nodos) ════ -->
+
+          <!-- START → AGENT -->
+          <line x1="140" y1="57" x2="346" y2="57" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+
+          <!-- AGENT → tools_condition -->
+          <line x1="500" y1="57" x2="511" y2="57" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+
+          <!-- tools_condition → END (sin tool_calls) -->
+          <line x1="625" y1="57" x2="641" y2="57" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr-ok)"/>
+          <text x="633" y="33" text-anchor="middle" font-size="8.5" fill="#16a34a" font-weight="600">sin tool_calls</text>
+          <line x1="633" y1="37" x2="633" y2="48" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="2,2"/>
+
+          <!-- tools_condition → TOOLS (con tool_calls) -->
+          <line x1="425" y1="86" x2="425" y2="181" stroke="#111" stroke-width="2.5" stroke-dasharray="6,4" marker-end="url(#arr)"/>
+          <text x="437" y="138" font-size="8.5" fill="#111" font-weight="600">con tool_calls</text>
+
+          <!-- TOOLS → route_after_tools -->
+          <line x1="425" y1="243" x2="425" y2="296" stroke="#b07c00" stroke-width="2.5" marker-end="url(#arr-warn)"/>
+
+          <!-- route_after_tools → CLARIFY (_interrupt) -->
+          <path d="M345 314 L175 314 L175 376" fill="none" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="252" y="307" text-anchor="middle" font-size="8.5" fill="#111" font-weight="600">_interrupt</text>
+
+          <!-- route_after_tools → REGENERATE (_regenerate) -->
+          <path d="M505 314 L595 314 L595 376" fill="none" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="551" y="307" text-anchor="middle" font-size="8.5" fill="#111" font-weight="600">_regenerate</text>
+
+          <!-- route_after_tools → AGENT (normal, bucle por la izquierda hacia el borde inferior) -->
+          <path d="M345 314 C288 314 300 150 382 90" fill="none" stroke="#111" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arr)"/>
+          <text x="300" y="232" text-anchor="middle" font-size="8.5" fill="#111" font-weight="600">normal</text>
+
+          <!-- CLARIFY → AGENT (resume, bucle exterior izquierdo) -->
+          <path d="M175 380 C52 300 52 95 346 70" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arr-blue)"/>
+          <text x="84" y="250" text-anchor="middle" font-size="8.5" fill="#2563eb" font-weight="600">resume</text>
+
+          <!-- REGENERATE → END -->
+          <line x1="685" y1="409" x2="701" y2="409" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr-ok)"/>
+          <text x="648" y="372" text-anchor="middle" font-size="8.5" fill="#16a34a" font-weight="600">ws actualizado</text>
+
+          <!-- ════ NODOS ════ -->
+
+          <!-- START -->
+          <rect x="34" y="38" width="110" height="46" rx="23" fill="#111"/>
+          <rect x="30" y="34" width="110" height="46" rx="23" fill="#fff" stroke="#111" stroke-width="3"/>
+          <text x="85" y="62" text-anchor="middle" font-size="12" font-weight="600" fill="#111">START</text>
+
+          <!-- AGENT (naranja) -->
+          <rect x="354" y="32" width="150" height="58" rx="4" fill="#111"/>
+          <rect x="350" y="28" width="150" height="58" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+          <text x="425" y="53" text-anchor="middle" font-size="12" font-weight="700" fill="#111">AGENT</text>
+          <text x="425" y="68" text-anchor="middle" font-size="8.5" fill="#75716a">chat_model.ainvoke()</text>
+
+          <!-- END top-right -->
+          <rect x="649" y="38" width="110" height="46" rx="23" fill="#111"/>
+          <rect x="645" y="34" width="110" height="46" rx="23" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="700" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="#16a34a">END</text>
+
+          <!-- tools_condition -->
+          <rect x="515" y="43" width="110" height="28" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="2"/>
+          <text x="570" y="61" text-anchor="middle" font-size="9" font-weight="600" fill="#b07c00">tools_condition</text>
+
+          <!-- TOOLS (azul) -->
+          <rect x="354" y="189" width="150" height="58" rx="4" fill="#111"/>
+          <rect x="350" y="185" width="150" height="58" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+          <text x="425" y="210" text-anchor="middle" font-size="12" font-weight="700" fill="#111">TOOLS</text>
+          <text x="425" y="225" text-anchor="middle" font-size="8.5" fill="#75716a">ToolNode (LangGraph)</text>
+
+          <!-- route_after_tools -->
+          <rect x="345" y="300" width="160" height="28" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="2"/>
+          <text x="425" y="318" text-anchor="middle" font-size="9" font-weight="600" fill="#b07c00">route_after_tools</text>
+
+          <!-- CLARIFY (amarillo) -->
+          <rect x="99" y="384" width="160" height="58" rx="4" fill="#111"/>
+          <rect x="95" y="380" width="160" height="58" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+          <text x="175" y="405" text-anchor="middle" font-size="12" font-weight="700" fill="#111">CLARIFY</text>
+          <text x="175" y="420" text-anchor="middle" font-size="8.5" fill="#75716a">interrupt() → pausa</text>
+
+          <!-- REGENERATE (verde) -->
+          <rect x="539" y="384" width="150" height="58" rx="4" fill="#111"/>
+          <rect x="535" y="380" width="150" height="58" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="610" y="405" text-anchor="middle" font-size="11.5" font-weight="700" fill="#111">REGENERATE</text>
+          <text x="610" y="420" text-anchor="middle" font-size="8.5" fill="#75716a">build_graph()</text>
+
+          <!-- END bottom-right -->
+          <rect x="709" y="390" width="80" height="46" rx="23" fill="#111"/>
+          <rect x="705" y="386" width="80" height="46" rx="23" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="745" y="414" text-anchor="middle" font-size="12" font-weight="700" fill="#16a34a">END</text>
+
+          <!-- ════ LEYENDA ════ -->
+          <rect x="30" y="480" width="430" height="40" rx="4" fill="#f5f0e8" stroke="#e2dccf" stroke-width="1.5"/>
+          <line x1="46" y1="501" x2="76" y2="501" stroke="#111" stroke-width="2.5"/>
+          <text x="82" y="505" font-size="9.5" fill="#111">flujo</text>
+          <line x1="120" y1="501" x2="150" y2="501" stroke="#111" stroke-width="2.5" stroke-dasharray="5,3"/>
+          <text x="156" y="505" font-size="9.5" fill="#111">condicional</text>
+          <line x1="242" y1="501" x2="272" y2="501" stroke="#16a34a" stroke-width="2.5"/>
+          <text x="278" y="505" font-size="9.5" fill="#16a34a">fin limpio</text>
+          <line x1="352" y1="501" x2="382" y2="501" stroke="#2563eb" stroke-width="2.5"/>
+          <text x="388" y="505" font-size="9.5" fill="#2563eb">resume</text>
+        </svg>
+      </div>
+
+      <div class="decision">
+        <div class="lab">Decisión</div>
+        El grafo se compila por petición (<code>build_agent_graph(ws)</code>) porque las tools cierran sobre
+        el <code>DiagramWorkspace</code> concreto. Un <code>ToolNode</code> global mutaría un diagrama compartido
+        y dos refinamientos concurrentes se pisarían. Ver <code>vision-global.md §3</code>.
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 1B. CONTEXTO: EL DIAGRAMA ACTUAL ENTERO -->
+    <!-- ================================================================ -->
+    <section id="contexto">
+      <div class="sec-head">
+        <div class="badge">&#9638;</div>
+        <div>
+          <h2>¿Qué contexto recibe el agente? El diagrama actual <em>entero</em></h2>
+          <p class="sec-sub">El refinamiento no parte de cero: el LLM ve todo el diagrama antes de editarlo</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>Para refinar ("añade un atributo a Usuario", "borra esa relación", "conecta A con B")
+        el agente necesita <strong>saber qué hay ya en el lienzo</strong>. Por eso, en cada petición de
+        refinamiento se le envía el <strong>diagrama actual completo</strong> —todos los nodos y todas las
+        aristas— serializado como JSON e <strong>inyectado en el system prompt</strong> del LLM. No es un
+        resumen, no es una muestra, y no es solo el texto del usuario: es el diagrama entero.</p>
+
+        <div class="def">
+          El prompt del usuario viaja en el <code>HumanMessage</code>; el diagrama actual viaja en el
+          <code>SystemMessage</code> (<code>build_system_prompt(ws)</code>). Esa separación es deliberada:
+          la instrucción es lo que cambia turno a turno; el diagrama es el <em>contexto</em> sobre el que
+          se razona.
+        </div>
+
+        <h3>De dónde sale ese contexto: el recorrido del diagrama</h3>
+        <table>
+          <thead>
+            <tr><th>Capa</th><th>Qué hace con el diagrama</th><th>Archivo · línea</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag">Frontend</span></td>
+              <td>Al detectar que ya hay diagrama en el lienzo emite <code>message:refine</code> con
+              <code>{ prompt, diagram }</code>. El <code>diagram</code> es el JSON compacto: todos los nodos
+              (sin <code>position</code>), todas las aristas (sin <code>data</code> visual),
+              <code>diagram_type</code> y <code>fragments</code> si los hay.</td>
+              <td><code>useWebSocket.ts:771</code> · <code>diagramToJson.ts:27</code></td>
+            </tr>
+            <tr>
+              <td><span class="tag t-blue">Backend</span></td>
+              <td>Reenvía <code>{ prompt, diagram }</code> <strong>tal cual</strong> a
+              <code>POST /refine/stream</code>. No interpreta ni reduce el diagrama; por eso este endpoint
+              no se cachea (la respuesta depende del diagrama de entrada).</td>
+              <td><code>socketHandlers.ts:397</code></td>
+            </tr>
+            <tr>
+              <td><span class="tag t-warn">Agente</span></td>
+              <td>Reconstruye el <code>DiagramWorkspace</code> desde el JSON, serializa el diagrama entero
+              con <code>ws.to_compact()</code> y lo <strong>incrusta en el system prompt</strong>.</td>
+              <td><code>main.py:403</code> · <code>agent_graph.py:193</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Qué incluye —y qué se omite— en el JSON que ve el LLM</h3>
+        <p>El diagrama se envía como <code>CompactDiagram</code> (<code>ws.to_compact()</code>), una vista
+        <strong>semántica</strong> del diagrama: lo que el agente necesita para editar, sin el ruido visual
+        que solo importa al render.</p>
+        <table>
+          <thead>
+            <tr><th></th><th>Campos</th><th>Por qué</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag t-green">Se envía</span></td>
+              <td>Por nodo: <code>id</code>, <code>label</code>, <code>node_type</code>,
+              <code>attributes</code>. Por arista: <code>id</code>, <code>source</code>,
+              <code>target</code>, <code>label</code>, <code>edge_type</code>. Más
+              <code>diagram_type</code> y <code>fragments</code> (secuencia).</td>
+              <td>El agente edita <strong>por <code>id</code></strong> (<code>update_node</code>,
+              <code>delete_edge</code>…); necesita ver los <code>id</code> y las conexiones existentes.</td>
+            </tr>
+            <tr>
+              <td><span class="tag t-warn">Se omite</span></td>
+              <td><code>position</code> de los nodos, <code>data</code> visual de las aristas
+              (waypoints, forma, flechas) y el <code>title</code> del diagrama.</td>
+              <td>Es información de presentación. El layout lo recalcula <code>dagre</code> en el frontend en
+              cada render; el <code>title</code> es <em>human-facing</em>. Mandarlo solo gastaría tokens.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="caveat">
+          <div class="lab">El contexto es el snapshot inicial; los cambios se siguen por las observaciones</div>
+          El system prompt se construye <strong>una vez</strong> al arrancar el refinamiento, con el diagrama
+          tal y como llegó. Durante el loop ReAct el agente no recibe un system prompt regenerado en cada
+          turno: ve ese snapshot inicial <em>más</em> las observaciones que devuelven sus propias tools
+          (<code>{"id": …}</code>, <code>{"ok": true, …}</code>), que le confirman cada mutación. La fuente de
+          verdad final es el <code>ws</code> mutado, que se sirve completo en el evento <code>done</code>.
+        </div>
+
+        <div class="decision">
+          <div class="lab">Implicación de escala</div>
+          Como el diagrama entero entra en el prompt, su tamaño crece con el nº de nodos/aristas: diagramas
+          muy grandes consumen más contexto por turno. La vista compacta (sin <code>position</code> ni
+          <code>data</code>) es precisamente la primera defensa contra ese coste. Una poda selectiva del
+          contexto (enviar solo el subgrafo afectado) sería una optimización futura, no el comportamiento
+          actual: <strong>hoy se envía todo</strong>.
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 2. NODOS DEL GRAFO -->
+    <!-- ================================================================ -->
+    <section id="nodos">
+      <div class="sec-head">
+        <div class="badge">&#9632;</div>
+        <div>
+          <h2>Nodos del grafo</h2>
+          <p class="sec-sub">StateGraph(MessagesState) · cuatro nodos + entry point</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Nodo</th>
+              <th>Tipo</th>
+              <th>Responsabilidad</th>
+              <th>Entra por</th>
+              <th>Sale a</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>agent</code></td>
+              <td><span class="tag t-warn">async fn</span></td>
+              <td>Invoca <code>chat_model.ainvoke(messages)</code> y devuelve la respuesta al estado. Si el LLM incluye <code>tool_calls</code>, <code>tools_condition</code> enruta a <code>tools</code>; si no, a <code>END</code>.</td>
+              <td>START, <code>tools</code> (vía <code>route_after_tools</code>), <code>clarify</code> (tras resume)</td>
+              <td><code>tools_condition</code> → <code>tools</code> o <code>END</code></td>
+            </tr>
+            <tr>
+              <td><code>tools</code></td>
+              <td><span class="tag t-blue">ToolNode</span></td>
+              <td>Ejecuta en paralelo todas las tool calls de la <code>AIMessage</code> anterior. Cada tool devuelve un JSON-string (observación). LangGraph añade los <code>ToolMessage</code> al estado.</td>
+              <td><code>agent</code> (via <code>tools_condition</code>)</td>
+              <td><code>route_after_tools</code> → <code>clarify</code>, <code>regenerate</code> o <code>agent</code></td>
+            </tr>
+            <tr>
+              <td><code>regenerate</code></td>
+              <td><span class="tag t-green">async fn</span></td>
+              <td>Escape hatch: detecta el marcador <code>_regenerate</code>, corre el pipeline de generación completo (<code>build_graph()</code>) y reemplaza el workspace (<code>ws.nodes</code>, <code>ws.edges</code>). Sale a <code>END</code> directamente.</td>
+              <td><code>tools</code> (vía <code>route_after_tools</code>)</td>
+              <td><code>END</code></td>
+            </tr>
+            <tr>
+              <td><code>clarify</code></td>
+              <td><span class="tag t-warn">async fn · interrupt</span></td>
+              <td>Pausa real: llama a <code>interrupt({"question":…, "options":…})</code>. El grafo se congela (checkpointer) y el stream devuelve la pregunta. Al reanudar, inyecta la respuesta como <code>HumanMessage</code> y vuelve a <code>agent</code>.</td>
+              <td><code>tools</code> (vía <code>route_after_tools</code>)</td>
+              <td><code>agent</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Estado del grafo: MessagesState</h3>
+      <div class="card">
+        <p>El grafo usa <code>MessagesState</code> de LangGraph como estado: una lista de mensajes
+        (<code>HumanMessage</code>, <code>AIMessage</code>, <code>ToolMessage</code>…) con reducer
+        <code>add_messages</code> que acumula en vez de reemplazar.
+        El historial completo es la fuente de verdad; <code>extract_history()</code> lo posprocesa
+        al final para derivar <code>refinement_history</code> sin mantener una segunda lista en paralelo.</p>
+        <div class="caveat">
+          <div class="lab">Principio de diseño</div>
+          <strong>Derivar al final, no construir en paralelo.</strong> <code>extract_history()</code>
+          es una función pura sobre <code>messages</code>: empareja cada <code>AIMessage.tool_calls</code>
+          con su <code>ToolMessage</code> por <code>tool_call_id</code>. Mismo patrón que
+          <code>classify_outcome</code>: una segunda fuente de verdad que crece en paralelo
+          puede desincronizarse; derivar al final es siempre consistente y testeable sin el grafo.
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 3. CONDICIONES DE ROUTING -->
+    <!-- ================================================================ -->
+    <section id="routing">
+      <div class="sec-head">
+        <div class="badge">&#9654;</div>
+        <div>
+          <h2>Condiciones de routing</h2>
+          <p class="sec-sub">tools_condition · route_after_tools · _last_marker()</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>tools_condition (LangGraph prebuilt)</h3>
+        <p>Inspecciona el último mensaje del estado. Si es una <code>AIMessage</code> con
+        <code>tool_calls</code> no vacíos → <code>"tools"</code>. Si no → <code>END</code>.
+        Esta condición es la que hace que el loop <strong>termine naturalmente</strong>:
+        el LLM responde sin pedir tools cuando considera que ha completado la tarea.</p>
+
+        <h3>route_after_tools (custom)</h3>
+        <p>Se ejecuta tras <code>ToolNode</code>. Inspecciona los <code>ToolMessage</code>
+        del último turno (solo los del turno actual, no del historial completo) buscando
+        marcadores especiales en las observaciones JSON:</p>
+
+        <table>
+          <thead>
+            <tr><th>Marcador detectado</th><th>Ruta</th><th>Prioridad</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>{"_interrupt": "clarification", …}</code></td>
+              <td><code>"clarify"</code></td>
+              <td><span class="tag t-warn">1ª (mayor)</span></td>
+            </tr>
+            <tr>
+              <td><code>{"_regenerate": true, …}</code></td>
+              <td><code>"regenerate"</code></td>
+              <td><span class="tag">2ª</span></td>
+            </tr>
+            <tr>
+              <td>Sin marcadores</td>
+              <td><code>"agent"</code></td>
+              <td><span class="tag t-blue">fallback</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="caveat">
+          <div class="lab">Orden importa</div>
+          Si en el mismo turno el LLM llamó a <code>ask_clarification</code> y a
+          <code>regenerate_from_scratch</code> (improbable pero posible), la clarificación
+          tiene prioridad: <em>preguntar antes de tirar el diagrama</em>.
+        </div>
+
+        <h3>_last_marker(messages, key)</h3>
+        <p>Helper puro que recorre los mensajes <strong>desde el final</strong>
+        mientras encuentre <code>ToolMessage</code>. El primer mensaje que no sea
+        <code>ToolMessage</code> corta la búsqueda. Así solo inspecciona las observaciones
+        del turno actual, no las de turnos anteriores donde el mismo marcador pudo aparecer.</p>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 4. ESCAPE HATCH: regenerate -->
+    <!-- ================================================================ -->
+    <section id="regenerate">
+      <div class="sec-head">
+        <div class="badge">&#9656;</div>
+        <div>
+          <h2>Escape hatch: <code>regenerate_from_scratch</code></h2>
+          <p class="sec-sub">Cuando el cambio pedido no es incremental</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>La mayoría de las tools editan el workspace incrementalmente: <code>add_node</code>,
+        <code>update_node</code>, <code>delete_edge</code>… Pero algunos cambios no son incrementales:
+        cambiar el tipo de diagrama, rehacer el diagrama entero con otra semántica o corregir
+        una topología muy errónea.</p>
+
+        <p>Para estos casos existe <code>regenerate_from_scratch</code>, que el LLM puede llamar
+        como cualquier otra tool pero cuya ejecución en el grafo es radicalmente distinta:</p>
+
+        <!-- SVG mini del flujo regenerate -->
+        <svg viewBox="0 0 820 170" width="100%" xmlns="http://www.w3.org/2000/svg" style="font-family:'JetBrains Mono',monospace;display:block;margin:16px 0;min-width:560px">
+          <defs>
+            <marker id="arr2" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+              <polygon points="0 0, 9 3.5, 0 7" fill="#111"/>
+            </marker>
+            <marker id="arr2-ok" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+              <polygon points="0 0, 9 3.5, 0 7" fill="#16a34a"/>
+            </marker>
+          </defs>
+
+          <!-- Aristas (debajo de los nodos) -->
+          <line x1="150" y1="58" x2="231" y2="58" stroke="#111" stroke-width="2.5" marker-end="url(#arr2)"/>
+          <text x="190" y="48" text-anchor="middle" font-size="8.5" fill="#111" font-weight="600">route_after_tools</text>
+
+          <line x1="345" y1="58" x2="426" y2="58" stroke="#111" stroke-width="2.5" marker-end="url(#arr2)"/>
+          <text x="385" y="48" text-anchor="middle" font-size="8.5" fill="#111" font-weight="600">ainvoke()</text>
+
+          <line x1="580" y1="58" x2="661" y2="58" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr2-ok)"/>
+          <text x="620" y="48" text-anchor="middle" font-size="8.5" fill="#16a34a" font-weight="600">ws actualizado</text>
+
+          <!-- Nodos -->
+          <rect x="34" y="38" width="116" height="52" rx="4" fill="#111"/>
+          <rect x="30" y="34" width="116" height="52" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+          <text x="88" y="57" text-anchor="middle" font-size="11" font-weight="700" fill="#111">TOOLS</text>
+          <text x="88" y="72" text-anchor="middle" font-size="8.5" fill="#75716a">_regenerate marcado</text>
+
+          <rect x="239" y="38" width="110" height="52" rx="4" fill="#111"/>
+          <rect x="235" y="34" width="110" height="52" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="290" y="57" text-anchor="middle" font-size="11" font-weight="700" fill="#111">REGENERATE</text>
+          <text x="290" y="72" text-anchor="middle" font-size="8.5" fill="#75716a">nodo del grafo</text>
+
+          <rect x="434" y="38" width="150" height="52" rx="4" fill="#111"/>
+          <rect x="430" y="34" width="150" height="52" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+          <text x="505" y="57" text-anchor="middle" font-size="11" font-weight="700" fill="#111">build_graph()</text>
+          <text x="505" y="72" text-anchor="middle" font-size="8.5" fill="#75716a">pipeline generación</text>
+
+          <rect x="669" y="38" width="92" height="52" rx="26" fill="#111"/>
+          <rect x="665" y="34" width="92" height="52" rx="26" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="711" y="65" text-anchor="middle" font-size="12" font-weight="700" fill="#16a34a">END</text>
+
+          <!-- Etiqueta WS -->
+          <line x1="505" y1="86" x2="505" y2="124" stroke="#b07c00" stroke-width="1.5" stroke-dasharray="3,2"/>
+          <rect x="385" y="124" width="240" height="28" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="2"/>
+          <text x="505" y="142" text-anchor="middle" font-size="9" font-weight="600" fill="#b07c00">ws.nodes / ws.edges REEMPLAZADOS</text>
+        </svg>
+
+        <ul class="clean">
+          <li>La tool <code>regenerate_from_scratch(prompt, diagram_type?)</code> en <code>DiagramWorkspace</code>
+          no hace nada: devuelve el marcador <code>{"_regenerate": true, "prompt": "...", ...}</code>
+          como observación. La frontera tool/grafo es explícita.</li>
+          <li>El nodo <code>regenerate</code> del grafo lee el marcador con <code>_last_marker()</code>,
+          extrae el prompt y corre <code>build_graph().ainvoke(initial_generation_state(prompt))</code>.</li>
+          <li>El resultado reemplaza <code>ws.diagram_type</code>, <code>ws.nodes</code> y <code>ws.edges</code>.</li>
+          <li>El nodo sale a <code>END</code> directamente: no vuelve al loop del agente.
+          El endpoint <code>/refine/stream</code> sirve el workspace actualizado uniforme con
+          cualquier otro refinamiento.</li>
+        </ul>
+
+        <div class="decision">
+          <div class="lab">Decisión</div>
+          <code>regenerate_from_scratch</code> sale por rama dedicada (no es tool incremental)
+          porque produce un diagrama entero, no una observación pequeña. Volver al agente
+          con el diagrama nuevo como contexto implicaría una llamada LLM extra innecesaria.
+          La tool es "intención + datos"; el nodo del grafo es la ejecución.
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 5. CLARIFY: interrupt / resume -->
+    <!-- ================================================================ -->
+    <section id="clarify">
+      <div class="sec-head">
+        <div class="badge">&#10067;</div>
+        <div>
+          <h2>Interrupt / Resume: <code>ask_clarification</code></h2>
+          <p class="sec-sub">LangGraph interrupt() · checkpointer InMemorySaver</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>Cuando el LLM detecta que la instrucción del usuario es ambigua puede llamar a
+        <code>ask_clarification(question, options?)</code>. La tool devuelve el marcador
+        <code>_interrupt</code>; el nodo <code>clarify</code> llama a <code>interrupt()</code>
+        de LangGraph, que <strong>congela</strong> el estado del grafo hasta que el cliente
+        reanude con la respuesta.</p>
+
+        <!-- Diagrama secuencia interrupt/resume -->
+        <svg viewBox="0 0 700 260" width="100%" xmlns="http://www.w3.org/2000/svg" style="font-family:'JetBrains Mono',monospace;display:block;margin:16px 0">
+          <defs>
+            <marker id="arr3" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+              <polygon points="0 0, 9 3.5, 0 7" fill="#111"/>
+            </marker>
+          </defs>
+
+          <!-- Líneas de vida -->
+          <line x1="90" y1="50" x2="90" y2="240" stroke="#e2dccf" stroke-width="2" stroke-dasharray="4,4"/>
+          <line x1="310" y1="50" x2="310" y2="240" stroke="#e2dccf" stroke-width="2" stroke-dasharray="4,4"/>
+          <line x1="530" y1="50" x2="530" y2="240" stroke="#e2dccf" stroke-width="2" stroke-dasharray="4,4"/>
+
+          <!-- Cabeceras participantes -->
+          <rect x="14" y="10" width="150" height="36" rx="4" fill="#fff" stroke="#111" stroke-width="3"/>
+          <text x="89" y="33" text-anchor="middle" font-size="10" font-weight="600" fill="#111">FRONTEND / CLIENTE</text>
+
+          <rect x="234" y="10" width="150" height="36" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+          <text x="309" y="27" text-anchor="middle" font-size="10" font-weight="600" fill="#111">GRAFO ReAct</text>
+          <text x="309" y="40" text-anchor="middle" font-size="8" fill="#75716a">/refine/stream</text>
+
+          <rect x="454" y="10" width="152" height="36" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+          <text x="530" y="27" text-anchor="middle" font-size="10" font-weight="600" fill="#111">CHECKPOINTER</text>
+          <text x="530" y="40" text-anchor="middle" font-size="8" fill="#75716a">InMemorySaver</text>
+
+          <!-- Mensajes secuencia -->
+          <!-- 1: refine request -->
+          <line x1="90" y1="80" x2="308" y2="80" stroke="#111" stroke-width="2" marker-end="url(#arr3)"/>
+          <text x="200" y="74" text-anchor="middle" font-size="9" fill="#111">POST /refine/stream {thread_id}</text>
+
+          <!-- 2: graph runs, hits interrupt -->
+          <rect x="282" y="92" width="56" height="28" rx="2" fill="#fdf0b8" stroke="#b07c00" stroke-width="1.5"/>
+          <text x="310" y="111" text-anchor="middle" font-size="8" fill="#b07c00">interrupt()</text>
+
+          <!-- 3: checkpoint state -->
+          <line x1="310" y1="106" x2="528" y2="106" stroke="#111" stroke-width="1.5" marker-end="url(#arr3)"/>
+          <text x="420" y="100" text-anchor="middle" font-size="9" fill="#111">persist state [thread_id]</text>
+
+          <!-- 4: emit clarification event -->
+          <line x1="308" y1="130" x2="92" y2="130" stroke="#2563eb" stroke-width="2" stroke-dasharray="5,2" marker-end="url(#arr-blue)"/>
+          <text x="200" y="124" text-anchor="middle" font-size="9" fill="#2563eb">NDJSON: clarification {question}</text>
+
+          <!-- 5: stream ends -->
+          <text x="310" y="152" text-anchor="middle" font-size="8" fill="#75716a" font-style="italic">stream termina</text>
+
+          <!-- 6: user answers -->
+          <line x1="90" y1="170" x2="308" y2="170" stroke="#111" stroke-width="2" marker-end="url(#arr3)"/>
+          <text x="200" y="164" text-anchor="middle" font-size="9" fill="#111">POST /refine/resume {thread_id, answer}</text>
+
+          <!-- 7: restore state -->
+          <line x1="310" y1="185" x2="528" y2="185" stroke="#111" stroke-width="1.5" marker-end="url(#arr3)"/>
+          <text x="420" y="179" text-anchor="middle" font-size="9" fill="#111">restore state [thread_id]</text>
+
+          <!-- 8: inject HumanMessage and continue -->
+          <rect x="282" y="196" width="56" height="28" rx="2" fill="#d8f3e1" stroke="#16a34a" stroke-width="1.5"/>
+          <text x="310" y="215" text-anchor="middle" font-size="8" fill="#16a34a">resume(ans)</text>
+
+          <!-- 9: continue stream -->
+          <line x1="308" y1="225" x2="92" y2="225" stroke="#2563eb" stroke-width="2" stroke-dasharray="5,2" marker-end="url(#arr-blue)"/>
+          <text x="200" y="219" text-anchor="middle" font-size="9" fill="#2563eb">NDJSON: continúa…</text>
+        </svg>
+
+        <h3>Diseño del nodo clarify: libre de efectos</h3>
+        <p>El nodo <code>clarify</code> es deliberadamente <strong>libre de efectos</strong>: solo llama
+        a <code>interrupt()</code> y no ejecuta nada más. Esta decisión es crítica por cómo funciona
+        LangGraph al reanudar:</p>
+        <ul class="clean">
+          <li>Al reanudar, LangGraph re-ejecuta el nodo <em>interrumpido</em> desde su inicio.</li>
+          <li>Las tools hermanas del mismo turno (p. ej. un <code>add_node</code> que llegó antes de
+          <code>ask_clarification</code>) ya corrieron en <code>ToolNode</code> y están checkpointeadas:
+          no se repiten.</li>
+          <li>Si el <code>interrupt()</code> viviera en <code>ToolNode</code> junto con esas tools,
+          todas se ejecutarían <strong>dos veces</strong> al reanudar (duplicado silencioso).</li>
+          <li>En un nodo aparte, la segunda ejecución de <code>interrupt()</code> es idempotente:
+          devuelve la respuesta del usuario en vez de pausar.</li>
+        </ul>
+
+        <div class="decision">
+          <div class="lab">Decisión</div>
+          Sin validador LLM previo al reanudar: interpretar la respuesta del usuario
+          (¿contesta a la pregunta o pide algo distinto?) es trabajo del propio agente en el loop.
+          Un validador extra duplicaría la llamada LLM y sería una segunda fuente de interpretación
+          con menos contexto. Estado entre pausa y reanudación en <code>InMemorySaver</code>:
+          excepción consciente al stateless (migrará a checkpointer Postgres).
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 6. STREAMING DE TOOL CALLS -->
+    <!-- ================================================================ -->
+    <section id="streaming">
+      <div class="sec-head">
+        <div class="badge">&#9889;</div>
+        <div>
+          <h2>Streaming de tool calls</h2>
+          <p class="sec-sub">tool_events() · astream(stream_mode="updates")</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>El endpoint <code>/refine/stream</code> usa <code>astream(stream_mode="updates")</code>
+        de LangGraph para emitir eventos NDJSON a medida que el grafo avanza. La función
+        <code>tool_events(update, ws)</code> traduce cada <em>update</em> a la lista de
+        eventos correspondiente.</p>
+
+        <table>
+          <thead>
+            <tr><th>Update (nodo del grafo)</th><th>Mensaje detectado</th><th>Evento NDJSON emitido</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>agent</code></td>
+              <td><code>AIMessage</code> con <code>tool_calls</code></td>
+              <td><code>{"_type":"tool_call", "id":…, "tool":…, "args":…}</code></td>
+            </tr>
+            <tr>
+              <td><code>tools</code></td>
+              <td><code>ToolMessage</code></td>
+              <td><code>{"_type":"tool_result", "id":…, "tool":…, "result":…, [delta]}</code></td>
+            </tr>
+            <tr>
+              <td><code>clarify</code></td>
+              <td>—</td>
+              <td><em>No emite</em> (evento <code>clarification</code> propio)</td>
+            </tr>
+            <tr>
+              <td><code>regenerate</code></td>
+              <td>—</td>
+              <td><em>No emite</em> (lleva el diagrama en <code>done</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Delta del servidor</h3>
+        <p>Para <code>add_node</code>, <code>update_node</code> y <code>add_edge</code>, el evento
+        <code>tool_result</code> adjunta la pieza <strong>completa</strong> leída del workspace
+        (no solo el <code>id</code> del resultado). El cliente la aplica literal, sin reimplementar
+        semántica del servidor (slugs, methods→attributes, cascade de borrados, etc.).</p>
+
+        <div class="caveat">
+          <div class="lab">Reconciliación incondicional</div>
+          Los eventos de streaming son <strong>UX efímera</strong>: retroalimentación visual
+          mientras el agente trabaja. El evento <code>done</code> lleva el snapshot completo del
+          diagrama + <code>refinement_history</code> y <strong>se aplica siempre</strong>,
+          independientemente de los eventos parciales recibidos. Si un evento se perdió o llegó
+          desordenado, el <code>done</code> corrige. La guarda de idempotencia del render solo
+          puede fallar "hacia aplicar de más", nunca hacia no-reparar.
+        </div>
+
+        <h3>¿Por qué no astream_events?</h3>
+        <p><code>astream_events</code> ofrece granularidad sub-nodo (tokens individuales),
+        pero el mapeo nodo→evento ya es 1:1 con la topología del grafo. Usar
+        <code>stream_mode="updates"</code> evita filtrar el 95% de eventos irrelevantes
+        (tokens de texto) y la función <code>tool_events()</code> es pura y testeable
+        sin grafo ni LLM.</p>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 7. TABLA DE TOOLS -->
+    <!-- ================================================================ -->
+    <section id="tools">
+      <div class="sec-head">
+        <div class="badge">&#9874;</div>
+        <div>
+          <h2>Las 9 tools del agente</h2>
+          <p class="sec-sub">agent/tools.py · DiagramWorkspace · build_tools(ws)</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>Las tools son <strong>lógica pura</strong> sobre el <code>DiagramWorkspace</code>:
+        testeables sin LLM ni grafo. Cada tool devuelve una <strong>observación</strong> como
+        JSON-string. En éxito, los datos que el plan pide (<code>{"id":…}</code>, lista, etc.);
+        en error, <code>{"error": "&lt;mensaje accionable&gt;"}</code> que el agente puede
+        leer y autocorregir.</p>
+
+        <table>
+          <thead>
+            <tr><th>Tool</th><th>Args principales</th><th>Observación en éxito</th><th>Notas</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>find_node</code></td>
+              <td><code>query: str</code></td>
+              <td><code>[{id, label, type}, …]</code></td>
+              <td>Substring primero; fuzzy con difflib si no hay match. <strong>Usar antes de cualquier ref por id.</strong></td>
+            </tr>
+            <tr>
+              <td><code>add_node</code></td>
+              <td><code>node_type, label, attributes?, methods?</code></td>
+              <td><code>{"id": slug}</code></td>
+              <td>Valida <code>node_type</code> contra el tipo de diagrama. El nodo nace desconectado. <code>methods</code> se anexan a <code>attributes</code>.</td>
+            </tr>
+            <tr>
+              <td><code>update_node</code></td>
+              <td><code>id, label?, node_type?, attributes?</code></td>
+              <td><code>{"ok": true, "id": …}</code></td>
+              <td>Modificación parcial. <code>attributes</code> reemplaza la lista completa si se da.</td>
+            </tr>
+            <tr>
+              <td><code>delete_node</code></td>
+              <td><code>id: str</code></td>
+              <td><code>{"ok": true, "deleted_node": id, "deleted_edges": […]}</code></td>
+              <td><strong>Cascade</strong>: borra todas las aristas conectadas. Las devuelve en la observación.</td>
+            </tr>
+            <tr>
+              <td><code>add_edge</code></td>
+              <td><code>source, target, edge_type, label?</code></td>
+              <td><code>{"id": slug}</code></td>
+              <td><strong>Nunca crea nodos.</strong> Si falta un extremo, error accionable. Valida <code>edge_type</code>.</td>
+            </tr>
+            <tr>
+              <td><code>delete_edge</code></td>
+              <td><code>id? | source + target</code></td>
+              <td><code>{"ok": true, "deleted_edge": id}</code></td>
+              <td>Acepta <code>id</code> O <code>source+target</code> (cualquier dirección). Si hay múltiples aristas entre los mismos nodos, devuelve candidatos.</td>
+            </tr>
+            <tr>
+              <td><code>apply_layout</code></td>
+              <td>—</td>
+              <td><code>{"ok": true, "note": "…"}</code></td>
+              <td>No-op en servidor: dagre recalcula en el frontend en cada render. Tool de señal semántica.</td>
+            </tr>
+            <tr>
+              <td><code>ask_clarification</code></td>
+              <td><code>question: str, options?: list[str]</code></td>
+              <td><code>{"_interrupt": "clarification", "question": …, "options": […]}</code></td>
+              <td>Solo señal. La pausa real es <code>interrupt()</code> en el nodo <code>clarify</code> del grafo.</td>
+            </tr>
+            <tr>
+              <td><code>regenerate_from_scratch</code></td>
+              <td><code>prompt: str, diagram_type?: DiagramType</code></td>
+              <td><code>{"_regenerate": true, "prompt": …, "diagram_type": …|null}</code></td>
+              <td>Solo señal. La ejecución del pipeline de generación es el nodo <code>regenerate</code> del grafo.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Frontera lógica pura / grafo</h3>
+      <div class="card">
+        <p>Las dos últimas tools (<code>ask_clarification</code> y <code>regenerate_from_scratch</code>)
+        siguen el patrón <strong>intención + datos en la tool, ejecución en el grafo</strong>.
+        Esta frontera es explícita en el código:</p>
+
+        <div class="def">
+          <code>tools.py</code>: lógica pura, sin LangGraph, sin imports del grafo.<br>
+          <code>agent_graph.py</code>: ensambla el grafo, lee los marcadores y ejecuta
+          el efecto real (<code>interrupt()</code>, <code>build_graph().ainvoke()</code>).
+        </div>
+
+        <p>El <code>DiagramWorkspace</code> es deliberadamente mutable (add/update/delete legítimos
+        en el pipeline de refinamiento, a diferencia del pipeline de generación que es
+        append-only). Dos refinamientos concurrentes reciben instancias distintas del workspace,
+        no comparten estado.</p>
+      </div>
+
+      <h3>Sistema de prompts por tipo de diagrama</h3>
+      <div class="card">
+        <p>El system prompt del agente (<code>build_system_prompt(ws)</code>) se genera
+        por petición e incluye:</p>
+        <ul class="clean">
+          <li>El diagrama actual serializado como JSON compacto (<code>ws.to_compact()</code>).</li>
+          <li>Los <code>node_type</code> y <code>edge_type</code> válidos para el tipo de diagrama,
+          extraídos de <code>ALLOWED_NODE_TYPES</code> / <code>ALLOWED_EDGE_TYPES</code>
+          (misma fuente de verdad que la validación de tipos).</li>
+          <li>Una guía específica para diagramas de secuencia (<code>_SEQUENCE_AGENT_GUIDE</code>)
+          que aclara que los participantes son nodos y las interacciones son aristas,
+          evitando el error más frecuente: crear un nodo "Handshake inicial" en vez de
+          tres aristas SYN/SYN-ACK/ACK.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 8. MODELO DE CHAT -->
+    <!-- ================================================================ -->
+    <section id="modelo">
+      <div class="sec-head">
+        <div class="badge">&#9670;</div>
+        <div>
+          <h2>Modelo de chat y perfiles LLM</h2>
+          <p class="sec-sub">agent/llm.py · get_chat_model("capable") · tres perfiles</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>El agente ReAct requiere un <code>BaseChatModel</code> de LangChain con soporte
+        a <code>bind_tools()</code>. La función <code>get_chat_model(profile)</code>
+        enruta según <code>LLM_PROFILE</code> en el entorno:</p>
+
+        <table>
+          <thead>
+            <tr><th>LLM_PROFILE</th><th>Perfil "capable"</th><th>Clase LangChain</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>local</code> (defecto)</td>
+              <td>Ollama <code>qwen3:8b</code></td>
+              <td><code>ChatOllama</code></td>
+            </tr>
+            <tr>
+              <td><code>openai</code></td>
+              <td><code>gpt-4o</code></td>
+              <td><code>ChatOpenAI</code></td>
+            </tr>
+            <tr>
+              <td><code>anthropic</code></td>
+              <td><code>claude-3-5-sonnet-*</code></td>
+              <td><code>ChatAnthropic</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="caveat">
+          <div class="lab">Dos APIs coexisten</div>
+          El pipeline de <strong>generación</strong> usa <code>call_llm</code>/<code>stream_llm</code>
+          (HTTP crudo con <code>httpx</code>, una completion, texto plano). El <strong>agente ReAct</strong>
+          usa <code>get_chat_model()</code> (chat-model de LangChain con <code>bind_tools()</code>).
+          Ambas enrutan por <code>LLM_PROFILE</code>. Migrar toda la generación a chat-models
+          sería un refactor masivo sin ganancia; las dos abstracciones coexisten por necesidad.
+          Decisión cerrada en <code>vision-global.md §3</code>.
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- 9. REFERENCIAS -->
+    <!-- ================================================================ -->
+    <section id="referencias">
+      <div class="sec-head">
+        <div class="badge">&#128270;</div>
+        <div>
+          <h2>Referencias del código fuente</h2>
+          <p class="sec-sub">Archivos relevantes para este módulo</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr><th>Archivo</th><th>Contenido</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>agent/agent_graph.py</code></td>
+              <td>Grafo ReAct completo: <code>build_agent_graph()</code>, nodos, routers, <code>tool_events()</code>, <code>extract_history()</code></td>
+            </tr>
+            <tr>
+              <td><code>agent/tools.py</code></td>
+              <td><code>DiagramWorkspace</code>, 9 tools puras, schemas Pydantic de argumentos</td>
+            </tr>
+            <tr>
+              <td><code>agent/graph.py</code></td>
+              <td>Pipeline de generación (<code>build_graph()</code>) — invocado por el nodo <code>regenerate</code></td>
+            </tr>
+            <tr>
+              <td><code>agent/llm.py</code></td>
+              <td><code>get_chat_model(profile)</code> — enrutamiento por <code>LLM_PROFILE</code></td>
+            </tr>
+            <tr>
+              <td><code>agent/schemas.py</code></td>
+              <td><code>DiagramNode</code>, <code>DiagramEdge</code>, <code>ALLOWED_NODE_TYPES</code>, <code>ALLOWED_EDGE_TYPES</code></td>
+            </tr>
+            <tr>
+              <td><code>agent/main.py</code></td>
+              <td>Endpoints <code>/refine/stream</code> y <code>/refine/resume</code>; construcción del checkpointer</td>
+            </tr>
+            <tr>
+              <td><code>docs/vision-global.md §3</code></td>
+              <td>Decisiones cerradas del grafo de refinamiento (texto canónico)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <a href="#" class="toplink">&#8593; Volver arriba</a>
+    </section>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Documentación generada del código fuente del proyecto.</p>
+    </div>
+  </div>
+  </main>
+</div>
+</body>
+</html>

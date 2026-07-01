@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Arquitectura</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación del proyecto</p>
+        <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a class="active" href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+  <main>
+  <div class="content">
+    <header class="hero">
+      <div class="eyebrow">ARQUITECTURA DEL SISTEMA</div>
+      <h1>Tres procesos independientes</h1>
+      <p class="lede">Frontend, Backend y Agente IA corren como procesos separados que se comunican únicamente por HTTP y WebSocket. La separación es un invariante arquitectónico no negociable del proyecto.</p>
+      <div class="meta-row">
+        <span class="pill"><b>React 19</b> + Vite 8 + React Flow 12</span>
+        <span class="pill"><b>Node.js 22</b> + Express 5 + Socket.io</span>
+        <span class="pill"><b>Python 3.12</b> + FastAPI + LangChain</span>
+        <span class="pill"><b>Supabase</b> PostgreSQL 16</span>
+      </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section id="diagrama-capas">
+      <div class="sec-head">
+        <div class="badge">&#9633;</div>
+        <div>
+          <h2>Diagrama de capas</h2>
+          <div class="sec-sub">frontend/src · backend/src/index.ts · agent/main.py</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:32px 20px;overflow-x:auto;">
+        <svg viewBox="0 0 780 340" width="100%" style="min-width:520px;display:block;">
+          <defs>
+            <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0,10 3.5,0 7" fill="#111"/>
+            </marker>
+            <marker id="arr-b" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0,10 3.5,0 7" fill="#111"/>
+            </marker>
+          </defs>
+
+          <!-- ── USUARIO ── -->
+          <rect x="44" y="139" width="110" height="52" rx="4" fill="#111"/>
+          <rect x="40" y="135" width="110" height="52" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+          <text x="95" y="156" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="600" fill="#111" text-transform="uppercase">USUARIO</text>
+          <text x="95" y="170" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">navegador</text>
+          <text x="95" y="182" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">WebSocket client</text>
+
+          <!-- ── FRONTEND ── -->
+          <rect x="194" y="94" width="140" height="132" rx="4" fill="#111"/>
+          <rect x="190" y="90" width="140" height="132" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+          <text x="260" y="113" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="#111">FRONTEND</text>
+          <line x1="198" y1="120" x2="322" y2="120" stroke="#111" stroke-width="1.5"/>
+          <text x="260" y="136" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">React 19 + Vite 8</text>
+          <text x="260" y="150" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">React Flow 12</text>
+          <text x="260" y="164" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">TypeScript estricto</text>
+          <text x="260" y="178" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Zod (schemas borde)</text>
+          <text x="260" y="196" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">puerto 5173</text>
+          <text x="260" y="210" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">socket.io-client</text>
+
+          <!-- ── GATEWAY ── -->
+          <rect x="384" y="74" width="148" height="172" rx="4" fill="#111"/>
+          <rect x="380" y="70" width="148" height="172" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+          <text x="454" y="93" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="#111">BACKEND</text>
+          <line x1="388" y1="100" x2="520" y2="100" stroke="#111" stroke-width="1.5"/>
+          <text x="454" y="116" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Node.js 22</text>
+          <text x="454" y="130" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Express 5 + Socket.io</text>
+          <text x="454" y="144" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Auth (JWT Supabase)</text>
+          <text x="454" y="158" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Rate limit + Caché</text>
+          <text x="454" y="172" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">CRUD /diagrams</text>
+          <text x="454" y="190" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">puerto 3001</text>
+          <text x="454" y="204" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">socketHandlers.ts</text>
+          <text x="454" y="218" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">index.ts</text>
+          <text x="454" y="232" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">agentStream.ts</text>
+
+          <!-- ── AGENTE IA ── -->
+          <rect x="584" y="74" width="148" height="172" rx="4" fill="#111"/>
+          <rect x="580" y="70" width="148" height="172" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="654" y="93" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="#111">AGENTE IA</text>
+          <line x1="588" y1="100" x2="720" y2="100" stroke="#111" stroke-width="1.5"/>
+          <text x="654" y="116" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Python 3.12</text>
+          <text x="654" y="130" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">FastAPI + LangGraph</text>
+          <text x="654" y="144" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">LangChain tools</text>
+          <text x="654" y="158" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Pydantic (schemas)</text>
+          <text x="654" y="172" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#33312c">Ollama / GPT / Claude</text>
+          <text x="654" y="190" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">puerto 8000</text>
+          <text x="654" y="204" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">main.py</text>
+          <text x="654" y="218" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">graph.py · agent_graph.py</text>
+          <text x="654" y="232" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">tools.py · schemas.py</text>
+
+          <!-- ── SUPABASE ── -->
+          <rect x="384" y="284" width="148" height="46" rx="4" fill="#111"/>
+          <rect x="380" y="280" width="148" height="46" rx="4" fill="#f3eee4" stroke="#111" stroke-width="3"/>
+          <text x="454" y="299" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="#111">SUPABASE</text>
+          <text x="454" y="315" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">PostgreSQL 16</text>
+
+          <!-- ── FLECHAS USUARIO→FRONTEND (doble sentido WS representado) ── -->
+          <line x1="150" y1="161" x2="188" y2="161" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="169" y="155" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#111">WS</text>
+
+          <!-- FRONTEND → GATEWAY (WS) -->
+          <line x1="330" y1="156" x2="378" y2="156" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="354" y="150" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#111">WS</text>
+
+          <!-- GATEWAY → AGENTE (HTTP NDJSON) -->
+          <line x1="528" y1="156" x2="578" y2="156" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="553" y="148" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#111">HTTP</text>
+          <text x="553" y="158" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#75716a">NDJSON stream</text>
+
+          <!-- GATEWAY → SUPABASE (SQL / REST) -->
+          <line x1="454" y1="242" x2="454" y2="278" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="476" y="265" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#111">SQL/RLS</text>
+
+          <!-- retorno: AGENTE → GATEWAY (stream) -->
+          <line x1="580" y1="175" x2="530" y2="175" stroke="#111" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+
+          <!-- retorno: GATEWAY → FRONTEND (emit) -->
+          <line x1="380" y1="175" x2="332" y2="175" stroke="#111" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+
+          <!-- retorno: FRONTEND → USUARIO -->
+          <line x1="190" y1="175" x2="152" y2="175" stroke="#111" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+
+          <!-- leyenda -->
+          <line x1="40" y1="318" x2="70" y2="318" stroke="#111" stroke-width="2.5"/>
+          <text x="76" y="322" font-family="JetBrains Mono" font-size="8" fill="#33312c">flujo petición</text>
+          <line x1="160" y1="318" x2="190" y2="318" stroke="#111" stroke-width="1.5" stroke-dasharray="4,3"/>
+          <text x="196" y="322" font-family="JetBrains Mono" font-size="8" fill="#33312c">flujo respuesta</text>
+        </svg>
+      </div>
+
+      <div class="decision">
+        <div class="lab">Invariante arquitectónico — vision-global.md §1</div>
+        Tres procesos independientes: Frontend (React+Vite) ↔ Backend (Node+Express+Socket.io) ↔ Agente IA (Python+FastAPI). Comunicación siempre por HTTP/WS. <b>Nunca <code>child_process</code> Node→Python ni fusión de capas.</b>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section id="capas-detalle">
+      <div class="sec-head">
+        <div class="badge">&#9632;</div>
+        <div>
+          <h2>Responsabilidades por capa</h2>
+          <div class="sec-sub">lo que cada proceso hace — y lo que nunca puede hacer</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Frontend</h3>
+        <table>
+          <thead>
+            <tr><th>Aspecto</th><th>Detalle</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><b>Stack</b></td><td>React 19 · Vite 8 · React Flow 12 · TypeScript estricto</td></tr>
+            <tr><td><b>UI de diagramas</b></td><td>Nodos y aristas como modelo de datos tipado en React Flow. Sin Mermaid (pipeline unidireccional, sin modelo editable).</td></tr>
+            <tr><td><b>Validación en borde</b></td><td>Schemas Zod en <code>frontend/src/types.ts</code>: <code>diagramSchema</code>, <code>diagramImportSchema</code> (integridad referencial), tipos TS derivados con <code>z.infer</code>.</td></tr>
+            <tr><td><b>Comunicación</b></td><td>Solo habla con el backend vía Socket.io. <b>Nunca accede a Supabase directamente</b> — el backend es el único punto de acceso a datos.</td></tr>
+            <tr><td><b>Eventos emitidos</b></td><td><code>message:send</code> · <code>message:regenerate</code> · <code>message:refine</code> · <code>message:clarification_answer</code> · <code>auth:refresh</code></td></tr>
+            <tr><td><b>Eventos recibidos</b></td><td><code>diagram:done</code> · <code>diagram:error</code> · <code>tool_call</code> · <code>tool_result</code> · <code>clarification</code></td></tr>
+          </tbody>
+        </table>
+        <div class="caveat">
+          <div class="lab">Por qué no Next.js</div>
+          SSR rompe la Canvas API y el modelo de nodos/aristas de React Flow, que requiere entorno de cliente. Decisión cerrada; no se revisita.
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Backend — backend/src/</h3>
+        <table>
+          <thead>
+            <tr><th>Aspecto</th><th>Detalle</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><b>Stack</b></td><td>Node.js 22 · Express 5 · Socket.io</td></tr>
+            <tr><td><b>Archivo de entrada</b></td><td><code>backend/src/index.ts</code> — arranca Express en <code>:3001</code>, instancia <code>socket.io</code>, monta <code>/diagrams</code> (CRUD) y llama a <code>attachAgentHandlers(io)</code>.</td></tr>
+            <tr><td><b>Handlers de socket</b></td><td><code>backend/src/socketHandlers.ts</code> — autenticación de handshake (JWT Supabase), frescura de token por socket (<code>tokenExp</code>), rate limit por identidad (<code>userId</code> o IP), caché de generaciones, reenvío de eventos del agente al cliente.</td></tr>
+            <tr><td><b>Control de admisión</b></td><td>Rate limiter en <code>rateLimit.ts</code>, caché global en <code>cache.ts</code>. <b>Estos módulos viven en el backend</b>, no en el agente: el agente queda solo con lógica de IA.</td></tr>
+            <tr><td><b>Persistencia</b></td><td>CRUD REST en <code>/diagrams</code> (<code>diagrams.ts</code>). El JWT del usuario se reenvía a Supabase para respetar RLS (<code>auth.uid()</code>). <code>service_role</code> solo para la caché global (<code>generation_cache</code>).</td></tr>
+            <tr><td><b>Streaming</b></td><td><code>agentStream.ts</code> — consume el NDJSON del agente vía HTTP y retransmite cada evento JSON al socket del cliente.</td></tr>
+          </tbody>
+        </table>
+        <div class="caveat">
+          <div class="lab">Antipatrón prohibido</div>
+          El backend nunca contiene lógica del agente: no clasifica diagramas, no valida semántica, no orquesta tools. Rate limit y caché son <em>control de admisión</em>, no razonamiento de IA.
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Agente IA — agent/</h3>
+        <table>
+          <thead>
+            <tr><th>Aspecto</th><th>Detalle</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><b>Stack</b></td><td>Python 3.12 · FastAPI · LangGraph · LangChain · Pydantic</td></tr>
+            <tr><td><b>Punto de entrada</b></td><td><code>agent/main.py</code> — servidor FastAPI en <code>:8000</code> con tres endpoints: <code>POST /generate/stream</code>, <code>POST /refine/stream</code>, <code>POST /refine/resume</code>. También <code>GET /health</code>.</td></tr>
+            <tr><td><b>Generación</b></td><td><code>/generate/stream</code> corre el grafo LangGraph de generación y devuelve NDJSON. El resultado pasa por <code>classify_outcome</code> (<code>outcome.py</code>): tres clases de error + <code>done</code>. Parámetro opcional <code>diagram_type</code> para tipo preseleccionado.</td></tr>
+            <tr><td><b>Refinamiento</b></td><td><code>/refine/stream</code> construye un <code>DiagramWorkspace</code> desde el diagrama compacto enviado por el backend y corre el loop ReAct con <code>build_agent_graph</code>. Streaming con <code>astream(stream_mode="updates")</code>.</td></tr>
+            <tr><td><b>Clarificaciones</b></td><td><code>/refine/resume</code> reanuda el grafo pausado por <code>interrupt()</code> usando <code>Command(resume=answer)</code> y el <code>InMemorySaver</code> (estado entre peticiones: excepción consciente al stateless, con migración a Postgres pendiente).</td></tr>
+            <tr><td><b>LLM profile</b></td><td>Variable <code>LLM_PROFILE</code> en <code>agent/.env</code>: <code>local</code> → Ollama <code>qwen3:1.7b</code>/<code>qwen3:8b</code> · <code>openai</code> → <code>gpt-4o-mini</code>/<code>gpt-4o</code> · <code>anthropic</code> → Claude. Imports lazy por perfil.</td></tr>
+            <tr><td><b>Schema-first</b></td><td>Todo lo que cruza un proceso pasa por Pydantic: <code>GenerateRequest</code>, <code>RefineRequest</code>, <code>ResumeRequest</code>, <code>DiagramNode</code>, <code>DiagramSchema</code>, <code>CompactDiagram</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>Supabase — única base de datos</h3>
+        <p>PostgreSQL 16. <b>Solo accesible desde el backend</b>, nunca desde el frontend directamente. Dos patrones de acceso:</p>
+        <ul class="clean">
+          <li><b>Diagramas de usuario</b> (<code>diagrams</code>): cliente Supabase por petición con el JWT del usuario — <code>auth.uid()</code> impone la propiedad vía RLS.</li>
+          <li><b>Caché de generaciones</b> (<code>generation_cache</code>): <code>service_role</code> del backend — RLS activa pero sin políticas, solo el backend puede leer/escribir.</li>
+        </ul>
+        <div class="decision">
+          <div class="lab">Por qué no NoSQL</div>
+          Nodos y aristas necesitan constraints relacionales (integridad referencial, RLS por usuario). Un documento sin esquema no puede expresar esas garantías.
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section id="flujo-e2e">
+      <div class="sec-head">
+        <div class="badge">&#9654;</div>
+        <div>
+          <h2>Flujo E2E: prompt → diagrama</h2>
+          <div class="sec-sub">secuencia completa de una generación desde el navegador hasta el canvas</div>
+        </div>
+      </div>
+
+      <!-- DIAGRAMA DE SECUENCIA -->
+      <div class="card" style="padding:32px 16px;overflow-x:auto;">
+        <svg viewBox="0 0 760 560" width="100%" style="min-width:580px;display:block;">
+          <defs>
+            <marker id="sarr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0,8 3,0 6" fill="#111"/>
+            </marker>
+            <marker id="sarr-d" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0,8 3,0 6" fill="#75716a"/>
+            </marker>
+          </defs>
+
+          <!-- ── Cabeceras actores ── -->
+          <!-- USUARIO -->
+          <rect x="44" y="24" width="90" height="36" rx="4" fill="#111"/>
+          <rect x="40" y="20" width="90" height="36" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+          <text x="85" y="42" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="#111">USUARIO</text>
+
+          <!-- FRONTEND -->
+          <rect x="184" y="24" width="100" height="36" rx="4" fill="#111"/>
+          <rect x="180" y="20" width="100" height="36" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+          <text x="230" y="42" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="#111">FRONTEND</text>
+
+          <!-- GATEWAY -->
+          <rect x="344" y="24" width="100" height="36" rx="4" fill="#111"/>
+          <rect x="340" y="20" width="100" height="36" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+          <text x="390" y="42" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="#111">BACKEND</text>
+
+          <!-- AGENTE -->
+          <rect x="504" y="24" width="100" height="36" rx="4" fill="#111"/>
+          <rect x="500" y="20" width="100" height="36" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="550" y="42" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="#111">AGENTE IA</text>
+
+          <!-- SUPABASE -->
+          <rect x="664" y="24" width="84" height="36" rx="4" fill="#111"/>
+          <rect x="660" y="20" width="84" height="36" rx="4" fill="#f3eee4" stroke="#111" stroke-width="3"/>
+          <text x="702" y="42" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="#111">SUPABASE</text>
+
+          <!-- líneas de vida -->
+          <line x1="85"  y1="56" x2="85"  y2="548" stroke="#e2dccf" stroke-width="1.5" stroke-dasharray="4,3"/>
+          <line x1="230" y1="56" x2="230" y2="548" stroke="#e2dccf" stroke-width="1.5" stroke-dasharray="4,3"/>
+          <line x1="390" y1="56" x2="390" y2="548" stroke="#e2dccf" stroke-width="1.5" stroke-dasharray="4,3"/>
+          <line x1="550" y1="56" x2="550" y2="548" stroke="#e2dccf" stroke-width="1.5" stroke-dasharray="4,3"/>
+          <line x1="702" y1="56" x2="702" y2="548" stroke="#e2dccf" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+          <!-- ── Mensajes ── -->
+
+          <!-- 1. Usuario escribe prompt -->
+          <line x1="85" y1="86" x2="225" y2="86" stroke="#111" stroke-width="2" marker-end="url(#sarr)"/>
+          <text x="155" y="80" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#111">escribe prompt</text>
+
+          <!-- 2. Frontend emite message:send via WS -->
+          <line x1="230" y1="110" x2="385" y2="110" stroke="#111" stroke-width="2" marker-end="url(#sarr)"/>
+          <text x="308" y="104" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#111">WS: message:send</text>
+
+          <!-- 3. Gateway: assertFreshToken + checkRateLimit -->
+          <rect x="350" y="120" width="80" height="26" rx="3" fill="#fff3e0" stroke="#111" stroke-width="1.5"/>
+          <text x="390" y="134" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">assertFreshToken</text>
+          <text x="390" y="144" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">checkRateLimit</text>
+
+          <!-- 4. Gateway: lookup caché -->
+          <line x1="390" y1="154" x2="697" y2="154" stroke="#111" stroke-width="2" marker-end="url(#sarr)"/>
+          <text x="544" y="148" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#111">getCached(prompt)</text>
+
+          <!-- 4b. caché miss -->
+          <line x1="697" y1="170" x2="395" y2="170" stroke="#75716a" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#sarr-d)"/>
+          <text x="544" y="165" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">MISS → continúa</text>
+
+          <!-- 5. Gateway → Agente HTTP POST -->
+          <line x1="390" y1="192" x2="545" y2="192" stroke="#111" stroke-width="2" marker-end="url(#sarr)"/>
+          <text x="468" y="186" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#111">POST /generate/stream</text>
+
+          <!-- 6. Agente: LangGraph generación -->
+          <rect x="510" y="202" width="80" height="44" rx="3" fill="#d8f3e1" stroke="#111" stroke-width="1.5"/>
+          <text x="550" y="218" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">build_graph()</text>
+          <text x="550" y="230" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">LLM calls</text>
+          <text x="550" y="242" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">Pydantic validate</text>
+
+          <!-- 7. Agente → Gateway NDJSON stream -->
+          <line x1="510" y1="256" x2="395" y2="256" stroke="#111" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#sarr)"/>
+          <text x="452" y="250" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#111">NDJSON stream</text>
+
+          <!-- 8. agentStream.ts retransmite al socket -->
+          <rect x="350" y="265" width="80" height="18" rx="3" fill="#ffe7d6" stroke="#111" stroke-width="1.5"/>
+          <text x="390" y="278" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">agentStream.ts</text>
+
+          <!-- 9. Gateway → Frontend: intermediate events -->
+          <line x1="350" y1="292" x2="235" y2="292" stroke="#111" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#sarr)"/>
+          <text x="293" y="286" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">node:add / node:update</text>
+
+          <!-- 10. Gateway → Frontend: diagram:done -->
+          <line x1="350" y1="320" x2="235" y2="320" stroke="#111" stroke-width="2" marker-end="url(#sarr)"/>
+          <text x="293" y="314" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#111">WS: diagram:done</text>
+
+          <!-- 10b. classify_outcome callback: setCached -->
+          <line x1="390" y1="336" x2="697" y2="336" stroke="#75716a" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#sarr-d)"/>
+          <text x="544" y="330" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">setCached (si no degradado)</text>
+
+          <!-- 11. Frontend actualiza canvas -->
+          <rect x="190" y="348" width="80" height="26" rx="3" fill="#dbe6ff" stroke="#111" stroke-width="1.5"/>
+          <text x="230" y="360" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">React Flow</text>
+          <text x="230" y="372" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#111">actualiza canvas</text>
+
+          <!-- 12. Frontend notifica al usuario -->
+          <line x1="190" y1="384" x2="90" y2="384" stroke="#111" stroke-width="2" marker-end="url(#sarr)"/>
+          <text x="140" y="378" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#111">diagrama visible</text>
+
+          <!-- separador caché HIT -->
+          <line x1="40" y1="408" x2="730" y2="408" stroke="#e2dccf" stroke-width="1" stroke-dasharray="2,4"/>
+          <text x="400" y="424" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">CACHÉ HIT — ruta corta (misma petición ya cacheada)</text>
+
+          <!-- Cache HIT: Gateway → Frontend -->
+          <line x1="350" y1="440" x2="235" y2="440" stroke="#ff5c00" stroke-width="2" marker-end="url(#sarr)"/>
+          <text x="293" y="434" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#ff5c00">diagram:done (cache)</text>
+
+          <!-- anotación sin llamar al agente -->
+          <rect x="500" y="432" width="130" height="22" rx="3" fill="#ffe7d6" stroke="#ff5c00" stroke-width="1.5"/>
+          <text x="565" y="447" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#b83f00">agente no se invoca</text>
+
+          <!-- notas al pie -->
+          <text x="40" y="530" font-family="JetBrains Mono" font-size="7.5" fill="#75716a">Fuentes: backend/src/socketHandlers.ts · backend/src/agentStream.ts · agent/main.py</text>
+        </svg>
+      </div>
+
+      <h3>Eventos Socket.io en detalle</h3>
+      <div class="card">
+        <table>
+          <thead>
+            <tr><th>Evento</th><th>Dirección</th><th>Cuándo se emite</th><th>Payload clave</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>message:send</code></td>
+              <td><span class="tag t-blue">FE → GW</span></td>
+              <td>Usuario envía prompt de generación</td>
+              <td><code>{ prompt, diagram_type? }</code></td>
+            </tr>
+            <tr>
+              <td><code>message:regenerate</code></td>
+              <td><span class="tag t-blue">FE → GW</span></td>
+              <td>Usuario pulsa "Regenerar" (salta caché)</td>
+              <td><code>{ prompt, diagram_type? }</code></td>
+            </tr>
+            <tr>
+              <td><code>message:refine</code></td>
+              <td><span class="tag t-blue">FE → GW</span></td>
+              <td>Usuario pide modificar el diagrama existente</td>
+              <td><code>{ prompt, diagram: CompactDiagram }</code></td>
+            </tr>
+            <tr>
+              <td><code>message:clarification_answer</code></td>
+              <td><span class="tag t-blue">FE → GW</span></td>
+              <td>Usuario responde una pregunta de clarificación</td>
+              <td><code>{ thread_id, answer }</code></td>
+            </tr>
+            <tr>
+              <td><code>auth:refresh</code></td>
+              <td><span class="tag t-blue">FE → GW</span></td>
+              <td>Supabase renueva el JWT (<code>TOKEN_REFRESHED</code>)</td>
+              <td>token JWT nuevo</td>
+            </tr>
+            <tr>
+              <td><code>diagram:done</code></td>
+              <td><span class="tag t-green">GW → FE</span></td>
+              <td>Agente termina; snapshot completo del diagrama</td>
+              <td><code>{ title, diagram, degraded, degradations, refinement_history }</code></td>
+            </tr>
+            <tr>
+              <td><code>diagram:error</code></td>
+              <td><span class="tag t-green">GW → FE</span></td>
+              <td>Error del agente o rate limit</td>
+              <td><code>{ error, category }</code></td>
+            </tr>
+            <tr>
+              <td><code>tool_call</code> / <code>tool_result</code></td>
+              <td><span class="tag t-green">GW → FE</span></td>
+              <td>Durante refinamiento: cada tool del loop ReAct</td>
+              <td>delta del canvas (nodo/arista añadida/modificada)</td>
+            </tr>
+            <tr>
+              <td><code>clarification</code></td>
+              <td><span class="tag t-green">GW → FE</span></td>
+              <td>Agente pausado con <code>interrupt()</code></td>
+              <td><code>{ thread_id, question, options }</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section id="por-que-separados">
+      <div class="sec-head">
+        <div class="badge">&#9670;</div>
+        <div>
+          <h2>Por qué nunca se fusionan</h2>
+          <div class="sec-sub">razones técnicas y de diseño que cierran la discusión</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Tabla de incompatibilidades</h3>
+        <table>
+          <thead>
+            <tr><th>Fusión hipotética</th><th>Por qué rompe</th><th>Decisión cerrada</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Frontend + Backend</b></td>
+              <td>SSR (Next.js) rompe Canvas API y React Flow (requieren DOM de cliente). Un bundle único acoplaría los ciclos de despliegue.</td>
+              <td>React + Vite (no Next.js)</td>
+            </tr>
+            <tr>
+              <td><b>Backend + Agente</b></td>
+              <td><code>child_process</code> Node→Python bloquea el event loop y oculta errores. La interfaz HTTP fuerza contratos explícitos (Pydantic / TypeScript) y permite escalar el agente de forma independiente.</td>
+              <td>Agente en Python separado</td>
+            </tr>
+            <tr>
+              <td><b>Agente embebido en Frontend</b></td>
+              <td>Expone el LLM_PROFILE, las claves de API y los prompts al cliente. Imposible en un navegador sin servidor.</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><b>Frontend → Supabase directo</b></td>
+              <td>Acoplamiento directo del cliente al esquema de BD; imposible centralizar auth, RLS ni caché. El backend es el único punto de entrada.</td>
+              <td>Backend único punto de acceso a datos</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>Principio de responsabilidad única por proceso</h3>
+        <p>Cada proceso tiene una única razón de cambio:</p>
+        <ul class="clean">
+          <li><b>Frontend</b> — cambia cuando cambia la UX (canvas, panel de chat, imports/exports). No depende de qué LLM se usa.</li>
+          <li><b>Backend</b> — cambia cuando cambia la política de acceso (auth, rate limit, caché) o el contrato de persistencia. No conoce la lógica del grafo LangGraph.</li>
+          <li><b>Agente IA</b> — cambia cuando cambia la lógica de generación, el prompt, el modelo o la topología del grafo. No conoce si el cliente usa WebSocket o REST.</li>
+        </ul>
+        <div class="decision">
+          <div class="lab">Principio — vision-global.md §2</div>
+          <b>Vertical E2E sobre horizontal</b>: cada sprint atraviesa las tres capas con un caso mínimo, en vez de completar una capa entera. La separación hace posible iterar en paralelo.
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Antipatrones activamente bloqueados en revisión</h3>
+        <div class="caveat">
+          <div class="lab">Bloquear en code review</div>
+          <ul class="clean" style="margin-bottom:0">
+            <li><code>child_process</code> Node → Python (cualquier forma)</li>
+            <li>Next.js / cualquier SSR que ejecute código React en servidor</li>
+            <li>Mermaid como pipeline editable (unidireccional, sin modelo de datos)</li>
+            <li>NoSQL para nodos/aristas (sin constraints relacionales)</li>
+            <li>LLM devolviendo strings sin schema (sin Pydantic/Zod en el borde)</li>
+            <li>Lógica del agente en el backend (clasificar, validar diagramas, orquestar tools)</li>
+            <li>Estado de diagrama duplicado entre frontend y backend sin fuente de verdad</li>
+            <li><code>any</code> en TypeScript · <code>dict</code> sin tipar en Python en código que cruza procesos</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section id="contratos">
+      <div class="sec-head">
+        <div class="badge">&#9638;</div>
+        <div>
+          <h2>Contratos entre procesos</h2>
+          <div class="sec-sub">schema-first — todo lo que cruza un proceso tiene schema explícito</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="def">
+          Todo lo que cruza un proceso pasa por un esquema. Pydantic en el agente, tipos TS derivados de Zod en backend/frontend. El schema es la fuente de verdad del contrato. — <em>vision-global.md §1.4</em>
+        </div>
+        <h3>Schemas por frontera</h3>
+        <table>
+          <thead>
+            <tr><th>Frontera</th><th>Schema de entrada</th><th>Schema de salida</th><th>Dónde se define</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>FE → GW (WS emit)</td>
+              <td><code>parseGenerationPayload()</code></td>
+              <td>—</td>
+              <td><code>backend/src/socketHandlers.ts</code></td>
+            </tr>
+            <tr>
+              <td>GW → Agente (HTTP body)</td>
+              <td><code>GenerateRequest</code> / <code>RefineRequest</code> / <code>ResumeRequest</code> (Pydantic)</td>
+              <td>NDJSON <code>{ _type, ... }</code></td>
+              <td><code>agent/main.py</code></td>
+            </tr>
+            <tr>
+              <td>GW → FE (WS emit)</td>
+              <td>—</td>
+              <td><code>diagram:done</code> payload</td>
+              <td><code>backend/src/agentStream.ts</code></td>
+            </tr>
+            <tr>
+              <td>FE: import de fichero</td>
+              <td><code>diagramImportSchema</code> (Zod + refine referencial)</td>
+              <td>—</td>
+              <td><code>frontend/src/types.ts</code></td>
+            </tr>
+            <tr>
+              <td>Agente interno (diagrama)</td>
+              <td><code>DiagramNode</code> / <code>DiagramSchema</code> (Pydantic)</td>
+              <td><code>CompactDiagram</code></td>
+              <td><code>agent/schemas.py</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>Perfiles LLM y enrutamiento</h3>
+        <table>
+          <thead>
+            <tr><th>LLM_PROFILE</th><th>Modelo fast</th><th>Modelo capable</th><th>Abstracción</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag t-warn">local</span> (default)</td>
+              <td>Ollama <code>qwen3:1.7b</code></td>
+              <td>Ollama <code>qwen3:8b</code></td>
+              <td><code>ChatOllama</code> (LangChain)</td>
+            </tr>
+            <tr>
+              <td><span class="tag t-blue">openai</span></td>
+              <td><code>gpt-4o-mini</code></td>
+              <td><code>gpt-4o</code></td>
+              <td><code>ChatOpenAI</code> (LangChain)</td>
+            </tr>
+            <tr>
+              <td><span class="tag t-green">anthropic</span></td>
+              <td colspan="2">Claude (Anthropic API)</td>
+              <td><code>ChatAnthropic</code> (LangChain)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="font-size:13.5px;color:var(--muted);margin-top:12px;">
+          Los tres perfiles comparten el mismo eje de routing. La generación usa <code>call_llm</code>/<code>stream_llm</code> (HTTP crudo con <code>httpx</code>, texto libre parseado con <code>ijson</code>). El agente ReAct usa <code>get_chat_model</code> con <code>bind_tools()</code> (exige <code>BaseChatModel</code>). Imports lazy por perfil para no acoplar el arranque del módulo a librerías no instaladas.
+        </p>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <section id="referencias">
+      <div class="sec-head">
+        <div class="badge">&#128270;</div>
+        <div>
+          <h2>Referencias al código</h2>
+          <div class="sec-sub">archivos fuente consultados para esta página</div>
+        </div>
+      </div>
+      <div class="card">
+        <details>
+          <summary class="src-toggle">Ver fuentes</summary>
+          <ul class="src-list">
+            <li><code>usc-mydiagram/backend/src/index.ts</code> — arranque Express + Socket.io, montaje de <code>attachAgentHandlers</code></li>
+            <li><code>usc-mydiagram/backend/src/socketHandlers.ts</code> — handshake auth, rate limit, caché, eventos WS, <code>streamAgentToSocket</code></li>
+            <li><code>usc-mydiagram/agent/main.py</code> — FastAPI, endpoints <code>/generate/stream</code>, <code>/refine/stream</code>, <code>/refine/resume</code>, checkpointer, <code>classify_outcome</code></li>
+            <li><code>docs/vision-global.md §1</code> — invariantes arquitectónicas (tres procesos, schema-first, LLM con tools)</li>
+            <li><code>CLAUDE.md §Arquitectura</code> — tabla de stacks, antipatrones, LLM_PROFILE</li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#">&#8593; Volver arriba</a>
+    </section>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Documentación generada del código fuente del proyecto.</p>
+    </div>
+  </div>
+  </main>
+</div>
+</body>
+</html>

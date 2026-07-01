@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Despliegue · MydIAgram</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+<style>
+  pre.term{background:var(--code-bg);border:2px solid var(--ink);border-radius:var(--radius);
+    padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65;
+    box-shadow:3px 3px 0 0 var(--ink);margin:12px 0;color:var(--ink)}
+  pre.term .c{color:var(--muted)}
+  pre.term b{color:var(--accent-ink);font-weight:600}
+  .step-n{display:inline-grid;place-items:center;width:26px;height:26px;flex:0 0 26px;
+    background:var(--ink);color:#fff;border-radius:var(--radius);font-family:var(--mono);
+    font-size:13px;font-weight:600;margin-right:10px}
+  .env-name{white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación técnica del proyecto</p>
+    <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a class="active" href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main>
+  <div class="content">
+
+    <header class="hero">
+      <div class="eyebrow">Sistema · Operación</div>
+      <h1>Despliegue</h1>
+      <p class="lede">Cómo se levanta MydIAgram. Los tres procesos son artefactos desplegables por
+      separado que se comunican por HTTP y WebSocket; ninguno invoca a otro dentro del mismo runtime.
+      Hay dos caminos: arranque en desarrollo (tres procesos a mano) y Docker Compose (un contenedor
+      por proceso). La base de datos vive en Supabase.</p>
+    </header>
+
+    <!-- ============ TOPOLOGÍA ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9881;</span>
+        <div><h2>Topología</h2><p class="sec-sub">Un contenedor por proceso; la base de datos es externa</p></div>
+      </div>
+      <div class="card" style="padding:30px;overflow-x:auto">
+        <svg viewBox="0 0 820 300" width="100%" style="max-width:820px;display:block;margin:0 auto">
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#111"/>
+            </marker>
+          </defs>
+          <!-- browser -->
+          <rect x="14" y="118" width="120" height="60" rx="4" fill="#111"/>
+          <rect x="10" y="114" width="120" height="60" rx="4" fill="#fff" stroke="#111" stroke-width="3"/>
+          <text x="70" y="140" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">NAVEGADOR</text>
+          <text x="70" y="157" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">del usuario</text>
+
+          <!-- compose boundary -->
+          <rect x="180" y="24" width="450" height="252" rx="6" fill="none" stroke="#75716a" stroke-width="2" stroke-dasharray="7 4"/>
+          <text x="196" y="44" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#75716a">DOCKER COMPOSE</text>
+
+          <!-- frontend -->
+          <rect x="208" y="60" width="180" height="64" rx="4" fill="#111"/>
+          <rect x="204" y="56" width="180" height="64" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+          <text x="294" y="82" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">frontend · nginx</text>
+          <text x="294" y="100" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">React 19 · estáticos</text>
+          <text x="294" y="114" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#b83f00">:8080 → :80</text>
+
+          <!-- backend -->
+          <rect x="208" y="150" width="180" height="64" rx="4" fill="#111"/>
+          <rect x="204" y="146" width="180" height="64" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+          <text x="294" y="172" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">backend · gateway</text>
+          <text x="294" y="190" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">Node 22 · Socket.io</text>
+          <text x="294" y="204" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#b83f00">:3001 (público)</text>
+
+          <!-- agent -->
+          <rect x="446" y="150" width="164" height="64" rx="4" fill="#111"/>
+          <rect x="442" y="146" width="164" height="64" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="524" y="172" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">agent · FastAPI</text>
+          <text x="524" y="190" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">Python · LangGraph</text>
+          <text x="524" y="204" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">:8000 (interno)</text>
+
+          <!-- supabase cloud -->
+          <rect x="668" y="118" width="138" height="60" rx="4" fill="#111"/>
+          <rect x="664" y="114" width="138" height="60" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+          <text x="733" y="140" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">SUPABASE</text>
+          <text x="733" y="157" text-anchor="middle" font-family="Space Grotesk" font-size="10.5" fill="#33312c">PostgreSQL · cloud</text>
+
+          <!-- browser -> frontend (static) -->
+          <line x1="130" y1="132" x2="200" y2="98" stroke="#75716a" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+          <text x="150" y="106" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">estáticos</text>
+          <!-- browser -> backend (WS) -->
+          <line x1="130" y1="158" x2="200" y2="180" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="150" y="196" font-family="JetBrains Mono" font-size="9" fill="#111">WS :3001</text>
+          <!-- backend -> agent -->
+          <line x1="388" y1="182" x2="438" y2="182" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="413" y="174" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#111">HTTP</text>
+          <!-- backend -> supabase -->
+          <line x1="388" y1="168" x2="662" y2="150" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+          <text x="520" y="150" font-family="JetBrains Mono" font-size="8.5" fill="#111">service_role</text>
+          <!-- browser -> supabase (auth) -->
+          <path d="M100,114 Q120,40 664,132" stroke="#75716a" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+          <text x="380" y="40" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">Auth (Google OAuth)</text>
+        </svg>
+      </div>
+      <p style="font-size:13.5px;color:var(--muted)">El agente solo publica su puerto en la red interna
+      de Compose (<code>expose</code>, no <code>ports</code>): nunca es alcanzable desde el navegador. El
+      backend lo localiza por el DNS de servicios (<code>AGENT_BASE_URL: http://agent:8000</code>). Supabase
+      no se contineriza; se apunta por variables de entorno.</p>
+    </section>
+
+    <!-- ============ PROCESOS Y PUERTOS ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9707;</span>
+        <div><h2>Procesos y puertos</h2><p class="sec-sub">Puertos por defecto en desarrollo y en Docker</p></div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Proceso</th><th>Stack</th><th>Puerto dev</th><th>Puerto Docker</th><th>Función</th></tr></thead>
+          <tbody>
+            <tr><td><b>Frontend</b></td><td>React 19 + Vite 8 + React Flow 12</td><td>5173</td><td>8080 → 80 (nginx)</td><td>Lienzo editable y panel de instrucciones en lenguaje natural</td></tr>
+            <tr><td><b>Backend</b></td><td>Node.js 22 + Express 5 + Socket.io</td><td>3001</td><td>3001</td><td>Puerta de acceso a datos: auth, límite de tasa, caché y proxy al agente</td></tr>
+            <tr><td><b>Agente IA</b></td><td>Python 3.12 + FastAPI + LangGraph</td><td>8000</td><td>8000 (solo interno)</td><td>Generación y refinamiento del diagrama; llamadas al LLM</td></tr>
+            <tr><td><b>Base de datos</b></td><td>Supabase (PostgreSQL 16)</td><td>54321 (CLI local)</td><td>cloud (externo)</td><td>Persistencia de diagramas, historial, configuración y caché</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ ARRANQUE EN DESARROLLO ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9654;</span>
+        <div><h2>Arranque en desarrollo</h2><p class="sec-sub">Base de datos local + tres procesos a mano</p></div>
+      </div>
+
+      <h3><span class="step-n">1</span>Base de datos local con la CLI de Supabase</h3>
+      <p>Arranca el stack local de Supabase y aplica todas las migraciones de <code>supabase/migrations/</code>
+      (esquema, RLS, caché y versiones):</p>
+      <pre class="term"><b>supabase</b> start
+<b>supabase</b> db reset   <span class="c"># aplica todas las migraciones</span></pre>
+      <p>Queda escuchando en <code>http://127.0.0.1:54321</code>.</p>
+
+      <h3><span class="step-n">2</span>Instalar dependencias</h3>
+      <pre class="term"><span class="c"># agente Python</span>
+cd agent &amp;&amp; pip install -r requirements.txt &amp;&amp; cd ..
+<span class="c"># backend y frontend</span>
+cd backend &amp;&amp; npm install &amp;&amp; cd ..
+cd frontend &amp;&amp; npm install &amp;&amp; cd ..</pre>
+      <p>Si vas a usar el perfil local, descarga el modelo de Ollama (ver <a href="#llm">perfiles de LLM</a>):</p>
+      <pre class="term"><b>ollama</b> pull qwen3:8b</pre>
+
+      <h3><span class="step-n">3</span>Levantar los tres procesos (una terminal cada uno)</h3>
+      <pre class="term"><span class="c"># terminal 1 — agente IA (:8000)</span>
+cd agent &amp;&amp; uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+<span class="c"># terminal 2 — backend / gateway (:3001)</span>
+cd backend &amp;&amp; npm run dev
+
+<span class="c"># terminal 3 — frontend (:5173)</span>
+cd frontend &amp;&amp; npm run dev</pre>
+      <div class="decision">
+        <span class="lab">Listo</span>
+        <p style="margin:0">La aplicación queda disponible en <code>http://localhost:5173</code>. El frontend
+        habla con el backend (<code>:3001</code>) por WebSocket, y el backend reenvía al agente
+        (<code>:8000</code>) por HTTP.</p>
+      </div>
+    </section>
+
+    <!-- ============ DOCKER COMPOSE ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9639;</span>
+        <div><h2>Docker Compose</h2><p class="sec-sub">Un servicio por proceso, contra Supabase cloud</p></div>
+      </div>
+      <p><code>docker-compose.yml</code> orquesta los tres procesos como servicios aislados. La base de datos
+      es Supabase en la nube (no se contineriza): se apunta por variables de entorno.</p>
+      <pre class="term"><span class="c"># 1) copia la plantilla y rellena las claves</span>
+cp .env.example .env
+<span class="c">#    rellena SUPABASE_*, VITE_* e INTERNAL_PROXY_SECRET,</span>
+<span class="c">#    y el perfil de LLM en agent/.env</span>
+
+<span class="c"># 2) construye y levanta</span>
+docker compose up --build</pre>
+      <div class="card">
+        <table>
+          <thead><tr><th>Servicio</th><th>Publicación</th><th>Notas</th></tr></thead>
+          <tbody>
+            <tr><td><b>agent</b></td><td><code>expose: 8000</code></td><td>Solo red interna de Compose; nunca se publica al host. Lee su perfil de LLM de <code>agent/.env</code>.</td></tr>
+            <tr><td><b>backend</b></td><td><code>ports: 3001:3001</code></td><td><code>depends_on: agent</code>. Alcanza al agente por DNS interno: <code>AGENT_BASE_URL: http://agent:8000</code>.</td></tr>
+            <tr><td><b>frontend</b></td><td><code>ports: 8080:80</code></td><td>Estáticos servidos por nginx. <code>depends_on: backend</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="caveat">
+        <span class="lab">Build-time</span>
+        <p style="margin:0">Las variables <code>VITE_*</code> se hornean en el bundle durante el <code>build</code>
+        del frontend (se pasan como <em>build args</em> en Compose), por lo que deben estar fijadas
+        <strong>antes</strong> de construir la imagen. Apuntan al backend tal y como lo ve el navegador, no la
+        red interna.</p>
+      </div>
+    </section>
+
+    <!-- ============ VARIABLES DE ENTORNO ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9638;</span>
+        <div><h2>Variables de entorno</h2><p class="sec-sub">.env de Compose y agent/.env</p></div>
+      </div>
+
+      <h3>Compose (raíz) · <code>.env.example</code></h3>
+      <div class="card">
+        <table>
+          <thead><tr><th>Variable</th><th>Para qué</th></tr></thead>
+          <tbody>
+            <tr><td class="env-name"><code>SUPABASE_URL</code></td><td>URL del proyecto Supabase (backend + frontend)</td></tr>
+            <tr><td class="env-name"><code>SUPABASE_ANON_KEY</code></td><td>Clave pública (cliente con RLS)</td></tr>
+            <tr><td class="env-name"><code>SUPABASE_SERVICE_ROLE_KEY</code></td><td>Clave privilegiada del backend (ignora RLS; caché global)</td></tr>
+            <tr><td class="env-name"><code>VITE_API_URL</code></td><td>URL del backend tal y como la ve el navegador</td></tr>
+            <tr><td class="env-name"><code>VITE_WS_URL</code></td><td>URL del canal WebSocket (por defecto, el mismo backend)</td></tr>
+            <tr><td class="env-name"><code>VITE_SUPABASE_URL</code> · <code>VITE_SUPABASE_ANON_KEY</code></td><td>Supabase desde el frontend (auth)</td></tr>
+            <tr><td class="env-name"><code>INTERNAL_PROXY_SECRET</code></td><td>Secreto compartido backend ↔ agente (proxy LLM interno)</td></tr>
+            <tr><td class="env-name"><code>RATE_LIMIT</code> · <code>RATE_LIMIT_WINDOW_SECONDS</code></td><td>Límite de tasa (opcionales; por defecto 5 / 60 s)</td></tr>
+            <tr><td class="env-name"><code>CACHE_TTL_DAYS</code></td><td>Caducidad de la caché de generaciones (opcional; por defecto 30)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Agente · <code>agent/.env</code></h3>
+      <div class="card">
+        <table>
+          <thead><tr><th>Variable</th><th>Para qué</th></tr></thead>
+          <tbody>
+            <tr><td class="env-name"><code>LLM_PROFILE</code></td><td>Perfil por defecto: <code>local</code> · <code>openai</code> · <code>anthropic</code> · <code>gemini</code></td></tr>
+            <tr><td class="env-name"><code>OLLAMA_URL</code></td><td>Endpoint de chat de Ollama (por defecto <code>http://localhost:11434/api/chat</code>)</td></tr>
+            <tr><td class="env-name"><code>OLLAMA_MODEL_FAST</code> · <code>OLLAMA_MODEL_CAPABLE</code></td><td>Modelos local para el rol rápido y el capaz</td></tr>
+            <tr><td class="env-name"><code>OPENAI_API_KEY</code></td><td>Credencial de OpenAI</td></tr>
+            <tr><td class="env-name"><code>OPENAI_MODEL_FAST</code> · <code>OPENAI_MODEL_CAPABLE</code></td><td>Modelos OpenAI (por defecto <code>gpt-4o-mini</code> / <code>gpt-4o</code>)</td></tr>
+            <tr><td class="env-name"><code>ANTHROPIC_API_KEY</code> · <code>GEMINI_API_KEY</code></td><td>Credenciales de los otros dos proveedores comerciales</td></tr>
+            <tr><td class="env-name"><code>GATEWAY_INTERNAL_URL</code></td><td>URL interna del backend para el proxy de navegador (transporte <code>browser</code>)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:13.5px;color:var(--muted)">Si el cliente envía un <code>llm_config</code> en la
+      petición (proveedor, modelos y clave elegidos por el usuario en la app), ese config tiene prioridad
+      sobre <code>LLM_PROFILE</code>.</p>
+    </section>
+
+    <!-- ============ PERFILES LLM ============ -->
+    <section id="llm">
+      <div class="sec-head">
+        <span class="badge">&#9673;</span>
+        <div><h2>Perfiles de LLM</h2><p class="sec-sub">Un motor por configuración, sin recompilar</p></div>
+      </div>
+      <p>El agente es agnóstico al proveedor: ambos perfiles exponen los mismos nombres lógicos
+      (<code>fast</code> y <code>capable</code>), así que el resto del código no cambia. Tras editar el perfil
+      basta reiniciar el microservicio.</p>
+      <div class="two-col" style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+        <div class="card">
+          <h3 style="margin-top:0">local — Ollama (por defecto)</h3>
+          <ul class="clean">
+            <li>Requiere Ollama en marcha y <code>OLLAMA_URL</code> apuntando a su endpoint de chat.</li>
+            <li>Ambos roles apuntan por defecto a <code>qwen3:8b</code>; <code>qwen3:1.7b</code> sirve para el rol rápido a costa de más fallos de formato.</li>
+            <li>La inferencia ocurre en la máquina del operador (o del usuario, en transporte de navegador). Sin coste por token.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">openai · anthropic · gemini</h3>
+          <ul class="clean">
+            <li>Requieren la clave del proveedor (<code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>).</li>
+            <li>Modelos por defecto en <code>agent/.env.example</code> (por ejemplo <code>gpt-4o-mini</code> / <code>gpt-4o</code>).</li>
+            <li>Más calidad y velocidad; la generación ocurre en los servidores del proveedor.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="caveat">
+        <span class="lab">Sin Structured Outputs</span>
+        <p style="margin:0">La generación llama al modelo con HTTP crudo (<code>httpx</code>), sin
+        <code>response_format</code>: el JSON se emite como texto libre, se parsea con <code>ijson</code> a
+        medida que llega y se valida con Pydantic más un bucle de reintento. La razón está en
+        <a href="modelo-datos.html">Modelo de datos</a> y el <a href="langgraph-generacion.html">grafo de generación</a>.</p>
+      </div>
+    </section>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Fuentes: <code>docker-compose.yml</code>, <code>.env.example</code>, <code>agent/.env.example</code>, <code>supabase/migrations/</code>.</p>
+    </div>
+
+  </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Layouts: cómo se dibuja cada diagrama</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body>
+<div class="shell">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación del proyecto</p>
+        <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a class="active" href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main>
+  <div class="content">
+
+    <header class="hero">
+      <div class="eyebrow">TFG · Frontend — Posicionamiento de diagramas</div>
+      <h1>Layouts: cómo se dibuja cada diagrama</h1>
+      <p class="lede">El agente decide <i>qué</i> hay en el diagrama; el navegador decide <i>dónde</i> va
+      cada cosa. Toda la posición se calcula en el frontend con una mezcla de una librería de grafos
+      (<b>dagre</b>) y varios algoritmos propios, uno por familia de diagrama. Esta página documenta las
+      tecnologías tal y como están <b>realmente aplicadas</b> en el código.</p>
+      <div class="meta-row">
+        <span class="pill"><b>dagre</b> · única librería de grafos</span>
+        <span class="pill"><b>5</b> algoritmos propios</span>
+        <span class="pill">Layout <b>100% en el cliente</b></span>
+        <span class="pill"><b>frontend/src/ui/utils/</b></span>
+      </div>
+    </header>
+
+    <!-- ============ EL REPARTO ============ -->
+    <section id="reparto">
+      <div class="sec-head">
+        <span class="badge">◑</span>
+        <div><h2>El reparto: estructura vs. posición</h2><p class="sec-sub">El LLM nunca devuelve coordenadas</p></div>
+      </div>
+      <div class="card">
+        <p class="def">El modelo de lenguaje produce <b>solo estructura</b> (nodos, aristas y sus tipos).
+        Las coordenadas se calculan íntegramente en el navegador cada vez que cambia el diagrama.</p>
+        <p>Antes de enviar el diagrama al agente, <code>diagramToJson.ts</code> <b>borra las posiciones</b>
+        de los nodos y la <code>data</code> de las aristas: el LLM razona sobre el grafo, no sobre la
+        geometría. Del lado Python no hay ninguna referencia a <code>position</code> — el agente es
+        agnóstico al dibujo. Esto mantiene el prompt compacto y evita que el modelo «invente» layouts.</p>
+        <p>En el frontend, un <b>despachador</b> central, <code>DiagramToFlow()</code> en
+        <code>diagramToFlow.ts</code>, mira el <code>diagram_type</code> y delega en el algoritmo adecuado.
+        No hay un único motor universal: cada tipo de diagrama tiene una geometría «natural» distinta y
+        forzarlos todos por el mismo algoritmo produce diagramas feos.</p>
+      </div>
+    </section>
+
+    <!-- ============ PERSISTENCIA ============ -->
+    <section id="persistencia">
+      <div class="sec-head">
+        <span class="badge">▥</span>
+        <div><h2>Qué se guarda en la base de datos y cuándo</h2><p class="sec-sub">Estructura siempre; coordenadas solo si las mueves a mano</p></div>
+      </div>
+      <div class="card">
+        <p class="def">La base de datos guarda el <b>modelo lógico</b> del diagrama y, encima, <b>solo las
+        coordenadas que has fijado a mano</b>. Las posiciones que calcula dagre (o un layout propio) son
+        <b>efímeras</b>: se recalculan en cada render y <b>nunca</b> se escriben en la base de datos.</p>
+
+        <h3>Qué se guarda: el campo <code>data</code></h3>
+        <p>Un diagrama vive en la tabla <code>diagrams</code>, cuyo campo <code>data</code> (JSON) es
+        literalmente el objeto del store (<code>currentDiagram</code>) serializado: <code>title</code>,
+        <code>diagram_type</code>, <code>nodes[]</code>, <code>edges[]</code> y, opcionalmente,
+        <code>group_layout</code> y <code>fragments</code>. Un <code>CHECK</code> de Postgres exige que
+        <code>data</code> tenga al menos <code>nodes</code> y <code>edges</code>.</p>
+        <p>La clave está en el nodo: <code>position: {x, y}</code> es <b>opcional</b> y aparece <b>solo si
+        arrastraste ese nodo</b>. Un nodo recién generado por el agente <b>no lleva</b> <code>position</code>
+        — su sitio lo calcula el navegador al pintarlo. Recuerda que <code>diagramToJson.ts</code>
+        <b>borra</b> las posiciones antes de enviar el diagrama al agente; es decir, las coordenadas son un
+        dato que solo conocen el frontend y la BD, nunca el LLM. Junto a las coordenadas se guardan los demás
+        ajustes visuales que tocas a mano: la geometría de los contenedores (<code>group_layout</code>) y los
+        <i>waypoints</i> y anclajes de las aristas (en <code>edge.data</code>).</p>
+
+        <div class="decision"><span class="lab">La asimetría que resuelve la duda</span>
+          Cuando el agente termina, el diagrama se guarda <b>sin coordenadas</b> (los nodos no tienen
+          <code>position</code>). Si lo cierras y lo reabres, dagre y los layouts propios <b>vuelven a colocar
+          todo desde cero</b> — podría incluso salir distinto si cambia el algoritmo. En el instante en que
+          arrastras un nodo, su <code>x/y</code> se <b>congela</b> dentro de <code>node.position</code> y a
+          partir de ahí <b>sobrevive a las recargas</b>. «Recalcular layout» hace lo contrario: borra esas
+          posiciones para que el algoritmo mande otra vez.</div>
+
+        <h3>Cuándo se guarda</h3>
+        <p>Todo pasa por <code>persistCurrentDiagram()</code>, una llamada <b>HTTP REST</b> contra el gateway
+        Express. El <b>WebSocket no escribe nunca</b> en la base de datos — solo transporta el streaming del
+        agente y, al terminar, dispara el guardado. La primera vez es un <code>POST /diagrams</code> (crea la
+        fila); a partir de ahí, <code>PATCH /diagrams/:id</code>.</p>
+        <table>
+          <thead><tr><th>Disparador</th><th>Cómo</th><th>Diario de versiones</th></tr></thead>
+          <tbody>
+            <tr><td><b>El agente termina</b> (generación o refinamiento)</td><td>Al cerrar el streaming, guardado <i>fire-and-forget</i></td><td>versión <code>generate</code> / <code>refine</code></td></tr>
+            <tr><td><b>Edición a mano</b> (arrastrar nodo, redimensionar grupo, editar atributo, crear o borrar arista)</td><td>Autosave con <b>debounce de 800 ms</b> que agrupa las ráfagas</td><td>versión <code>manual_edit</code></td></tr>
+            <tr><td><b>Importar</b> un diagrama</td><td><code>POST</code> (la fila aún no existe)</td><td>versión inicial</td></tr>
+            <tr><td><b>Renombrar</b> el diagrama</td><td><code>PATCH /diagrams/:id/rename</code> — toca solo el título</td><td><b>no</b> crea versión</td></tr>
+            <tr><td><b>Navegar</b> entre versiones (◀ ▶)</td><td>Solo memoria del store</td><td><b>no</b> persiste nada</td></tr>
+          </tbody>
+        </table>
+
+        <h3>El diario de versiones</h3>
+        <p>Cada guardado (salvo el rename) <b>añade un snapshot completo</b> del diagrama a la tabla
+        <code>diagram_versions</code> — no un <i>diff</i>, sino el JSON entero con sus coordenadas. Ese diario
+        es lo que permite navegar con ◀ ▶ y «volver a esta versión». Cada snapshot lleva un
+        <code>origin</code> (<code>generate</code>, <code>refine</code>, <code>manual_edit</code>,
+        <code>restore</code>): los autosaves de edición se navegan pero no figuran como hitos en la lista de
+        operaciones; los del agente sí. Renombrar es metadato, no un cambio estructural, así que no ensucia el
+        diario.</p>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>frontend/src/store/index.ts</code> → <code>schedulePersist</code> (debounce 800 ms), <code>updateNodePosition</code>, <code>relayout</code></li>
+            <li><code>frontend/src/lib/api.ts</code> → <code>persistCurrentDiagram</code> (POST/PATCH, cola en serie)</li>
+            <li><code>frontend/src/ui/utils/diagramToJson.ts</code> (stripea <code>position</code> antes de enviar al agente)</li>
+            <li><code>backend/src/diagrams.ts</code> → <code>POST/PATCH /diagrams</code> y <code>/rename</code>; tablas <code>diagrams</code> y <code>diagram_versions</code></li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <!-- ============ MAPA TECNOLOGÍA ============ -->
+    <section id="mapa">
+      <div class="sec-head">
+        <span class="badge">▦</span>
+        <div><h2>Una tecnología por tipo de diagrama</h2><p class="sec-sub">Qué motor mueve a cada familia</p></div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Tipo de diagrama</th><th>Tecnología</th><th>Fichero · función</th><th>Idea geométrica</th></tr></thead>
+          <tbody>
+            <tr><td><b>Flujo · ERD</b></td><td><span class="tag t-blue">dagre</span></td><td><code>diagramToFlow.ts</code> · <code>dagreLayout</code></td><td>Jerarquía por niveles (arriba→abajo)</td></tr>
+            <tr><td><b>Mapa mental</b></td><td><span class="tag t-warn">propio</span></td><td><code>mindmapLayout.ts</code></td><td>Árbol radial («sol con rayos»)</td></tr>
+            <tr><td><b>Arquitectura</b></td><td><span class="tag t-warn">propio</span></td><td><code>architectureLayout.ts</code></td><td>Rejilla de grupos contenedores</td></tr>
+            <tr><td><b>Secuencia</b></td><td><span class="tag t-warn">propio</span></td><td><code>sequenceLayout.ts</code></td><td>Carriles verticales (líneas de vida)</td></tr>
+            <tr><td><b>Casos de uso</b></td><td><span class="tag t-warn">propio</span></td><td><code>diagramToFlow.ts</code> · <code>useCaseLayout</code></td><td>Actores a los lados, casos en columnas</td></tr>
+          </tbody>
+        </table>
+        <p style="font-size:13px;color:var(--muted);margin:8px 0 0">
+          <span class="tag t-blue">azul</span> librería de grafos dagre ·
+          <span class="tag t-warn">naranja</span> algoritmo escrito a mano específico del tipo.
+          El enrutado de aristas (por dónde van las líneas) es una pieza <b>compartida</b> entre dagre,
+          arquitectura y casos de uso.</p>
+
+        <div class="caveat"><span class="lab">Nota de honestidad técnica</span>
+          El proyecto declara la dependencia <code>elkjs</code> (el motor ELK) y quedan comentarios
+          antiguos que lo daban por elegido para arquitectura. <b>En el código real, ELK no se importa ni
+          se ejecuta</b>: la única librería de grafos usada es dagre; el resto son algoritmos propios. El
+          diseño inicial proponía ELK con nodos anidados, pero la implementación aterrizó en una <b>rejilla
+          síncrona hecha a mano</b> (ver <a href="#arquitectura">Arquitectura</a>). Lo mismo con el plan de
+          un fichero de layout por tipo (<code>erdLayout.ts</code> y afines) con <code>rankdir</code>
+          distintos: en la práctica flujo y ERD comparten un único <code>dagreLayout</code> en
+          <code>TB</code>.</div>
+      </div>
+    </section>
+
+    <!-- ============ DAGRE ============ -->
+    <section id="dagre">
+      <div class="sec-head">
+        <span class="badge">◇</span>
+        <div><h2>dagre: el motor jerárquico</h2><p class="sec-sub">Flujo · ERD</p></div>
+      </div>
+      <div class="card">
+        <p class="def"><b>dagre</b> coloca grafos dirigidos por <i>niveles</i> (la misma familia que
+        Graphviz: dibujo por capas de Sugiyama). Le das nodos con un tamaño y aristas con dirección, y
+        reparte los nodos en filas (rangos) minimizando cruces y separándolos para que no se solapen.</p>
+        <p>Es lo que «antes se usaba para todo». Hoy se reserva para los diagramas genuinamente
+        jerárquicos, que comparten un único <code>dagreLayout</code>:</p>
+
+        <h3>Configuración real</h3>
+        <ul class="clean">
+          <li><b>Dirección</b> <code>rankdir:'TB'</code> — los niveles fluyen de arriba abajo. (No hay
+          variantes <code>LR</code>/<code>BT</code> por tipo: un único TB para los cuatro.)</li>
+          <li><b>Separación</b> entre nodos del mismo nivel <code>nodesep:120</code>, entre niveles
+          <code>ranksep:150</code>; márgenes del lienzo <code>marginx/y:40</code>.</li>
+          <li><b>Tamaño real de cada caja.</b> Una tabla ERD o una clase crecen con sus atributos, así que
+          no se le pasa a dagre un tamaño fijo: <code>estimateNodeSize(label, attributes)</code> estima
+          ancho y alto reales — ancho ≈ <code>nº caracteres del texto más largo × 7,3 px + relleno</code>
+          (monospace), alto ≈ <code>cabecera 40 + 16 + nº atributos × 22 px</code>. Sobrestima a propósito:
+          «mejor aire de más que solapamiento».</li>
+          <li><b>Hueco para etiquetas de arista.</b> Cada arista reserva el espacio de su texto
+          (<code>label.length × 7 + 24</code>, <code>labelpos:'c'</code>) para que dagre no lo pise.</li>
+          <li><b>Flujo:</b> pequeño caso especial — <code>centerSingleSide</code> centra los anclajes en
+          los rombos de decisión para que las ramas salgan limpias.</li>
+        </ul>
+        <p>dagre devuelve el <b>centro</b> de cada nodo; la app lo convierte a la esquina superior-izquierda
+        (<code>x = g.x − g.width/2</code>) que React Flow espera. El recorrido de las líneas no lo hace
+        dagre: se delega en el enrutado compartido.</p>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>frontend/src/ui/utils/diagramToFlow.ts</code> → <code>dagreLayout</code>, <code>estimateNodeSize</code></li>
+            <li>Librería: <code>@dagrejs/dagre ^3.0.0</code> (único motor de grafos importado)</li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <!-- ============ ARISTAS ============ -->
+    <section id="aristas">
+      <div class="sec-head">
+        <span class="badge">↳</span>
+        <div><h2>Enrutado de aristas</h2><p class="sec-sub">Común a dagre, arquitectura y casos de uso</p></div>
+      </div>
+      <div class="card">
+        <p>Una vez los nodos tienen posición, hay que decidir por dónde sale y entra cada línea y cómo la
+        rodea si hay nodos en medio. Lo resuelve una pieza compartida
+        (<code>computeDistributedAnchors</code> + el enrutado ortogonal) con tres reglas:</p>
+        <table>
+          <thead><tr><th>Regla</th><th>Cómo funciona</th></tr></thead>
+          <tbody>
+            <tr><td><b>Un solo eje por arista</b></td><td>Se elige si la línea es vertical u horizontal según cómo se solapen las dos cajas, y se asignan lados opuestos a origen y destino. Una línea recta cuando es posible; nada de «escaleras» absurdas.</td></tr>
+            <tr><td><b>Reparto anti-solape</b></td><td>Si varias aristas salen por el mismo lado de un nodo, se separan con una distancia mínima (<code>ANCHOR_MIN_SEP = 26 px</code>) y se mantienen lejos de las esquinas (<code>ANCHOR_PAD = 16 px</code>), al estilo draw.io / dbdiagram.</td></tr>
+            <tr><td><b>Esquivar obstáculos</b></td><td>Si la línea recta choca con otro nodo, un buscador de ruta <b>A*</b> (<code>orthogonalRoute.ts</code>) calcula puntos intermedios ortogonales que rodean las cajas. Los <i>contenedores</i> (sistema de casos de uso, grupos de arquitectura) se excluyen como obstáculos para que las líneas crucen su borde y lleguen a los hijos.</td></tr>
+          </tbody>
+        </table>
+        <p>El <b>aspecto</b> de cada arista (recta, curva, codo, color, punta) sale de una única fuente de
+        verdad por tipo de relación en <code>edgeDefaults.ts</code>: <code>include</code>/<code>extend</code>
+        discontinuas, herencia con triángulo hueco, llamadas de arquitectura sólidas, etc. Las aristas
+        dibujadas a mano infieren su estilo del <i>modo</i> de las existentes (<code>predictEdgeDefaults</code>).</p>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>diagramToFlow.ts</code> → <code>computeDistributedAnchors</code>, <code>buildFlowEdges</code>, <code>spreadAlong</code></li>
+            <li><code>orthogonalRoute.ts</code> (A* ortogonal) · <code>edgeDefaults.ts</code> (estilo por tipo)</li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <!-- ============ MINDMAP ============ -->
+    <section id="mindmap">
+      <div class="sec-head">
+        <span class="badge">✺</span>
+        <div><h2>Mindmap · árbol radial</h2><p class="sec-sub">Algoritmo propio · sunburst por cuñas</p></div>
+      </div>
+      <div class="card">
+        <p class="def">Un mapa mental es un <b>árbol</b>, no una jerarquía por niveles: el centro es el tema
+        raíz y las ramas se abren en abanico a su alrededor («sol con rayos»). dagre solo se usa de red de
+        seguridad (<code>buildDagreFallback</code>) si no se detecta una raíz clara.</p>
+        <ul class="clean">
+          <li><b>Construir el árbol.</b> Se arma la adyacencia de forma <i>no dirigida</i> y se orienta
+          desde una raíz detectada por BFS, para que las aristas hijo→padre que a veces emite el LLM no
+          desconecten ramas. La raíz es el <code>topic</code> sin entradas; si hay varios, el de más salidas.</li>
+          <li><b>Repartir el ángulo.</b> Cada rama recibe una porción de la circunferencia proporcional al
+          <i>peso</i> de su subárbol — la suma de los <b>anchos de sus hojas</b>, no su número — con un
+          <code>WEDGE_PAD = 0.18</code> (18 %) de margen entre hermanas. Así una rama de etiquetas largas se
+          lleva más arco y no se forman «espigas» de nodos amontonados.</li>
+          <li><b>Radio adaptativo por hijo</b> (la clave). Cada nodo se empuja hacia fuera <i>solo lo
+          necesario</i> para librar la caja de su padre (<code>RAD_GAP = 30</code>) y los hermanos ya
+          colocados (<code>SIB_GAP = 24</code>), en pasos de <code>STEP = 8 px</code>, con un suelo por nivel
+          <code>180 + (nivel−1)·150</code> px (180, 330, 480…). No es un anillo fijo por nivel: cada hijo
+          escoge su radio, lo que evita huecos enormes y choques. Tope anti-espiga <code>PUSH_CAP = 300 px</code>.</li>
+          <li><b>Relajación final de hojas.</b> Hasta 400 pasadas empujan <i>solo las hojas</i> hacia fuera
+          si pisan otro nodo o si una arista curva ajena las cruza. La detección de cruce
+          (<code>radialHitsBox</code>) muestrea 28 puntos de la <b>misma curva bezier</b> que luego se
+          dibuja, así que lo que se calcula coincide con lo que se ve.</li>
+        </ul>
+        <p>Cada rama de primer nivel hereda un color de una paleta de 7 (<code>BRANCH_COLORS</code>) y el
+        grosor del trazo baja con la profundidad (<code>max(1.5, 5 − nivel·0.9)</code>). Los nodos sueltos
+        (no alcanzables desde la raíz) se ponen en gris en una fila debajo del árbol, en vez de amontonarse
+        en el centro. Es un layout puramente radial: <b>no</b> tiene segunda pasada con tamaños medidos.</p>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>frontend/src/ui/utils/mindmapLayout.ts</code> → <code>mindmapLayout</code>, <code>assignAngles</code>, <code>radialHitsBox</code></li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <!-- ============ ARQUITECTURA ============ -->
+    <section id="arquitectura">
+      <div class="sec-head">
+        <span class="badge">▣</span>
+        <div><h2>Arquitectura · rejilla de grupos</h2><p class="sec-sub">Algoritmo propio síncrono · sin ELK</p></div>
+      </div>
+      <div class="card">
+        <p class="def">Un diagrama de arquitectura agrupa servicios en cajas contenedoras (un grupo
+        «Backend», otro «Datos»…). El layout es una colocación <b>determinista y síncrona</b>, sin librería
+        de grafos.</p>
+        <div class="caveat"><span class="lab">Divergencia con el diseño inicial</span>
+          El diseño inicial contemplaba <b>ELK layered con
+          <code>INCLUDE_CHILDREN</code></b> por su soporte de nodos anidados. La implementación final
+          <b>no usa ELK</b>: como <code>elk.layout()</code> es asíncrono y el pipeline de render síncrono,
+          se optó por una <b>rejilla propia</b> que da el mismo resultado tidy sin la complejidad del efecto
+          async. Los nodos anidados de React Flow (<code>parentId</code> + <code>extent:'parent'</code>) sí
+          se conservan.</div>
+        <ul class="clean">
+          <li><b>Grupos como contenedores.</b> Un nodo con el atributo <code>group: Nombre</code> se mete
+          en un contenedor <code>architectureGroup</code>, con sus hijos apilados en vertical dentro de la
+          caja (alto = <code>cabecera 36 + relleno + hijos·(120 + 40)</code>).</li>
+          <li><b>Rejilla casi cuadrada.</b> Los grupos se reparten en una cuadrícula de
+          <code>columnas = ⌈√n⌉</code>, con anchos de columna uniformes y la altura de cada fila igual a la
+          del grupo más alto (gaps <code>80</code>/<code>60</code>). Se elige rejilla —y no una fila— para
+          que queden ordenados aunque no haya aristas entre grupos. Los nodos sin grupo van en una fila
+          debajo.</li>
+          <li><b>Silueta «botella».</b> Cada servicio se dibuja como un icono <code>72×72</code> con su
+          etiqueta debajo. Para enrutar, el obstáculo es la <i>huella completa</i> (icono + texto) para que
+          las líneas no crucen el texto, pero los anclajes aterrizan en el icono. Aristas en codo:
+          <code>calls</code> sólidas, el resto discontinuas.</li>
+        </ul>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>frontend/src/ui/utils/architectureLayout.ts</code> → <code>architectureLayoutSync</code>, <code>parseGroups</code></li>
+            <li><code>frontend/src/components/nodes/ArchitectureGroupNode.tsx</code> · <code>archBottle.ts</code> (huella de enrutado)</li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <!-- ============ SECUENCIA ============ -->
+    <section id="secuencia">
+      <div class="sec-head">
+        <span class="badge">↕</span>
+        <div><h2>Secuencia · carriles y líneas de vida</h2><p class="sec-sub">Algoritmo propio · rejilla columnas×filas</p></div>
+      </div>
+      <div class="card">
+        <p class="def">Un diagrama de secuencia es <b>matemática posicional pura</b>, sin grafo: cada actor
+        es una columna fija y cada mensaje una fila creciente. Es determinista por construcción — nunca
+        force-directed ni dagre.</p>
+        <ul class="clean">
+          <li><b>Columnas (actores).</b> El actor <i>i</i> va en <code>x = i × 240 px</code>, con su línea
+          de vida (la vertical de puntos) centrada bajo la cabecera de <code>80 px</code> de alto. Si algún
+          actor tiene una x guardada, se reordenan por esa x.</li>
+          <li><b>Filas (mensajes).</b> Un cursor vertical baja <code>60 px</code> por mensaje; cada uno se
+          dibuja como una flecha entre las líneas de vida de origen y destino a esa altura, y el destino
+          recibe una pequeña <i>barra de activación</i> (16 px de ancho).</li>
+          <li><b>Fragmentos combinados</b> (<code>alt</code>/<code>loop</code>/<code>opt</code>). Se dibujan
+          como marcos anidados que envuelven sus mensajes: reservan una banda de cabecera arriba
+          (<code>24 px</code>) y un relleno abajo, y los marcos hijos quedan dentro de los padres (el relleno
+          horizontal mengua con la profundidad de anidamiento). Orden de apilado: fragmentos &lt; líneas de
+          vida &lt; activaciones &lt; actores.</li>
+        </ul>
+        <p>Su geometría ya es exacta, así que <b>no</b> pasa por la segunda pasada de tamaños medidos.</p>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>frontend/src/ui/utils/sequenceLayout.ts</code> → <code>sequenceLayout</code></li>
+            <li><code>frontend/src/components/nodes/SequenceFragmentNode.tsx</code></li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <!-- ============ CASOS DE USO ============ -->
+    <section id="casos">
+      <div class="sec-head">
+        <span class="badge">◍</span>
+        <div><h2>Casos de uso · actores y columnas</h2><p class="sec-sub">Algoritmo propio · colocación UML clásica</p></div>
+      </div>
+      <div class="card">
+        <p class="def">Colocación clásica de UML: los actores a los lados, los casos de uso dentro de una
+        caja «sistema».</p>
+        <ul class="clean">
+          <li><b>Una o dos columnas.</b> Hasta 6 casos van en una columna; a partir de 7, en dos. Para
+          repartirlos se usa una heurística de «tirón»: cada caso suma <code>−1</code> por cada actor
+          conectado a su izquierda y <code>+1</code> por cada uno a la derecha (los actores alternan lado
+          por paridad de índice), y se va a la columna de su lado dominante; los indecisos equilibran.</li>
+          <li><b>Orden dentro de la columna.</b> Un recorrido en profundidad (DFS) coloca juntos los casos
+          enlazados por <code>include</code>/<code>extend</code>, para que esas relaciones queden como
+          líneas cortas.</li>
+          <li><b>Caja del sistema.</b> Envuelve los casos y se centra; los actores se reparten
+          uniformemente por los lados (<code>actorY = sysY + innerH·(i+1)/(n+1) − ACTOR_H/2</code>). Las
+          asociaciones actor↔caso se fuerzan <b>rectas</b> (estilo abanico) y cruzan el borde del sistema;
+          las relaciones caso↔caso mantienen el codo ortogonal. Tu <code>group_layout</code> manual prevalece
+          sobre la geometría automática.</li>
+        </ul>
+        <p>Es de los tipos que <b>sí</b> se refinan con tamaños medidos (ver abajo).</p>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>frontend/src/ui/utils/diagramToFlow.ts</code> → <code>useCaseLayout</code></li>
+            <li><code>frontend/src/components/nodes/UseCaseSystemNode.tsx</code></li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <!-- ============ FASES + VIVO ============ -->
+    <section id="fases">
+      <div class="sec-head">
+        <span class="badge">◐</span>
+        <div><h2>Dos fases y montaje en vivo</h2><p class="sec-sub">Estimado→medido · ensamblaje durante el streaming</p></div>
+      </div>
+      <div class="card">
+        <h3>Dos pasadas de tamaño</h3>
+        <p>La primera pasada coloca todo con tamaños <b>estimados</b> (todavía no se ha pintado nada).
+        Cuando React Flow ya ha renderizado y conoce el tamaño <b>real</b> de cada caja en el DOM, una
+        segunda pasada (en <code>DiagramCanvas.tsx</code>) reajusta anclajes y recorrido de aristas con esas
+        medidas exactas. Se aplica a <b>dagre, arquitectura y casos de uso</b>, y se <b>omite</b> en
+        secuencia y mindmap (su geometría ya es exacta por construcción).</p>
+
+        <h3>Montaje en vivo (streaming)</h3>
+        <p>Mientras el agente va emitiendo el diagrama (<code>liveLayout.ts</code>), los nodos sin aristas
+        esperan en un <b>círculo</b> (<code>radio = max(220, n·22)</code>). En cuanto llegan conexiones, se
+        calcula la estructura real en el centro y cada nodo «encaja» en su sitio al aparecer su arista —los
+        que aún esperan orbitan en un anillo exterior—, de modo que el diagrama se ensambla conexión a
+        conexión ante tus ojos. El lienzo hace <code>fitView</code> animado durante el proceso.</p>
+
+        <div class="decision"><span class="lab">Y siempre: tus ediciones mandan</span>
+          Cualquier algoritmo respeta la posición que hayas fijado a mano al mover un nodo
+          (<code>node.position</code>) o redimensionar un contenedor (<code>group_layout</code>): el cálculo
+          automático solo rellena lo que no has tocado. Por eso «Recalcular layout» rehace todo, pero
+          arrastrar un nodo lo deja donde lo dejaste.</div>
+        <details>
+          <summary class="src-toggle">Ficheros fuente</summary>
+          <ul class="src-list">
+            <li><code>frontend/src/ui/utils/liveLayout.ts</code> (montaje en vivo)</li>
+            <li><code>frontend/src/components/DiagramCanvas.tsx</code> (refinamiento con tamaños medidos, fitView)</li>
+          </ul>
+        </details>
+      </div>
+      <a class="toplink" href="#reparto">↑ volver al índice</a>
+    </section>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG. Esta página documenta el sistema de layouts tal y como está implementado en
+      <code>frontend/src/ui/utils/</code>. Para la fundamentación teórica (Sugiyama, Buzan, C4, MSC) y la
+      notación canónica por tipo, ver el catálogo de tipos en <a href="features.html">Features</a>.</p>
+    </div>
+
+  </div>
+  </main>
+</div>
+
+<script>
+  // Scroll-spy: resalta la sección activa en el índice
+  const links = [...document.querySelectorAll('#nav a[href^="#"]')];
+  const map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const sections = [...document.querySelectorAll('section[id]')];
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if(e.isIntersecting){
+        links.forEach(l => l.classList.remove('active'));
+        const a = map.get(e.target.id);
+        if(a) a.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-20% 0px -70% 0px', threshold:0});
+  sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

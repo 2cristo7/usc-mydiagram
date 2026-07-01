@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Grafo de Generación LangGraph</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+<style>
+/* ── extras locales ─────────────────────────────────────────────────────── */
+.sec-head{display:flex;align-items:flex-start;gap:18px;margin-bottom:20px}
+.sec-head .badge{
+  flex:0 0 50px;width:50px;height:50px;
+  background:var(--surface);border:3px solid var(--ink);border-radius:var(--radius);
+  box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;
+  font-size:22px;
+}
+.sec-head h2{margin:0;font-size:26px;letter-spacing:-.6px;line-height:1.15}
+.sec-head p{margin:6px 0 0;color:var(--muted);font-size:14.5px}
+
+.card{
+  background:var(--surface);border:3px solid var(--ink);border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);padding:28px 32px;margin:0 0 32px;
+}
+.card h3{margin:0 0 14px;font-size:17px;font-family:var(--mono);font-weight:600;
+  text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+
+.def{
+  background:var(--accent-soft);border-left:6px solid var(--accent);
+  border-radius:var(--radius);padding:14px 18px;margin:18px 0;
+  font-size:15px;line-height:1.6;
+}
+.def strong{color:var(--accent-ink)}
+
+.decision{
+  background:var(--ok-soft);border:2px solid var(--ok);border-radius:var(--radius);
+  padding:14px 18px;margin:18px 0;position:relative;
+}
+.decision .lab{
+  font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px;color:#fff;background:var(--ok);padding:2px 7px;
+  border-radius:3px;margin-right:8px;
+}
+
+.caveat{
+  background:var(--warn-soft);border:2px solid var(--warn);border-radius:var(--radius);
+  padding:14px 18px;margin:18px 0;
+}
+.caveat .lab{
+  font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px;color:#fff;background:var(--warn);padding:2px 7px;
+  border-radius:3px;margin-right:8px;
+}
+
+.tag{font-family:var(--mono);font-size:10.5px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.4px;padding:3px 8px;border-radius:3px;border:1.5px solid var(--ink);
+  display:inline-block;margin:0 4px 4px 0}
+.t-blue{background:var(--blue-soft);color:var(--blue)}
+.t-green{background:var(--ok-soft);color:var(--ok)}
+.t-warn{background:var(--warn-soft);color:var(--warn)}
+.t-orange{background:var(--accent-soft);color:var(--accent-ink)}
+.t-ink{background:#eee;color:var(--ink)}
+
+table{width:100%;border-collapse:collapse;font-size:14px;margin:0 0 8px}
+th{font-family:var(--mono);font-size:11.5px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.4px;background:var(--ink);color:#fff;padding:10px 14px;text-align:left}
+td{padding:10px 14px;border-bottom:1.5px solid var(--line);vertical-align:top}
+tr:nth-child(even) td{background:#faf7f2}
+tr:hover td{background:var(--accent-soft)}
+
+code{
+  font-family:var(--mono);font-size:13px;background:var(--code-bg);
+  border:1.5px solid var(--line);border-radius:3px;padding:1px 6px;
+}
+pre{
+  font-family:var(--mono);font-size:12.5px;background:var(--code-bg);
+  border:2px solid var(--ink);border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:18px 20px;overflow-x:auto;line-height:1.65;margin:0 0 20px;
+}
+pre code{background:none;border:none;padding:0;font-size:inherit}
+
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:760px){.two-col{grid-template-columns:1fr}}
+
+.svg-wrap{
+  overflow-x:auto;border:3px solid var(--ink);border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);background:#fff;
+}
+
+.footer{
+  margin-top:80px;padding-top:28px;border-top:3px solid var(--ink);
+  font-size:13px;color:var(--muted);
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación del proyecto</p>
+        <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a class="active" href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+  <main>
+  <div class="content">
+    <header class="hero">
+      <div class="eyebrow">Microservicio IA · LangGraph</div>
+      <h1>Grafo de Generación</h1>
+      <p class="lede">Pipeline de 9 nodos con tres bucles de reintento independientes que transforma un prompt en lenguaje natural en un diagrama validado estructuralmente, con streaming progresivo al canvas.</p>
+      <div class="meta-row">
+        <span class="pill"><b>Fichero</b> agent/graph.py</span>
+        <span class="pill"><b>Framework</b> LangGraph + StateGraph</span>
+        <span class="pill"><b>Estado</b> DiagramState (TypedDict)</span>
+        <span class="pill"><b>Retries máx.</b> 10 + 10 + 10</span>
+      </div>
+    </header>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECCIÓN 1 — DIAGRAMA PRINCIPAL
+    ═══════════════════════════════════════════════════════════ -->
+    <section id="grafo-completo">
+      <div class="sec-head">
+        <div class="badge">&#9654;</div>
+        <div>
+          <h2>El grafo completo</h2>
+          <p>Topología, aristas de routing y los tres bucles de reintento con feedback</p>
+        </div>
+      </div>
+
+      <div class="card" style="padding:20px">
+        <div class="svg-wrap">
+          <svg viewBox="0 0 860 1080" width="100%" style="display:block;min-width:640px">
+            <defs>
+              <!-- marcador flecha negra estándar -->
+              <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#111"/>
+              </marker>
+              <!-- marcador flecha roja para rutas de reintento -->
+              <marker id="arr-retry" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#b83f00"/>
+              </marker>
+              <!-- marcador flecha verde para ruta ok -->
+              <marker id="arr-ok" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+              </marker>
+            </defs>
+
+            <!-- ─── helper: caja con sombra dura ──────────────────────────
+                 Para cada nodo: primero el rect de sombra (desplazado +4,+4),
+                 luego el rect principal + texto.
+            ──────────────────────────────────────────────────────────────── -->
+
+            <!-- ════ ENTRADA / SALIDA ════ -->
+            <!-- START (círculo) -->
+            <circle cx="430" cy="38" r="22" fill="#111"/>
+            <circle cx="427" cy="35" r="22" fill="#fff" stroke="#111" stroke-width="3"/>
+            <text x="427" y="40" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="700">START</text>
+
+            <!-- ════ GUARD ════ -->
+            <rect x="314" y="94" width="160" height="50" rx="4" fill="#111"/>
+            <rect x="310" y="90" width="160" height="50" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+            <text x="390" y="112" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700" fill="#111">GUARD</text>
+            <text x="390" y="129" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/guard.py</text>
+
+            <!-- flecha START → GUARD -->
+            <line x1="427" y1="57" x2="427" y2="86" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+            <!-- corrección: centrar con guard -->
+            <line x1="430" y1="57" x2="392" y2="86" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+
+            <!-- ════ END (ruta "no es diagrama") ════ -->
+            <rect x="614" y="94" width="100" height="50" rx="22" fill="#111"/>
+            <rect x="610" y="90" width="100" height="50" rx="22" fill="#e2dccf" stroke="#111" stroke-width="3"/>
+            <text x="660" y="120" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">END</text>
+
+            <!-- flecha GUARD → END (no es petición de diagrama) -->
+            <line x1="470" y1="115" x2="606" y2="115" stroke="#75716a" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arr)"/>
+            <text x="538" y="109" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#75716a">is_diagram=false</text>
+
+            <!-- ════ CLASSIFY ════ -->
+            <rect x="314" y="194" width="160" height="50" rx="4" fill="#111"/>
+            <rect x="310" y="190" width="160" height="50" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+            <text x="390" y="212" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">CLASSIFY</text>
+            <text x="390" y="229" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/classify.py</text>
+
+            <!-- flecha GUARD → CLASSIFY (is_diagram=true) -->
+            <line x1="390" y1="140" x2="390" y2="186" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+            <text x="410" y="167" font-family="JetBrains Mono" font-size="9.5" fill="#111">is_diagram=true</text>
+
+            <!-- ════ EXTRACT_NODES ════ -->
+            <rect x="284" y="304" width="220" height="56" rx="4" fill="#111"/>
+            <rect x="280" y="300" width="220" height="56" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="390" y="324" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">EXTRACT_NODES</text>
+            <text x="390" y="343" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/extract_nodes.py · streaming</text>
+
+            <!-- flecha CLASSIFY → EXTRACT_NODES -->
+            <line x1="390" y1="240" x2="390" y2="296" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+
+            <!-- ════ VALIDATE_NODES ════ -->
+            <rect x="284" y="414" width="220" height="56" rx="4" fill="#111"/>
+            <rect x="280" y="410" width="220" height="56" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="390" y="434" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">VALIDATE_NODES</text>
+            <text x="390" y="452" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/validate_nodes.py · max 10</text>
+
+            <!-- flecha EXTRACT_NODES → VALIDATE_NODES -->
+            <line x1="390" y1="356" x2="390" y2="406" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+
+            <!-- ════ BUCLE NODOS (retry) ════ -->
+            <!-- flecha curva VALIDATE_NODES → EXTRACT_NODES por la izquierda -->
+            <path d="M280,445 Q170,445 170,328 Q170,300 276,300"
+                  fill="none" stroke="#b83f00" stroke-width="2" stroke-dasharray="7,3" marker-end="url(#arr-retry)"/>
+            <rect x="68" y="354" width="92" height="38" rx="4" fill="#ffe7d6" stroke="#b83f00" stroke-width="2"/>
+            <text x="114" y="369" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="600" fill="#b83f00">RETRY</text>
+            <text x="114" y="382" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#b83f00">node_errors ≠ ∅</text>
+
+            <!-- ════ EXTRACT_EDGES ════ -->
+            <rect x="284" y="530" width="220" height="56" rx="4" fill="#111"/>
+            <rect x="280" y="526" width="220" height="56" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="390" y="550" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">EXTRACT_EDGES</text>
+            <text x="390" y="568" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/extract_edges.py · streaming</text>
+
+            <!-- flecha VALIDATE_NODES → EXTRACT_EDGES (ok) -->
+            <line x1="390" y1="466" x2="390" y2="522" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr-ok)"/>
+            <text x="412" y="498" font-family="JetBrains Mono" font-size="9.5" fill="#16a34a">errors = ∅</text>
+
+            <!-- ════ VALIDATE_EDGES ════ -->
+            <rect x="284" y="646" width="220" height="56" rx="4" fill="#111"/>
+            <rect x="280" y="642" width="220" height="56" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="390" y="666" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">VALIDATE_EDGES</text>
+            <text x="390" y="684" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/validate_edges.py · max 10</text>
+
+            <!-- flecha EXTRACT_EDGES → VALIDATE_EDGES -->
+            <line x1="390" y1="582" x2="390" y2="638" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+
+            <!-- ════ BUCLE ARISTAS (retry) ════ -->
+            <path d="M280,672 Q155,672 155,549 Q155,522 276,522"
+                  fill="none" stroke="#b83f00" stroke-width="2" stroke-dasharray="7,3" marker-end="url(#arr-retry)"/>
+            <rect x="52" y="578" width="92" height="38" rx="4" fill="#ffe7d6" stroke="#b83f00" stroke-width="2"/>
+            <text x="98" y="593" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="600" fill="#b83f00">RETRY</text>
+            <text x="98" y="606" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#b83f00">edge_errors ≠ ∅</text>
+
+            <!-- ════ SYNTHESIZE ════ -->
+            <rect x="284" y="762" width="220" height="56" rx="4" fill="#111"/>
+            <rect x="280" y="758" width="220" height="56" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+            <text x="390" y="782" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">SYNTHESIZE</text>
+            <text x="390" y="800" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/synthesize.py · DiagramSchema</text>
+
+            <!-- flecha VALIDATE_EDGES → SYNTHESIZE (ok) -->
+            <line x1="390" y1="698" x2="390" y2="754" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr-ok)"/>
+            <text x="412" y="730" font-family="JetBrains Mono" font-size="9.5" fill="#16a34a">errors = ∅</text>
+
+            <!-- ════ VALIDATE_SCHEMA ════ -->
+            <rect x="284" y="878" width="220" height="56" rx="4" fill="#111"/>
+            <rect x="280" y="874" width="220" height="56" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="390" y="898" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">VALIDATE_SCHEMA</text>
+            <text x="390" y="916" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#75716a">nodes/validate_schema.py · max 10</text>
+
+            <!-- flecha SYNTHESIZE → VALIDATE_SCHEMA -->
+            <line x1="390" y1="814" x2="390" y2="870" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+
+            <!-- ════ BUCLE ESTRUCTURAL (retry) — vuelve a extract_nodes o extract_edges ════ -->
+            <!-- Bucle → extract_nodes (gaps de tipo "nodes") -->
+            <path d="M500,902 Q680,902 680,328 Q680,300 504,300"
+                  fill="none" stroke="#b83f00" stroke-width="2" stroke-dasharray="7,3" marker-end="url(#arr-retry)"/>
+            <!-- Bucle → extract_edges (gaps de tipo "edges") -->
+            <path d="M500,922 Q700,922 700,554 Q700,526 504,526"
+                  fill="none" stroke="#b83f00" stroke-width="1.8" stroke-dasharray="5,3" marker-end="url(#arr-retry)"/>
+
+            <!-- etiqueta bucle estructural -->
+            <rect x="596" y="588" width="130" height="56" rx="4" fill="#ffe7d6" stroke="#b83f00" stroke-width="2"/>
+            <text x="661" y="604" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700" fill="#b83f00">RETRY ESTRUCTURAL</text>
+            <text x="661" y="618" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#b83f00">gaps[nodes] → extract_nodes</text>
+            <text x="661" y="631" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#b83f00">gaps[edges] → extract_edges</text>
+            <text x="661" y="644" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#b83f00">max 10 reintentos</text>
+
+            <!-- ════ END final ════ -->
+            <rect x="344" y="992" width="100" height="50" rx="22" fill="#111"/>
+            <rect x="340" y="988" width="100" height="50" rx="22" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="390" y="1018" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="700">END</text>
+
+            <!-- flecha VALIDATE_SCHEMA → END (gaps = ∅) -->
+            <line x1="390" y1="930" x2="390" y2="984" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr-ok)"/>
+            <text x="412" y="961" font-family="JetBrains Mono" font-size="9.5" fill="#16a34a">gaps = ∅</text>
+
+            <!-- ════ LEYENDA ════ -->
+            <rect x="10" y="988" width="280" height="82" rx="4" fill="#fff" stroke="#111" stroke-width="2"/>
+            <text x="22" y="1006" font-family="JetBrains Mono" font-size="10" font-weight="700" fill="#111">LEYENDA</text>
+            <line x1="22" y1="1016" x2="60" y2="1016" stroke="#111" stroke-width="2.5"/>
+            <text x="66" y="1020" font-family="JetBrains Mono" font-size="10" fill="#111">Ruta normal / ok</text>
+            <line x1="22" y1="1032" x2="60" y2="1032" stroke="#b83f00" stroke-width="2" stroke-dasharray="6,3"/>
+            <text x="66" y="1036" font-family="JetBrains Mono" font-size="10" fill="#b83f00">Reintento con feedback</text>
+            <line x1="22" y1="1048" x2="60" y2="1048" stroke="#75716a" stroke-width="2" stroke-dasharray="4,3"/>
+            <text x="66" y="1052" font-family="JetBrains Mono" font-size="10" fill="#75716a">Ruta de rechazo (END)</text>
+            <line x1="22" y1="1064" x2="60" y2="1064" stroke="#16a34a" stroke-width="2.5"/>
+            <text x="66" y="1068" font-family="JetBrains Mono" font-size="10" fill="#16a34a">Ruta válida (sin errores)</text>
+          </svg>
+        </div>
+        <p style="margin:14px 0 0;font-size:13px;color:var(--muted);font-family:var(--mono)">
+          Fuente: <code>agent/graph.py</code> — <code>build_graph()</code> + funciones <code>route_after_*</code>.
+          Los tres bucles de reintento son independientes: presupuestos separados (<code>node_retry_count</code>, <code>retry_count</code>, <code>schema_retry_count</code>).
+        </p>
+        <div class="caveat">
+          <span class="lab">Nota</span>
+          El diagrama omite el nodo <code>extract_fragments</code> por legibilidad: se ejecuta entre <code>validate_edges</code> y <code>synthesize</code>, y es no-op salvo en diagramas de secuencia, donde ensambla los fragmentos combinados. Contándolo, el pipeline tiene 9 nodos.
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECCIÓN 2 — NODOS DEL GRAFO
+    ═══════════════════════════════════════════════════════════ -->
+    <section id="nodos">
+      <div class="sec-head">
+        <div class="badge">&#9632;</div>
+        <div>
+          <h2>Nodos del grafo</h2>
+          <p>Responsabilidad, modo y salidas de cada nodo</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Nodo</th>
+              <th>Archivo</th>
+              <th>Rol</th>
+              <th>LLM tier</th>
+              <th>Salidas al estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>guard</code></td>
+              <td><code>nodes/guard.py</code></td>
+              <td>Clasificador binario: determina si el prompt describe algo representable como diagrama. Respuesta <code>yes/no</code> en inglés.</td>
+              <td><span class="tag t-warn">fast</span></td>
+              <td><code>is_diagram_request: bool</code></td>
+            </tr>
+            <tr>
+              <td><code>classify</code></td>
+              <td><code>nodes/classify.py</code></td>
+              <td>Clasifica el tipo de diagrama (<code>DiagramType</code>) y genera el título. Si el usuario preseleccionó el tipo en la UI, salta la llamada de tipo y solo llama a la del título. Ambas llamadas se lanzan concurrentes con <code>asyncio.gather</code>.</td>
+              <td><span class="tag t-warn">fast</span></td>
+              <td><code>diagram_type</code>, <code>title</code></td>
+            </tr>
+            <tr>
+              <td><code>extract_nodes</code></td>
+              <td><code>nodes/extract_nodes.py</code></td>
+              <td>Genera nodos vía LLM con streaming progresivo. Parsea JSON en streaming con <code>ijson</code>. Opera en tres modos según el contenido del estado: <em>normal</em>, <em>corregir</em> (nodos inválidos), <em>rellenar</em> (huecos estructurales).</td>
+              <td><span class="tag t-orange">capable</span></td>
+              <td><code>nodes: list[DiagramNode]</code> (reducer add), <code>invalid_nodes</code></td>
+            </tr>
+            <tr>
+              <td><code>validate_nodes</code></td>
+              <td><code>nodes/validate_nodes.py</code></td>
+              <td>Punto de decisión del bucle de nodos. Si hay <code>invalid_nodes</code> y queda presupuesto (<code>MAX_NODE_RETRIES = 10</code>), emite <code>node_validation_errors</code> para volver a <code>extract_nodes</code>. Si se agota, registra una <code>Degradation</code> en el canal <code>degradations</code>.</td>
+              <td>— (sin LLM)</td>
+              <td><code>node_validation_errors</code>, <code>node_retry_count</code>, <code>degradations</code></td>
+            </tr>
+            <tr>
+              <td><code>extract_edges</code></td>
+              <td><code>nodes/extract_edges.py</code></td>
+              <td>Genera aristas vía LLM con streaming progresivo. Tres validaciones en cadena: Pydantic → integridad referencial (huérfanas) → semántica por <code>DiagramType</code>. Tres modos simétricos a <code>extract_nodes</code>.</td>
+              <td><span class="tag t-orange">capable</span></td>
+              <td><code>edges: list[DiagramEdge]</code> (reducer add), <code>invalid_edges</code></td>
+            </tr>
+            <tr>
+              <td><code>validate_edges</code></td>
+              <td><code>nodes/validate_edges.py</code></td>
+              <td>Punto de decisión del bucle de aristas. Simétrico a <code>validate_nodes</code> con su propio presupuesto <code>retry_count</code> y <code>MAX_RETRIES = 10</code>. Al agotar, registra <code>Degradation(category="edges")</code>.</td>
+              <td>— (sin LLM)</td>
+              <td><code>validation_errors</code>, <code>retry_count</code>, <code>degradations</code></td>
+            </tr>
+            <tr>
+              <td><code>extract_fragments</code></td>
+              <td><code>nodes/extract_fragments.py</code></td>
+              <td>Se intercala entre <code>validate_edges</code> y <code>synthesize</code>, con los nodos y aristas ya validados. Ensambla los fragmentos combinados propios de los diagramas de secuencia. No-op para el resto de tipos de diagrama.</td>
+              <td>— (no-op salvo secuencia)</td>
+              <td>Fragmentos combinados del diagrama de secuencia (sin efecto en otros tipos)</td>
+            </tr>
+            <tr>
+              <td><code>synthesize</code></td>
+              <td><code>nodes/synthesize.py</code></td>
+              <td>Ensambla el <code>DiagramSchema</code> final a partir de los nodos y aristas validados que acumuló el estado.</td>
+              <td>— (sin LLM)</td>
+              <td><code>diagram: DiagramSchema</code></td>
+            </tr>
+            <tr>
+              <td><code>validate_schema</code></td>
+              <td><code>nodes/validate_schema.py</code></td>
+              <td>Único nodo que ve el diagrama ensamblado completo. Detecta carencias estructurales del conjunto (p. ej. flowchart sin terminator de inicio). Tercer bucle de feedback con presupuesto propio <code>schema_retry_count / MAX_SCHEMA_RETRIES = 10</code>.</td>
+              <td>— (sin LLM)</td>
+              <td><code>structural_gaps</code>, <code>schema_retry_count</code>, <code>degradations</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECCIÓN 3 — LOS TRES BUCLES DE REINTENTO
+    ═══════════════════════════════════════════════════════════ -->
+    <section id="bucles">
+      <div class="sec-head">
+        <div class="badge">&#8635;</div>
+        <div>
+          <h2>Los tres bucles de reintento</h2>
+          <p>Presupuestos independientes, feedback por pieza, degradación honesta al agotar</p>
+        </div>
+      </div>
+
+      <!-- Diagrama SVG de los tres niveles -->
+      <div class="card" style="padding:20px">
+        <div class="svg-wrap">
+          <svg viewBox="0 0 780 340" width="100%" style="display:block;min-width:560px">
+            <defs>
+              <marker id="arr2" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 9 3, 0 6" fill="#111"/>
+              </marker>
+              <marker id="arr2-r" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 9 3, 0 6" fill="#b83f00"/>
+              </marker>
+              <marker id="arr2-g" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 9 3, 0 6" fill="#16a34a"/>
+              </marker>
+            </defs>
+
+            <!-- BUCLE 1: NODOS -->
+            <rect x="14" y="14" width="200" height="296" rx="4" fill="#111"/>
+            <rect x="10" y="10" width="200" height="296" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="110" y="36" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="700">BUCLE 1 — NODOS</text>
+            <text x="110" y="52" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">node_retry_count ≤ 10</text>
+
+            <rect x="34" y="74" width="152" height="36" rx="4" fill="#111"/>
+            <rect x="30" y="70" width="152" height="36" rx="4" fill="#fff" stroke="#111" stroke-width="2.5"/>
+            <text x="106" y="91" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">extract_nodes</text>
+            <text x="106" y="103" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">streaming + ijson</text>
+
+            <line x1="106" y1="106" x2="106" y2="130" stroke="#111" stroke-width="2" marker-end="url(#arr2)"/>
+
+            <rect x="34" y="134" width="152" height="36" rx="4" fill="#111"/>
+            <rect x="30" y="130" width="152" height="36" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="2.5"/>
+            <text x="106" y="151" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">validate_nodes</text>
+            <text x="106" y="163" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">Pydantic + semántica</text>
+
+            <!-- retry flecha -->
+            <path d="M30,148 Q10,148 10,88 Q10,70 26,70" fill="none" stroke="#b83f00" stroke-width="1.8" stroke-dasharray="5,3" marker-end="url(#arr2-r)"/>
+            <text x="3" y="115" font-family="JetBrains Mono" font-size="8" fill="#b83f00" transform="rotate(-90,3,115)">retry</text>
+
+            <!-- ok flecha -->
+            <line x1="106" y1="166" x2="106" y2="200" stroke="#16a34a" stroke-width="2" marker-end="url(#arr2-g)"/>
+            <text x="114" y="186" font-family="JetBrains Mono" font-size="8.5" fill="#16a34a">ok →</text>
+
+            <rect x="20" y="202" width="172" height="28" rx="3" fill="#fdf0b8" stroke="#b07c00" stroke-width="1.5"/>
+            <text x="106" y="221" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">degradación si max retries</text>
+
+            <rect x="20" y="238" width="172" height="28" rx="3" fill="#eee" stroke="#111" stroke-width="1.5"/>
+            <text x="106" y="257" text-anchor="middle" font-family="JetBrains Mono" font-size="9">Degradation(category="nodes")</text>
+
+            <rect x="20" y="272" width="172" height="28" rx="3" fill="#dbe6ff" stroke="#2563eb" stroke-width="1.5"/>
+            <text x="106" y="291" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#2563eb">→ sigue a extract_edges</text>
+
+            <!-- BUCLE 2: ARISTAS -->
+            <rect x="294" y="14" width="200" height="296" rx="4" fill="#111"/>
+            <rect x="290" y="10" width="200" height="296" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="390" y="36" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="700">BUCLE 2 — ARISTAS</text>
+            <text x="390" y="52" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">retry_count ≤ 10</text>
+
+            <rect x="314" y="74" width="152" height="36" rx="4" fill="#111"/>
+            <rect x="310" y="70" width="152" height="36" rx="4" fill="#fff" stroke="#111" stroke-width="2.5"/>
+            <text x="386" y="91" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">extract_edges</text>
+            <text x="386" y="103" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">streaming + ijson</text>
+
+            <line x1="386" y1="106" x2="386" y2="130" stroke="#111" stroke-width="2" marker-end="url(#arr2)"/>
+
+            <rect x="314" y="134" width="152" height="36" rx="4" fill="#111"/>
+            <rect x="310" y="130" width="152" height="36" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="2.5"/>
+            <text x="386" y="151" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">validate_edges</text>
+            <text x="386" y="163" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">Pydantic+huérfanas+semántica</text>
+
+            <path d="M310,148 Q290,148 290,88 Q290,70 306,70" fill="none" stroke="#b83f00" stroke-width="1.8" stroke-dasharray="5,3" marker-end="url(#arr2-r)"/>
+            <text x="283" y="115" font-family="JetBrains Mono" font-size="8" fill="#b83f00" transform="rotate(-90,283,115)">retry</text>
+
+            <line x1="386" y1="166" x2="386" y2="200" stroke="#16a34a" stroke-width="2" marker-end="url(#arr2-g)"/>
+            <text x="394" y="186" font-family="JetBrains Mono" font-size="8.5" fill="#16a34a">ok →</text>
+
+            <rect x="300" y="202" width="172" height="28" rx="3" fill="#fdf0b8" stroke="#b07c00" stroke-width="1.5"/>
+            <text x="386" y="221" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">degradación si max retries</text>
+
+            <rect x="300" y="238" width="172" height="28" rx="3" fill="#eee" stroke="#111" stroke-width="1.5"/>
+            <text x="386" y="257" text-anchor="middle" font-family="JetBrains Mono" font-size="9">Degradation(category="edges")</text>
+
+            <rect x="300" y="272" width="172" height="28" rx="3" fill="#dbe6ff" stroke="#2563eb" stroke-width="1.5"/>
+            <text x="386" y="291" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#2563eb">→ sigue a synthesize</text>
+
+            <!-- BUCLE 3: ESTRUCTURAL -->
+            <rect x="574" y="14" width="200" height="296" rx="4" fill="#111"/>
+            <rect x="570" y="10" width="200" height="296" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+            <text x="670" y="36" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="700">BUCLE 3 — SCHEMA</text>
+            <text x="670" y="52" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">schema_retry_count ≤ 10</text>
+
+            <rect x="594" y="74" width="152" height="36" rx="4" fill="#111"/>
+            <rect x="590" y="70" width="152" height="36" rx="4" fill="#fff" stroke="#111" stroke-width="2.5"/>
+            <text x="666" y="91" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">synthesize</text>
+            <text x="666" y="103" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">ensambla DiagramSchema</text>
+
+            <line x1="666" y1="106" x2="666" y2="130" stroke="#111" stroke-width="2" marker-end="url(#arr2)"/>
+
+            <rect x="594" y="134" width="152" height="36" rx="4" fill="#111"/>
+            <rect x="590" y="130" width="152" height="36" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="2.5"/>
+            <text x="666" y="151" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600">validate_schema</text>
+            <text x="666" y="163" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">validate_structure()</text>
+
+            <path d="M590,148 Q570,148 570,88 Q570,70 586,70" fill="none" stroke="#b83f00" stroke-width="1.8" stroke-dasharray="5,3" marker-end="url(#arr2-r)"/>
+            <text x="563" y="115" font-family="JetBrains Mono" font-size="8" fill="#b83f00" transform="rotate(-90,563,115)">retry</text>
+
+            <line x1="666" y1="166" x2="666" y2="200" stroke="#16a34a" stroke-width="2" marker-end="url(#arr2-g)"/>
+            <text x="674" y="186" font-family="JetBrains Mono" font-size="8.5" fill="#16a34a">ok →</text>
+
+            <rect x="580" y="202" width="172" height="28" rx="3" fill="#fdf0b8" stroke="#b07c00" stroke-width="1.5"/>
+            <text x="666" y="221" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">degradación si max retries</text>
+
+            <rect x="580" y="238" width="172" height="28" rx="3" fill="#eee" stroke="#111" stroke-width="1.5"/>
+            <text x="666" y="257" text-anchor="middle" font-family="JetBrains Mono" font-size="9">Degradation(category="struct")</text>
+
+            <rect x="580" y="272" width="172" height="28" rx="3" fill="#d8f3e1" stroke="#16a34a" stroke-width="1.5"/>
+            <text x="666" y="291" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#16a34a">→ END (diagrama coherente)</text>
+          </svg>
+        </div>
+        <p style="margin:14px 0 0;font-size:13px;color:var(--muted);font-family:var(--mono)">
+          Cada bucle tiene su propio presupuesto. Agotar el de nodos no consume el de aristas ni el estructural.
+        </p>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>Invariante de streaming</h3>
+          <p>Lo que se streamea al canvas <strong>nunca se retracta</strong>. Los nodos y aristas solo se envían a la <code>asyncio.Queue</code> tras pasar la validación local (Pydantic + semántica). Los inválidos se retienen en <code>invalid_nodes</code> / <code>invalid_edges</code> sin llegar al cliente.</p>
+          <div class="decision">
+            <span class="lab">Decisión</span>
+            El reducer <code>operator.add</code> en <code>nodes</code> y <code>edges</code> garantiza que LangGraph concatene solo los nuevos elementos válidos de cada pasada de feedback, sin sobrescribir los ya confirmados.
+          </div>
+        </div>
+        <div class="card">
+          <h3>Degradación honesta</h3>
+          <p>Cuando un bucle agota su presupuesto sin resolver todos los fallos, registra una <code>Degradation</code> en el canal <code>degradations</code> (reducer <code>operator.add</code>, acumula hasta el END).</p>
+          <div class="caveat">
+            <span class="lab">Tensión</span>
+            Los canales <code>invalid_nodes</code>, <code>invalid_edges</code> y <code>structural_gaps</code> usan replace (deben converger a <code>[]</code> para cortar el bucle). Si no se vacían, el router entraría en bucle infinito.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECCIÓN 4 — ESTADO DiagramState
+    ═══════════════════════════════════════════════════════════ -->
+    <section id="estado">
+      <div class="sec-head">
+        <div class="badge">&#9638;</div>
+        <div>
+          <h2>Estado compartido — DiagramState</h2>
+          <p>TypedDict con reducers diferenciados según semántica de cada canal</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Campo</th>
+              <th>Tipo</th>
+              <th>Reducer</th>
+              <th>Semántica</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>prompt</code></td>
+              <td><code>str</code></td>
+              <td>replace</td>
+              <td>Prompt original del usuario. Inmutable tras la entrada.</td>
+            </tr>
+            <tr>
+              <td><code>is_diagram_request</code></td>
+              <td><code>bool</code></td>
+              <td>replace</td>
+              <td>Salida de <code>guard</code>. Controla la arista condicional hacia <code>classify</code> o <code>END</code>.</td>
+            </tr>
+            <tr>
+              <td><code>diagram_type</code></td>
+              <td><code>Optional[DiagramType]</code></td>
+              <td>replace</td>
+              <td><code>None</code> = clasificación automática por LLM. Valor = tipo preseleccionado por el usuario.</td>
+            </tr>
+            <tr>
+              <td><code>nodes</code></td>
+              <td><code>list[DiagramNode]</code></td>
+              <td><strong>operator.add</strong></td>
+              <td>Acumula nodos válidos de todas las pasadas. Los inválidos nunca entran aquí.</td>
+            </tr>
+            <tr>
+              <td><code>invalid_nodes</code></td>
+              <td><code>list[dict]</code></td>
+              <td>replace</td>
+              <td>Nodos inválidos retenidos pendientes de regenerar. Debe converger a <code>[]</code> para cortar el bucle.</td>
+            </tr>
+            <tr>
+              <td><code>node_validation_errors</code></td>
+              <td><code>list[str]</code></td>
+              <td>replace</td>
+              <td>Señal de routing del bucle de nodos. No-vacío → router vuelve a <code>extract_nodes</code>.</td>
+            </tr>
+            <tr>
+              <td><code>node_retry_count</code></td>
+              <td><code>int</code></td>
+              <td>replace</td>
+              <td>Presupuesto del bucle de nodos. Tope <code>MAX_NODE_RETRIES = 10</code> en <code>validate_nodes</code>.</td>
+            </tr>
+            <tr>
+              <td><code>edges</code></td>
+              <td><code>list[DiagramEdge]</code></td>
+              <td><strong>operator.add</strong></td>
+              <td>Acumula aristas válidas de todas las pasadas.</td>
+            </tr>
+            <tr>
+              <td><code>invalid_edges</code></td>
+              <td><code>list[dict]</code></td>
+              <td>replace</td>
+              <td>Aristas inválidas retenidas. Representación uniforme <code>{"raw": ..., "reason": ...}</code> para las tres clases de fallo: huérfana, semántica, Pydantic.</td>
+            </tr>
+            <tr>
+              <td><code>validation_errors</code></td>
+              <td><code>list[str]</code></td>
+              <td>replace</td>
+              <td>Señal de routing del bucle de aristas. No-vacío → router vuelve a <code>extract_edges</code>.</td>
+            </tr>
+            <tr>
+              <td><code>retry_count</code></td>
+              <td><code>int</code></td>
+              <td>replace</td>
+              <td>Presupuesto del bucle de aristas. Tope <code>MAX_RETRIES = 10</code> en <code>validate_edges</code>.</td>
+            </tr>
+            <tr>
+              <td><code>diagram</code></td>
+              <td><code>Optional[DiagramSchema]</code></td>
+              <td>replace</td>
+              <td>Diagrama ensamblado por <code>synthesize</code>. Solo existe tras ese nodo.</td>
+            </tr>
+            <tr>
+              <td><code>structural_gaps</code></td>
+              <td><code>list[StructuralGap]</code></td>
+              <td>replace</td>
+              <td>Huecos del conjunto detectados por <code>validate_schema</code>. Replace: cada pasada recalcula desde cero. Si usa <code>operator.add</code>, los gaps resueltos reaparecerían y el bucle no terminaría.</td>
+            </tr>
+            <tr>
+              <td><code>schema_retry_count</code></td>
+              <td><code>int</code></td>
+              <td>replace</td>
+              <td>Presupuesto del bucle estructural. Tope <code>MAX_SCHEMA_RETRIES = 10</code> en <code>validate_schema</code>.</td>
+            </tr>
+            <tr>
+              <td><code>degradations</code></td>
+              <td><code>list[Degradation]</code></td>
+              <td><strong>operator.add</strong></td>
+              <td>Degradaciones consumadas. Acumula hasta el END para que <code>classify_outcome</code> construya el aviso al usuario. Guarda de idempotencia en cada branch.</td>
+            </tr>
+            <tr>
+              <td><code>title</code></td>
+              <td><code>Optional[str]</code></td>
+              <td>replace</td>
+              <td>Título del diagrama derivado del prompt por <code>classify</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>Estado inicial — initial_generation_state()</h3>
+        <p>Definido en <code>agent/graph.py</code>. Fuente única de verdad para el estado de arranque, compartida por el endpoint <code>/generate/stream</code> y el nodo de escape <code>regenerate_from_scratch</code>. Evita <em>drift</em> entre los dos puntos de entrada que produciría <code>KeyError</code> en nodos downstream.</p>
+        <pre><code>initial_generation_state(prompt, diagram_type=None) → dict
+# diagram_type: DiagramType preseleccionado o None (automático)</code></pre>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECCIÓN 5 — ROUTING
+    ═══════════════════════════════════════════════════════════ -->
+    <section id="routing">
+      <div class="sec-head">
+        <div class="badge">&#9654;</div>
+        <div>
+          <h2>Funciones de routing</h2>
+          <p>Las aristas condicionales leen el estado; los topes de reintento viven en los nodos de validación</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Función</th>
+              <th>Lee del estado</th>
+              <th>Destinos posibles</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>route_after_guard</code></td>
+              <td><code>is_diagram_request</code></td>
+              <td><code>"classify"</code> · <code>END</code></td>
+            </tr>
+            <tr>
+              <td><code>route_after_validate_nodes</code></td>
+              <td><code>node_validation_errors</code> (no-vacío = reintentar)</td>
+              <td><code>"extract_nodes"</code> · <code>"extract_edges"</code></td>
+            </tr>
+            <tr>
+              <td><code>route_after_validate_edges</code></td>
+              <td><code>validation_errors</code> (no-vacío = reintentar)</td>
+              <td><code>"extract_edges"</code> · <code>"extract_fragments"</code></td>
+            </tr>
+            <tr>
+              <td><code>route_after_validate_schema</code></td>
+              <td><code>structural_gaps</code> (vacío = END; tipo "nodes" → extract_nodes; tipo "edges" → extract_edges)</td>
+              <td><code>"extract_nodes"</code> · <code>"extract_edges"</code> · <code>END</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="def">
+          <strong>Principio de diseño:</strong> El router no controla el límite de reintentos — solo refleja la decisión ya tomada por el nodo de validación. Los topes (<code>MAX_NODE_RETRIES</code>, <code>MAX_RETRIES</code>, <code>MAX_SCHEMA_RETRIES</code>) viven <em>en un solo sitio</em>: el nodo de validación correspondiente. Así no hay que cambiar nada en el grafo si se ajusta un tope.
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Routing estructural — detalle</h3>
+        <p><code>route_after_validate_schema</code> inspecciona el <code>type</code> de cada gap para decidir a qué extractor volver:</p>
+        <ul>
+          <li><span class="tag t-warn">type: "nodes"</span> — Falta un nodo (p. ej. el terminator de inicio de un flowchart). Se vuelve a <code>extract_nodes</code>; en cascada, sus aristas también faltarán y las gestionará el bucle de aristas.</li>
+          <li><span class="tag t-blue">type: "edges"</span> — Los nodos existen pero falta conectarlos (p. ej. el terminator recién creado sin aristas). Se vuelve directamente a <code>extract_edges</code>.</li>
+        </ul>
+        <p>Cada extractor filtra los gaps de <em>su</em> scope con <code>[g for g in structural_gaps if g["type"] == "nodes/edges"]</code>, de modo que no sobrecargan al otro extractor con trabajo ajeno.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECCIÓN 6 — VALIDACIONES EN EXTRACT_EDGES
+    ═══════════════════════════════════════════════════════════ -->
+    <section id="validaciones">
+      <div class="sec-head">
+        <div class="badge">&#10003;</div>
+        <div>
+          <h2>Triple validación en extract_edges</h2>
+          <p>Tres capas de comprobación en cascada antes de aceptar una arista</p>
+        </div>
+      </div>
+
+      <div class="card" style="padding:20px">
+        <div class="svg-wrap">
+          <svg viewBox="0 0 700 200" width="100%" style="display:block;min-width:500px">
+            <defs>
+              <marker id="arr3" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 9 3, 0 6" fill="#111"/>
+              </marker>
+              <marker id="arr3-r" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 9 3, 0 6" fill="#b83f00"/>
+              </marker>
+              <marker id="arr3-g" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 9 3, 0 6" fill="#16a34a"/>
+              </marker>
+            </defs>
+
+            <!-- entrada -->
+            <rect x="14" y="74" width="80" height="50" rx="4" fill="#111"/>
+            <rect x="10" y="70" width="80" height="50" rx="4" fill="#eee" stroke="#111" stroke-width="3"/>
+            <text x="50" y="91" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700">EDGE</text>
+            <text x="50" y="105" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">del LLM</text>
+            <text x="50" y="118" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">(dict crudo)</text>
+
+            <line x1="90" y1="95" x2="126" y2="95" stroke="#111" stroke-width="2" marker-end="url(#arr3)"/>
+
+            <!-- capa 1 -->
+            <rect x="134" y="64" width="120" height="62" rx="4" fill="#111"/>
+            <rect x="130" y="60" width="120" height="62" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="190" y="82" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700">1. PYDANTIC</text>
+            <text x="190" y="97" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">DiagramEdge</text>
+            <text x="190" y="110" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">.model_validate()</text>
+
+            <line x1="250" y1="91" x2="286" y2="91" stroke="#111" stroke-width="2" marker-end="url(#arr3)"/>
+
+            <!-- capa 2 -->
+            <rect x="294" y="64" width="120" height="62" rx="4" fill="#111"/>
+            <rect x="290" y="60" width="120" height="62" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="350" y="82" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700">2. REFERENCIA</text>
+            <text x="350" y="97" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">source/target</text>
+            <text x="350" y="110" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">∈ node_ids</text>
+
+            <line x1="410" y1="91" x2="446" y2="91" stroke="#111" stroke-width="2" marker-end="url(#arr3)"/>
+
+            <!-- capa 3 -->
+            <rect x="454" y="64" width="120" height="62" rx="4" fill="#111"/>
+            <rect x="450" y="60" width="120" height="62" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="510" y="82" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="700">3. SEMÁNTICA</text>
+            <text x="510" y="97" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">edge_type_allowed</text>
+            <text x="510" y="110" text-anchor="middle" font-family="JetBrains Mono" font-size="8.5" fill="#75716a">(DiagramType)</text>
+
+            <line x1="570" y1="91" x2="606" y2="91" stroke="#16a34a" stroke-width="2" marker-end="url(#arr3-g)"/>
+
+            <!-- salida ok -->
+            <rect x="614" y="74" width="76" height="50" rx="4" fill="#111"/>
+            <rect x="610" y="70" width="76" height="50" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="648" y="91" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700">VÁLIDA</text>
+            <text x="648" y="105" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#75716a">→ stream</text>
+            <text x="648" y="118" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">+ state.edges</text>
+
+            <!-- flechas de rechazo hacia abajo -->
+            <line x1="190" y1="122" x2="190" y2="155" stroke="#b83f00" stroke-width="1.8" stroke-dasharray="4,3" marker-end="url(#arr3-r)"/>
+            <line x1="350" y1="122" x2="350" y2="155" stroke="#b83f00" stroke-width="1.8" stroke-dasharray="4,3" marker-end="url(#arr3-r)"/>
+            <line x1="510" y1="122" x2="510" y2="155" stroke="#b83f00" stroke-width="1.8" stroke-dasharray="4,3" marker-end="url(#arr3-r)"/>
+
+            <!-- caja de rechazo -->
+            <rect x="100" y="158" width="480" height="32" rx="4" fill="#fdf0b8" stroke="#b07c00" stroke-width="2"/>
+            <text x="340" y="179" text-anchor="middle" font-family="JetBrains Mono" font-size="9.5" fill="#75716a">→ invalid_edges [ {"raw": ..., "reason": "..."} ] → bucle de reintento</text>
+          </svg>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Modos de extract_nodes y extract_edges</h3>
+        <p>El modo se detecta por <strong>contenido del estado</strong>, no por contador. Los contadores son presupuesto, no señal de modo. Prioridad: <em>rellenar</em> &gt; <em>corregir</em> &gt; <em>normal</em>.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Modo</th>
+              <th>Condición de entrada</th>
+              <th>System prompt</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag t-blue">Normal</span></td>
+              <td>Primera pasada sin elementos previos</td>
+              <td><code>get_node_prompt(dt)</code> / <code>get_edge_prompt(dt, valid_ids)</code> — prompt específico por tipo de diagrama</td>
+            </tr>
+            <tr>
+              <td><span class="tag t-warn">Corregir</span></td>
+              <td><code>invalid_nodes</code> / <code>invalid_edges</code> no vacío</td>
+              <td>Lista las piezas inválidas con su motivo; pide al LLM regenerar solo esas, con los tipos permitidos</td>
+            </tr>
+            <tr>
+              <td><span class="tag t-orange">Rellenar</span></td>
+              <td><code>structural_gaps</code> con tipo propio no vacío</td>
+              <td>Lista los huecos; proporciona el contexto de lo ya existente (nodos/aristas) para no repetir; pide solo lo que falta</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════
+         SECCIÓN 7 — STREAMING PROGRESIVO
+    ═══════════════════════════════════════════════════════════ -->
+    <section id="streaming">
+      <div class="sec-head">
+        <div class="badge">&#9655;</div>
+        <div>
+          <h2>Streaming progresivo al canvas</h2>
+          <p>Parser incremental ijson sobre la respuesta del LLM; cola asyncio hacia el stream NDJSON</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="def">
+          El LLM devuelve el array JSON de nodos/aristas como <strong>texto libre</strong> en streaming. Se parsea <em>en vuelo</em> con <code>ijson</code> (parser SAX-style): en cuanto se completa un objeto del array, se valida y, si pasa, se envía al canvas vía <code>asyncio.Queue</code> → stream NDJSON. El usuario ve los nodos aparecer en tiempo real.
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Capa</th>
+              <th>Componente</th>
+              <th>Rol</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>LLM</td>
+              <td><code>stream_llm()</code> en <code>agent/llm.py</code></td>
+              <td>Genera JSON de texto libre en chunks de texto</td>
+            </tr>
+            <tr>
+              <td>Parser</td>
+              <td><code>ijson.sendable_list</code> + <code>items_coro</code></td>
+              <td>Parsea JSON incrementalmente; emite objetos completos en <code>events</code></td>
+            </tr>
+            <tr>
+              <td>Validación</td>
+              <td><code>drain()</code> dentro de extract_nodes/edges</td>
+              <td>Consume <code>events</code>, valida cada objeto (Pydantic + semántica) y enqueue los válidos</td>
+            </tr>
+            <tr>
+              <td>Transporte</td>
+              <td><code>asyncio.Queue</code> → stream NDJSON (FastAPI)</td>
+              <td>Envía eventos <code>{"_type": "node"|"edge", "data": {...}}</code> al frontend</td>
+            </tr>
+            <tr>
+              <td>Canvas</td>
+              <td>React Flow (frontend)</td>
+              <td>Añade nodos/aristas al diagrama en tiempo real según llegan los eventos</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Documentación generada del código fuente del proyecto.</p>
+    </div>
+  </div>
+  </main>
+</div>
+</body>
+</html>

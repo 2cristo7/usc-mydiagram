@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Documentación del proyecto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+<style>
+  .hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:18px;margin:32px 0}
+  .hub-card{background:var(--surface);border:3px solid var(--ink);border-radius:var(--radius);
+    padding:22px 24px;box-shadow:var(--shadow);transition:all .08s;text-decoration:none;color:var(--ink);display:block}
+  .hub-card:hover{transform:translate(-2px,-2px);box-shadow:var(--shadow-lg);text-decoration:none}
+  .hub-card .hc-icon{font-size:28px;margin-bottom:10px;display:block}
+  .hub-card .hc-title{font-size:17px;font-weight:700;margin-bottom:6px;letter-spacing:-.3px}
+  .hub-card .hc-desc{font-size:13.5px;color:var(--ink-soft);line-height:1.5;font-weight:400}
+  .hub-card .hc-tag{margin-top:12px}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación técnica del proyecto</p>
+    <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a class="active" href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main>
+  <div class="content">
+
+    <header class="hero">
+      <div class="eyebrow">TFG · Universidad de Santiago de Compostela</div>
+      <h1>MydIAgram</h1>
+      <p class="lede">Agente conversacional que genera diagramas de software editables a partir de
+      lenguaje natural: entidad-relación, secuencia, diagramas de flujo, arquitectura (C4), mapas
+      mentales y casos de uso. Esta es la documentación técnica del sistema: arquitectura, motor de
+      generación, modelo de datos y funcionalidades.</p>
+      <div class="meta-row">
+        <span class="pill"><b>React 19</b> + React Flow 12</span>
+        <span class="pill"><b>Express 5</b> + Socket.io</span>
+        <span class="pill"><b>LangGraph</b> + FastAPI</span>
+        <span class="pill"><b>Supabase</b> · PostgreSQL 16</span>
+      </div>
+    </header>
+
+    <!-- ============ MAPA DEL SISTEMA ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9670;</span>
+        <div><h2>Mapa del sistema</h2><p class="sec-sub">Visión de pájaro de los 3 procesos y su comunicación</p></div>
+      </div>
+      <div class="card" style="padding:30px;overflow-x:auto">
+        <svg viewBox="0 0 820 320" width="100%" style="max-width:820px;display:block;margin:0 auto">
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#111"/>
+            </marker>
+            <marker id="arr-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#ff5c00"/>
+            </marker>
+          </defs>
+
+          <!-- Frontend box -->
+          <rect x="24" y="54" width="200" height="90" rx="4" fill="#111"/>
+          <rect x="20" y="50" width="200" height="90" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+          <text x="120" y="80" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111">FRONTEND</text>
+          <text x="120" y="100" text-anchor="middle" font-family="Space Grotesk" font-size="12" fill="#33312c">React 19 + Vite 8</text>
+          <text x="120" y="118" text-anchor="middle" font-family="Space Grotesk" font-size="12" fill="#33312c">React Flow 12</text>
+
+          <!-- Gateway box -->
+          <rect x="314" y="54" width="200" height="90" rx="4" fill="#111"/>
+          <rect x="310" y="50" width="200" height="90" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+          <text x="410" y="80" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111">BACKEND</text>
+          <text x="410" y="100" text-anchor="middle" font-family="Space Grotesk" font-size="12" fill="#33312c">Node.js 22 + Express 5</text>
+          <text x="410" y="118" text-anchor="middle" font-family="Space Grotesk" font-size="12" fill="#33312c">Socket.io (WS)</text>
+
+          <!-- Agent box -->
+          <rect x="604" y="54" width="200" height="90" rx="4" fill="#111"/>
+          <rect x="600" y="50" width="200" height="90" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+          <text x="700" y="80" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111">AGENTE IA</text>
+          <text x="700" y="100" text-anchor="middle" font-family="Space Grotesk" font-size="12" fill="#33312c">Python 3.12 + FastAPI</text>
+          <text x="700" y="118" text-anchor="middle" font-family="Space Grotesk" font-size="12" fill="#33312c">LangGraph + LangChain</text>
+
+          <!-- Supabase box -->
+          <rect x="314" y="224" width="200" height="70" rx="4" fill="#111"/>
+          <rect x="310" y="220" width="200" height="70" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+          <text x="410" y="250" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111">SUPABASE</text>
+          <text x="410" y="270" text-anchor="middle" font-family="Space Grotesk" font-size="12" fill="#33312c">PostgreSQL 16 · RLS</text>
+
+          <!-- Arrow Frontend → Gateway (WS) -->
+          <line x1="220" y1="82" x2="305" y2="82" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="262" y="74" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">WS</text>
+
+          <!-- Arrow Gateway → Agent (HTTP) -->
+          <line x1="510" y1="82" x2="595" y2="82" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="552" y="74" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">HTTP</text>
+
+          <!-- Arrow Agent → Gateway (NDJSON stream) -->
+          <line x1="595" y1="118" x2="510" y2="118" stroke="#ff5c00" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#arr-orange)"/>
+          <text x="552" y="132" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#b83f00">NDJSON</text>
+
+          <!-- Arrow Gateway → Supabase -->
+          <line x1="410" y1="140" x2="410" y2="215" stroke="#111" stroke-width="2.5" marker-end="url(#arr)"/>
+          <text x="430" y="180" font-family="JetBrains Mono" font-size="9" fill="#111">service_role</text>
+
+          <!-- Arrow Frontend → Supabase (auth) -->
+          <line x1="120" y1="140" x2="305" y2="235" stroke="#75716a" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+          <text x="190" y="200" font-family="JetBrains Mono" font-size="9" fill="#75716a">Auth (anon)</text>
+        </svg>
+      </div>
+      <p style="font-size:13.5px;color:var(--muted)">El navegador solo habla con el backend por WebSocket.
+      El backend es el único punto de acceso a datos: verifica el JWT, aplica límite de tasa y caché, y
+      reenvía la petición al agente por HTTP recibiendo el diagrama en streaming NDJSON. El microservicio
+      de IA nunca se expone al navegador.</p>
+    </section>
+
+    <!-- ============ HUB DE SECCIONES ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9776;</span>
+        <div><h2>Documentación</h2><p class="sec-sub">Explora cada aspecto del sistema</p></div>
+      </div>
+
+      <div class="hub-grid">
+        <a class="hub-card" href="arquitectura.html">
+          <span class="hc-icon">&#9633;</span>
+          <div class="hc-title">Arquitectura</div>
+          <div class="hc-desc">Los 3 procesos independientes, por qué no se fusionan, comunicación HTTP/WebSocket y flujo E2E de una petición completa.</div>
+          <div class="hc-tag"><span class="tag t-blue">sistema</span></div>
+        </a>
+
+        <a class="hub-card" href="despliegue.html">
+          <span class="hc-icon">&#9881;</span>
+          <div class="hc-title">Despliegue</div>
+          <div class="hc-desc">Cómo se levanta el sistema: arranque en desarrollo, Docker Compose, variables de entorno y perfiles de LLM (local con Ollama o en la nube).</div>
+          <div class="hc-tag"><span class="tag t-blue">operación</span></div>
+        </a>
+
+        <a class="hub-card" href="langgraph-generacion.html">
+          <span class="hc-icon">&#9654;</span>
+          <div class="hc-title">Grafo de generación</div>
+          <div class="hc-desc">Pipeline LangGraph: guard, classify, extracción y validación de nodos y aristas, synthesize. Bucles de reintento con realimentación y streaming progresivo.</div>
+          <div class="hc-tag"><span class="tag t-green">agente</span></div>
+        </a>
+
+        <a class="hub-card" href="langgraph-refinamiento.html">
+          <span class="hc-icon">&#8634;</span>
+          <div class="hc-title">Grafo de refinamiento</div>
+          <div class="hc-desc">Loop ReAct: el agente edita el diagrama con herramientas (añadir, quitar y actualizar nodos y aristas). Escape hatch regenerate e interrupt/resume para aclaraciones.</div>
+          <div class="hc-tag"><span class="tag t-green">agente</span></div>
+        </a>
+
+        <a class="hub-card" href="modelo-datos.html">
+          <span class="hc-icon">&#9638;</span>
+          <div class="hc-title">Modelo de datos</div>
+          <div class="hc-desc">Schema-first: DiagramNode/DiagramSchema en Pydantic ↔ Zod. Tipos permitidos por diagrama y validación en 3 niveles.</div>
+          <div class="hc-tag"><span class="tag t-blue">contratos</span></div>
+        </a>
+
+        <a class="hub-card" href="features.html">
+          <span class="hc-icon">&#9733;</span>
+          <div class="hc-title">Features</div>
+          <div class="hc-desc">Catálogo de funcionalidades: 6 tipos de diagrama, edición inline en el lienzo, autenticación, historial con papelera, caché y exportación.</div>
+          <div class="hc-tag"><span class="tag t-green">producto</span></div>
+        </a>
+
+        <a class="hub-card" href="layouts.html">
+          <span class="hc-icon">&#9707;</span>
+          <div class="hc-title">Layouts</div>
+          <div class="hc-desc">Cómo se posiciona cada diagrama: dagre para los jerárquicos y algoritmos propios (radial, rejilla, carriles, columnas). Enrutado y montaje en vivo.</div>
+          <div class="hc-tag"><span class="tag t-blue">frontend</span></div>
+        </a>
+
+        <a class="hub-card" href="decisiones.html">
+          <span class="hc-icon">&#10003;</span>
+          <div class="hc-title">Decisiones de diseño</div>
+          <div class="hc-desc">Las decisiones de arquitectura cerradas con su porqué: stack, validación en capas, streaming, backend como puerta de acceso, caché y perfiles de LLM.</div>
+          <div class="hc-tag"><span class="tag t-warn">ADR</span></div>
+        </a>
+      </div>
+    </section>
+
+    <!-- ============ QUICK FACTS ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9881;</span>
+        <div><h2>El proyecto en cifras</h2><p class="sec-sub">Stack y alcance</p></div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Dimensión</th><th>Valor</th></tr></thead>
+          <tbody>
+            <tr><td><b>Tipos de diagrama</b></td><td>6 (ERD, secuencia, flujo, arquitectura C4, mapa mental, casos de uso)</td></tr>
+            <tr><td><b>Procesos independientes</b></td><td>3 (frontend · backend/gateway · agente de IA) + Supabase</td></tr>
+            <tr><td><b>Grafos del agente</b></td><td>2 (generación tipo pipeline + refinamiento ReAct)</td></tr>
+            <tr><td><b>Niveles de validación</b></td><td>3 (Pydantic local → referencial → estructural por tipo)</td></tr>
+            <tr><td><b>Perfiles LLM</b></td><td>2 probados (local Ollama qwen3 · OpenAI gpt-4o) + Anthropic y Gemini configurables</td></tr>
+            <tr><td><b>Persistencia</b></td><td>Supabase PostgreSQL 16, aislamiento por usuario con RLS (<code>auth.uid() = user_id</code>)</td></tr>
+            <tr><td><b>Exportación / importación</b></td><td>PNG · nativo <code>.mdia</code> · Mermaid · draw.io · Excalidraw</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Documentación técnica generada a partir del código fuente del proyecto.</p>
+    </div>
+
+  </div>
+  </main>
+</div>
+</body>
+</html>

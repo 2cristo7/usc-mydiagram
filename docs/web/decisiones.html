@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Decisiones de diseño</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+<style>
+/* ---- SVG diagrams ---- */
+.svg-wrap{overflow-x:auto;padding:8px 0 4px}
+svg text{font-family:"JetBrains Mono",monospace}
+
+/* ---- Decision cards grid ---- */
+.decision-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+@media(max-width:700px){.decision-grid{grid-template-columns:1fr}}
+
+.dec-card{
+  background:var(--surface);
+  border:3px solid var(--ink);
+  border-radius:var(--radius);
+  padding:20px 22px;
+  box-shadow:var(--shadow);
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.dec-card .dc-id{
+  font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:1px;
+  text-transform:uppercase;color:#fff;background:var(--ink);
+  border-radius:3px;padding:2px 8px;display:inline-block;width:fit-content;
+}
+.dec-card .dc-title{font-weight:700;font-size:15px;line-height:1.3}
+.dec-card .dc-why{font-size:13.5px;color:var(--ink-soft);line-height:1.5}
+.dec-card .dc-sprint{
+  font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:auto;
+  border-top:1.5px solid var(--line);padding-top:9px;
+}
+
+/* ---- Layer diagram wrapper ---- */
+.diagram-card{
+  background:var(--surface);border:3px solid var(--ink);border-radius:var(--radius);
+  padding:28px 30px;box-shadow:var(--shadow-lg);margin-bottom:22px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.diagram-card .dc-label{
+  font-family:var(--mono);font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.6px;color:var(--muted);margin-bottom:4px;
+}
+
+/* ---- Revisited callout ---- */
+.revisited{
+  border:2px solid var(--ink);border-left-width:6px;background:var(--blue-soft);
+  border-radius:var(--radius);padding:15px 18px;margin:16px 0;font-size:14.5px;
+  box-shadow:3px 3px 0 0 var(--ink);
+}
+.revisited .lab{
+  font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.8px;
+  text-transform:uppercase;color:#fff;background:var(--blue);border:2px solid var(--ink);
+  border-radius:3px;padding:2px 8px;display:inline-block;margin-bottom:9px;
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación del proyecto</p>
+        <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a class="active" href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+  <main>
+  <div class="content">
+    <header class="hero">
+      <div class="eyebrow">Diseño · Arquitectura</div>
+      <h1>Decisiones cerradas</h1>
+      <p class="lede">Registro de decisiones de diseño no revisitables, con el razonamiento que las fundamenta. Una vez cerrada, una decisión no se reabre sin justificación nueva.</p>
+      <div class="meta-row">
+        <span class="pill"><b>Fuente</b> docs/vision-global.md §3</span>
+        <span class="pill"><b>Decisiones</b> 22 registradas</span>
+      </div>
+    </header>
+
+    <!-- ===== SECCIÓN 0: DIAGRAMA SVG ===== -->
+    <section id="mapa">
+      <div class="sec-head">
+        <div class="badge">&#9671;</div>
+        <div>
+          <h2>Mapa de dependencias entre decisiones</h2>
+          <p class="sec-sub">Cómo las decisiones de capas inferiores condicionan las superiores</p>
+        </div>
+      </div>
+
+      <div class="diagram-card">
+        <div class="dc-label">Diagrama de dependencias — lectura de abajo a arriba</div>
+        <div class="svg-wrap">
+<svg viewBox="0 0 860 620" width="100%" style="max-width:860px;display:block;margin:0 auto">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0,9 3.5,0 7" fill="#111"/>
+    </marker>
+  </defs>
+
+  <!-- ===== FILA 0: cimientos ===== -->
+  <!-- Supabase -->
+  <rect x="54" y="534" width="170" height="48" rx="4" fill="#111"/>
+  <rect x="50" y="530" width="170" height="48" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="135" y="549" text-anchor="middle" font-size="10" font-weight="600" fill="#111">SUPABASE</text>
+  <text x="135" y="562" text-anchor="middle" font-size="9" fill="#2563eb">PostgreSQL 16</text>
+  <!-- Agente Python -->
+  <rect x="254" y="534" width="170" height="48" rx="4" fill="#111"/>
+  <rect x="250" y="530" width="170" height="48" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="335" y="549" text-anchor="middle" font-size="10" font-weight="600" fill="#111">AGENTE PYTHON</text>
+  <text x="335" y="562" text-anchor="middle" font-size="9" fill="#2563eb">FastAPI separado</text>
+  <!-- React+Vite (no Next.js) -->
+  <rect x="454" y="534" width="170" height="48" rx="4" fill="#111"/>
+  <rect x="450" y="530" width="170" height="48" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="535" y="549" text-anchor="middle" font-size="10" font-weight="600" fill="#111">REACT + VITE</text>
+  <text x="535" y="562" text-anchor="middle" font-size="9" fill="#2563eb">Sin SSR</text>
+  <!-- Express 5 -->
+  <rect x="654" y="534" width="170" height="48" rx="4" fill="#111"/>
+  <rect x="650" y="530" width="170" height="48" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="735" y="549" text-anchor="middle" font-size="10" font-weight="600" fill="#111">EXPRESS 5 + WS</text>
+  <text x="735" y="562" text-anchor="middle" font-size="9" fill="#2563eb">Backend / Socket.io</text>
+  <!-- ===== FILA 1: modelo de datos / frontend canvas ===== -->
+  <!-- React Flow 12 -->
+  <rect x="54" y="430" width="170" height="48" rx="4" fill="#111"/>
+  <rect x="50" y="426" width="170" height="48" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+  <text x="135" y="445" text-anchor="middle" font-size="10" font-weight="600" fill="#111">REACT FLOW 12</text>
+  <text x="135" y="458" text-anchor="middle" font-size="9" fill="#16a34a">No D3 / cytoscape</text>
+  <!-- Schema-first / Zod -->
+  <rect x="254" y="430" width="170" height="48" rx="4" fill="#111"/>
+  <rect x="250" y="426" width="170" height="48" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+  <text x="335" y="445" text-anchor="middle" font-size="10" font-weight="600" fill="#111">SCHEMA-FIRST</text>
+  <text x="335" y="458" text-anchor="middle" font-size="9" fill="#16a34a">Pydantic + Zod</text>
+  <!-- LangGraph -->
+  <rect x="454" y="430" width="170" height="48" rx="4" fill="#111"/>
+  <rect x="450" y="426" width="170" height="48" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+  <text x="535" y="445" text-anchor="middle" font-size="10" font-weight="600" fill="#111">LANGGRAPH</text>
+  <text x="535" y="458" text-anchor="middle" font-size="9" fill="#16a34a">Orquestación con tools</text>
+  <!-- ===== FILA 2: pipeline validación ===== -->
+  <!-- Validación en capas -->
+  <rect x="104" y="326" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="100" y="322" width="200" height="56" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+  <text x="200" y="342" text-anchor="middle" font-size="10" font-weight="600" fill="#111">VALIDACIÓN EN CAPAS</text>
+  <text x="200" y="355" text-anchor="middle" font-size="9" fill="#b07c00">Pydantic + semántica</text>
+  <text x="200" y="366" text-anchor="middle" font-size="9" fill="#b07c00">+ referencial + estructural</text>
+  <!-- Streaming progresivo -->
+  <rect x="334" y="326" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="330" y="322" width="200" height="56" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+  <text x="430" y="342" text-anchor="middle" font-size="10" font-weight="600" fill="#111">STREAMING PROGRESIVO</text>
+  <text x="430" y="355" text-anchor="middle" font-size="9" fill="#b07c00">Solo emit lo confirmado;</text>
+  <text x="430" y="366" text-anchor="middle" font-size="9" fill="#b07c00">nunca retractar</text>
+  <!-- Prompts por DiagramType -->
+  <rect x="564" y="326" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="560" y="322" width="200" height="56" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+  <text x="660" y="342" text-anchor="middle" font-size="10" font-weight="600" fill="#111">PROMPTS POR TIPO</text>
+  <text x="660" y="355" text-anchor="middle" font-size="9" fill="#b07c00">Registro agent/prompts.py</text>
+  <text x="660" y="366" text-anchor="middle" font-size="9" fill="#b07c00">fallback permisivo</text>
+  <!-- ===== FILA 3: gateway como backend ===== -->
+  <!-- Gateway = backend -->
+  <rect x="104" y="222" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="100" y="218" width="200" height="56" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+  <text x="200" y="238" text-anchor="middle" font-size="10" font-weight="600" fill="#111">BACKEND</text>
+  <text x="200" y="251" text-anchor="middle" font-size="9" fill="#b83f00">rate limit, caché, CRUD</text>
+  <text x="200" y="262" text-anchor="middle" font-size="9" fill="#b83f00">NO lógica de agente</text>
+  <!-- Caché global service_role -->
+  <rect x="334" y="222" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="330" y="218" width="200" height="56" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+  <text x="430" y="238" text-anchor="middle" font-size="10" font-weight="600" fill="#111">CACHÉ GLOBAL</text>
+  <text x="430" y="251" text-anchor="middle" font-size="9" fill="#b83f00">service_role, sin user_id</text>
+  <text x="430" y="262" text-anchor="middle" font-size="9" fill="#b83f00">RLS sin políticas</text>
+  <!-- Frescura token lazy -->
+  <rect x="564" y="222" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="560" y="218" width="200" height="56" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+  <text x="660" y="238" text-anchor="middle" font-size="10" font-weight="600" fill="#111">FRESCURA TOKEN LAZY</text>
+  <text x="660" y="251" text-anchor="middle" font-size="9" fill="#b83f00">Comparación exp sin cripto;</text>
+  <text x="660" y="262" text-anchor="middle" font-size="9" fill="#b83f00">revalidación en entrada</text>
+  <!-- ===== FILA 4: ReAct / agente ===== -->
+  <!-- Dos APIs LLM -->
+  <rect x="104" y="118" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="100" y="114" width="200" height="56" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="200" y="134" text-anchor="middle" font-size="10" font-weight="600" fill="#111">DOS APIS LLM</text>
+  <text x="200" y="147" text-anchor="middle" font-size="9" fill="#2563eb">call_llm (httpx) + get_chat_model</text>
+  <text x="200" y="158" text-anchor="middle" font-size="9" fill="#2563eb">(LangChain bind_tools)</text>
+  <!-- Puente tools por petición -->
+  <rect x="334" y="118" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="330" y="114" width="200" height="56" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="430" y="134" text-anchor="middle" font-size="10" font-weight="600" fill="#111">PUENTE TOOLS</text>
+  <text x="430" y="147" text-anchor="middle" font-size="9" fill="#2563eb">Closure por petición;</text>
+  <text x="430" y="158" text-anchor="middle" font-size="9" fill="#2563eb">loop termina sin tool_calls</text>
+  <!-- Interrupt ask_clarification -->
+  <rect x="564" y="118" width="200" height="56" rx="4" fill="#111"/>
+  <rect x="560" y="114" width="200" height="56" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="660" y="134" text-anchor="middle" font-size="10" font-weight="600" fill="#111">INTERRUPT DEDICADO</text>
+  <text x="660" y="147" text-anchor="middle" font-size="9" fill="#2563eb">nodo clarify libre de efectos;</text>
+  <text x="660" y="158" text-anchor="middle" font-size="9" fill="#2563eb">/refine/resume separado</text>
+  <!-- ===== FLECHAS fila 0 → fila 1 ===== -->
+  <!-- Supabase → Schema-first -->
+  <line x1="135" y1="530" x2="295" y2="474" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Agente Python → LangGraph -->
+  <line x1="335" y1="530" x2="495" y2="474" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- React+Vite → React Flow -->
+  <line x1="500" y1="554" x2="220" y2="474" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Express → Schema-first -->
+  <line x1="700" y1="530" x2="400" y2="474" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- fila 1 → fila 2 -->
+  <!-- React Flow → Validación en capas -->
+  <line x1="135" y1="426" x2="175" y2="378" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Schema-first → Validación -->
+  <line x1="310" y1="426" x2="235" y2="378" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Schema-first → Streaming -->
+  <line x1="360" y1="426" x2="400" y2="378" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- LangGraph → Prompts por tipo -->
+  <line x1="560" y1="426" x2="630" y2="378" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- LangGraph → Streaming -->
+  <line x1="510" y1="426" x2="470" y2="378" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- fila 2 → fila 3 -->
+  <!-- Validación en capas → Gateway=Backend -->
+  <line x1="200" y1="322" x2="200" y2="274" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Validación → Caché global -->
+  <line x1="250" y1="340" x2="370" y2="274" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Streaming → Caché global -->
+  <line x1="430" y1="322" x2="430" y2="274" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Streaming → Frescura token -->
+  <line x1="490" y1="340" x2="600" y2="274" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- fila 3 → fila 4 -->
+  <!-- Gateway=Backend → Dos APIs LLM -->
+  <line x1="200" y1="218" x2="200" y2="170" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Gateway=Backend → Puente tools -->
+  <line x1="260" y1="236" x2="370" y2="170" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Caché → Dos APIs LLM -->
+  <line x1="380" y1="236" x2="260" y2="170" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Caché → Interrupt -->
+  <line x1="490" y1="218" x2="600" y2="170" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- Frescura → Interrupt -->
+  <line x1="660" y1="218" x2="660" y2="170" stroke="#111" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Leyenda -->
+  <rect x="30" y="20" width="300" height="84" rx="4" fill="#fff" stroke="#111" stroke-width="2"/>
+  <text x="40" y="38" font-size="10" font-weight="600" fill="#111">LEYENDA</text>
+  <rect x="40" y="45" width="14" height="10" rx="2" fill="#dbe6ff" stroke="#111" stroke-width="1.5"/>
+  <text x="60" y="54" font-size="9" fill="#111">Infraestructura / stack base</text>
+  <rect x="40" y="60" width="14" height="10" rx="2" fill="#d8f3e1" stroke="#111" stroke-width="1.5"/>
+  <text x="60" y="69" font-size="9" fill="#111">Modelo de datos / orquestación</text>
+  <rect x="40" y="75" width="14" height="10" rx="2" fill="#fdf0b8" stroke="#111" stroke-width="1.5"/>
+  <text x="60" y="84" font-size="9" fill="#111">Pipeline de validación / generación</text>
+  <rect x="40" y="90" width="14" height="10" rx="2" fill="#ffe7d6" stroke="#111" stroke-width="1.5"/>
+  <text x="60" y="99" font-size="9" fill="#111">Backend / seguridad / caché</text>
+</svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SECCIÓN 1: TABLA MAESTRA ===== -->
+    <section id="tabla">
+      <div class="sec-head">
+        <div class="badge">&#9776;</div>
+        <div>
+          <h2>Tabla de decisiones</h2>
+          <p class="sec-sub">Referencia rápida — decisión · razón · capa</p>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:36px">#</th>
+              <th style="width:200px">Decisión</th>
+              <th>Razón principal</th>
+              <th style="width:80px">Capa</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D01</code></td>
+              <td><b>Supabase</b> (no Mongo/Firestore)</td>
+              <td>Nodos/aristas necesitan constraints relacionales e integridad referencial que solo un modelo relacional garantiza</td>
+              <td><span class="tag">BD</span></td>
+            </tr>
+            <tr>
+              <td><code>D02</code></td>
+              <td><b>Agente Python separado</b></td>
+              <td>Ecosistema LangChain/LangGraph solo disponible en Python; nunca <code>child_process</code> Node→Python</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D03</code></td>
+              <td><b>React + Vite</b> (no Next.js)</td>
+              <td>SSR rompe Canvas API / React Flow; el canvas es client-only</td>
+              <td><span class="tag">Frontend</span></td>
+            </tr>
+            <tr>
+              <td><code>D04</code></td>
+              <td><b>Express 5 + Socket.io</b></td>
+              <td>Simplicidad y soporte nativo de WebSockets; WS bidireccional necesario para streaming</td>
+              <td><span class="tag">Backend</span></td>
+            </tr>
+            <tr>
+              <td><code>D05</code></td>
+              <td><b>React Flow 12</b> (no D3/cytoscape)</td>
+              <td>Modelo nodo/arista declarativo + edición nativa. D3 requeriría reimplementar todo el modelo de edición</td>
+              <td><span class="tag">Frontend</span></td>
+            </tr>
+            <tr>
+              <td><code>D06</code></td>
+              <td><b>Schema-first</b> con Pydantic + Zod</td>
+              <td>Schema = único contrato entre procesos; tipos TS derivados de <code>z.infer</code> no pueden desincronizarse del validador</td>
+              <td><span class="tag">Transversal</span></td>
+            </tr>
+            <tr>
+              <td><code>D07</code></td>
+              <td><b>LangGraph</b> para orquestación</td>
+              <td>Control de flujo del agente con tools; bucles de reintento y branches son nativos en el grafo</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D08</code></td>
+              <td><b>Validación en TRES niveles</b> (no Structured Outputs)</td>
+              <td>SO garantiza sintaxis pero no semántica ni refs. Los tres niveles (pieza, referencial, estructural) atrapan además la sintaxis → SO es refuerzo opcional, no reemplazo</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D09</code></td>
+              <td><b>Streaming progresivo sin retracción</b></td>
+              <td>El reintento opera solo sobre huérfanas retenidas (no emitidas) → el canvas solo recibe adiciones, sin reconciliación ni flash</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D10</code></td>
+              <td><b>Prompts específicos por <code>DiagramType</code></b></td>
+              <td>Prompt genérico producía topologías lineales para todos los tipos; el registro de tipos también es la fuente de verdad para la validación semántica</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D11</code></td>
+              <td><b><code>extract_nodes</code> = única fuente de nodos</b></td>
+              <td>Una arista huérfana es indistinguible de un nodo olvidado; dejar que las aristas inventen nodos reintroduce alucinación</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D12</code></td>
+              <td><b>Mapa de tipos permitidos en <code>schemas.py</code></b></td>
+              <td>Contrato vive junto a los enums, no en prompts (evita dependencia invertida); fallback permisivo → degrada a solo-Pydantic si falta registro</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D13</code></td>
+              <td><b>Fallo estructural = carencia, no pieza inválida</b></td>
+              <td>Canal <code>structural_gaps</code> (replace) + bucle de RELLENO aditivo separado; presupuesto <code>schema_retry_count</code> propio</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D14</code></td>
+              <td><b>Modo de extractores por CONTENIDO</b></td>
+              <td>El contador es presupuesto, no señal de modo; detectar modo por estado (hay <code>structural_gaps</code> / <code>invalid_*</code>) evita secuestros de modo</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D15</code></td>
+              <td><b><code>classify_outcome</code> función pura</b></td>
+              <td>Un nodo terminal no puede ver todos los desenlaces; <code>main.py</code> es el único punto que ve final limpio, guard-reject y crash. Función pura → testable sin grafo</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D16</code></td>
+              <td><b>Dos APIs de LLM por necesidad</b></td>
+              <td><code>bind_tools()</code>/ToolNode exigen <code>BaseChatModel</code>; migrar la generación httpx sería refactor masivo sin ganancia. Tres perfiles (local/openai/anthropic)</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D17</code></td>
+              <td><b>Puente tools closure por petición</b></td>
+              <td>Un ToolNode global mutaría un workspace compartido → dos refinamientos concurrentes se pisarían</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D18</code></td>
+              <td><b><code>ask_clarification</code> = <code>interrupt()</code> en nodo dedicado</b></td>
+              <td>En ToolNode, las tools hermanas del turno se ejecutarían dos veces al reanudar; en nodo aparte el interrupt es idempotente</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D19</code></td>
+              <td><b><code>refinement_history</code> derivada de <code>messages</code></b></td>
+              <td>La traza existe en el estado; una lista paralela sería segunda fuente de verdad capaz de desincronizarse (mismo principio que <code>classify_outcome</code>)</td>
+              <td><span class="tag">Agente</span></td>
+            </tr>
+            <tr>
+              <td><code>D20</code></td>
+              <td><b>Backend = único acceso a datos; JWT reenviado a Supabase</b></td>
+              <td>Auth y topología en un solo sitio; <code>auth.uid()</code> impone propiedad sin bypass de RLS. <code>service_role</code> solo para caché global</td>
+              <td><span class="tag">Backend</span></td>
+            </tr>
+            <tr>
+              <td><code>D21</code></td>
+              <td><b>Caché global con <code>service_role</code>, RLS sin políticas</b></td>
+              <td>Evita envenenamiento desde cliente; namespace por modelo impide servir diagrama Qwen a usuario GPT-4o; solo cachea éxito limpio</td>
+              <td><span class="tag">Backend</span></td>
+            </tr>
+            <tr>
+              <td><code>D22</code></td>
+              <td><b>Frescura de token por revalidación perezosa (<code>exp</code>)</b></td>
+              <td>Comparar <code>now &gt;= exp</code> sin cripto en cada entrada al agente; cripto cara solo al entrar token nuevo. Identidad inmutable en socket vivo</td>
+              <td><span class="tag">Backend</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===== SECCIÓN 2: DECISIONES DE STACK BASE ===== -->
+    <section id="stack">
+      <div class="sec-head">
+        <div class="badge">&#9633;</div>
+        <div>
+          <h2>Stack base e infraestructura</h2>
+          <p class="sec-sub">D01–D05 · Cimientos no negociables</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D01</span>
+        <p><b>Supabase (PostgreSQL) como única BD.</b> Los nodos y aristas de un diagrama son entidades con identidad, relaciones y constraints de integridad referencial que solo un modelo relacional garantiza de forma nativa. Un store NoSQL como Mongo o Firestore haría recaer esas constraints en el código de aplicación, con el riesgo de aristas huérfanas persistentes.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D02</span>
+        <p><b>Proceso Python independiente para el agente IA.</b> LangChain, LangGraph y el ecosistema de herramientas de IA (transformers, ijson, httpx para LLM) son de facto Python. Ejecutarlos desde Node.js vía <code>child_process</code> implicaría serializar el estado completo del agente en cada llamada, impide streaming granular y acopla los ciclos de vida de los dos procesos. La arquitectura de tres procesos independientes (frontend / backend / agente) con HTTP/WS entre ellos es invariante del proyecto.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D03</span>
+        <p><b>React 19 + Vite 8 (no Next.js ni ningún framework con SSR).</b> El canvas de diagramas usa la Canvas API y React Flow, ambas <em>client-only</em>: requieren acceso al DOM y a eventos de puntero que no existen en el servidor. Next.js SSR renderizaría los componentes en servidor y los hidrataria en cliente, produciendo mismatches de hidratación insalvables. Vite en modo SPA da HMR sub-segundo y bundles óptimos sin ninguna complejidad de SSR.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D04</span>
+        <p><b>Express 5 + Socket.io como backend.</b> El streaming de nodos y aristas desde el agente requiere un canal bidireccional. Socket.io sobre Express es la opción con mejor soporte y documentación para WS en Node.js. Fastify o Nest habrían añadido abstracción sin ganancia real para un servidor cuya responsabilidad central es enrutar HTTP → Python y mantener el socket → cliente.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D05</span>
+        <p><b>React Flow 12 (no D3 ni cytoscape).</b> React Flow expone un modelo declarativo de nodos y aristas como objetos React, con edición interactiva (drag, resize, conexiones) integrada. D3 es un motor de renderizado SVG de bajo nivel: habría que reimplementar todo el modelo de interacción. Cytoscape tiene un modelo de datos propio que no se mapa a tipos TS sin conversión constante.</p>
+      </div>
+    </section>
+
+    <!-- ===== SECCIÓN 3: SCHEMA-FIRST Y CONTRATOS ===== -->
+    <section id="schema">
+      <div class="sec-head">
+        <div class="badge">&#10003;</div>
+        <div>
+          <h2>Contratos y schema-first</h2>
+          <p class="sec-sub">D06 · Decisión transversal</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D06</span>
+        <p><b>Schema-first: Pydantic en el agente, Zod en el frontend; tipos TS derivados con <code>z.infer</code>.</b> Todo lo que cruza el borde de un proceso pasa por un schema en runtime. Los tipos TypeScript se borran en compilación — si el schema y el tipo fueran archivos distintos, podrían desincronizarse silenciosamente. <code>z.infer&lt;typeof schema&gt;</code> hace al schema la única fuente de verdad: tipo y validador son la misma declaración. El import de un <code>.json</code> externo usa <code>diagramImportSchema = diagramSchema.refine(integridad referencial)</code> porque es entrada externa no confiable.</p>
+      </div>
+
+      <div class="caveat">
+        <span class="lab">Alcance de la decisión</span>
+        <p>Los tipos puramente de UI (<code>Message</code>, <code>UIState</code>, <code>ToolTrace*</code>, <code>Degradation</code>…) siguen como <code>type</code>/<code>interface</code> sin Zod. No entran por ningún borde externo — son estado interno del cliente — así que el runtime overhead de un schema no aporta nada.</p>
+      </div>
+    </section>
+
+    <!-- ===== SECCIÓN 4: PIPELINE DE VALIDACIÓN ===== -->
+    <section id="validacion">
+      <div class="sec-head">
+        <div class="badge">&#9632;</div>
+        <div>
+          <h2>Pipeline de validación en capas</h2>
+          <p class="sec-sub">D07–D15 · Núcleo del agente</p>
+        </div>
+      </div>
+
+      <p>El núcleo de la generación es un grafo LangGraph con tres categorías ortogonales de validación, cada una con su propio presupuesto de reintento y canal de estado. La decisión de no usar Structured Outputs (DO) como única garantía es la más debatida del proyecto y merece tratamiento separado.</p>
+
+      <div class="revisited">
+        <span class="lab">Decisión revisitada D08</span>
+        <p><b>Validación en capas con realimentación en vez de Structured Outputs.</b></p>
+        <p>La garantía sintáctica de SO (JSON siempre parseable) no cubre los errores dominantes del dominio: aristas huérfanas, <code>node_type</code> semánticamente inválido para ese <code>DiagramType</code>, flowcharts sin nodo de inicio — todos schema-válidos en Pydantic y en SO. Las capas de validación, necesarias de todos modos para esos errores, también atrapan la sintaxis (Pydantic). Descartar en SO y generar de nuevo es más caro que retener lo válido y realimentar solo lo inválido.</p>
+        <p>SO queda registrado en <code>docs/pendientes.md</code> como <b>refuerzo opcional</b>: evaluar compatibilidad con el streaming ijson y la paridad de los tres perfiles (local/openai/anthropic).</p>
+      </div>
+
+      <div class="decision-grid">
+        <div class="dec-card">
+          <span class="dc-id">D09</span>
+          <div class="dc-title">Streaming progresivo sin retracción</div>
+          <div class="dc-why">Solo se emite al canvas lo confirmado válido. El reintento opera sobre huérfanas retenidas — nunca streameadas. El resultado es siempre "solo añadir": no hay reconciliación ni flash de elementos que desaparecen.</div>
+          <div class="dc-sprint">Invariante: una vez emitido, no se retracta</div>
+        </div>
+        <div class="dec-card">
+          <span class="dc-id">D10</span>
+          <div class="dc-title">Prompts específicos por <code>DiagramType</code></div>
+          <div class="dc-why">Un prompt genérico con ejemplo ERD producía topologías lineales para todos los tipos — flowcharts sin nodo de decisión, casos de uso sin actores. El registro en <code>agent/prompts.py</code> es además la fuente de verdad para la validación semántica del lado agente.</div>
+          <div class="dc-sprint">Fallback genérico para tipos sin entrada registrada</div>
+        </div>
+        <div class="dec-card">
+          <span class="dc-id">D11</span>
+          <div class="dc-title"><code>extract_nodes</code> = única fuente de nodos</div>
+          <div class="dc-why">Una arista huérfana (typo en ID vs. nodo olvidado) es indistinguible desde su propia señal. Dejar que la regeneración de aristas invente nodos reintroduce alucinación. Si los nodos son malos, el usuario regenera desde 0.</div>
+          <div class="dc-sprint">Las aristas nunca crean nodos — invariante ortogonal</div>
+        </div>
+        <div class="dec-card">
+          <span class="dc-id">D12</span>
+          <div class="dc-title">Tipos permitidos en <code>schemas.py</code>, fallback permisivo</div>
+          <div class="dc-why">El contrato de qué tipo es válido para qué diagrama vive junto a los enums, no en el módulo de prompts (evita dependencia invertida). Si se añade un tipo y se olvida registrarlo, degrada a solo-Pydantic en vez de rechazar todos sus diagramas.</div>
+          <div class="dc-sprint">Fallar hacia permisivo, nunca hacia roto</div>
+        </div>
+        <div class="dec-card">
+          <span class="dc-id">D13</span>
+          <div class="dc-title">Fallo estructural = carencia, no pieza inválida</div>
+          <div class="dc-why">No hay pieza que retener/corregir — falta algo que el LLM nunca generó. Canal <code>structural_gaps</code> (replace) + bucle de relleno aditivo con <code>schema_retry_count</code> propio. <code>operator.add</code> en nodos/aristas: el relleno solo añade, respetando el invariante de streaming.</div>
+          <div class="dc-sprint">Presupuestos separados por tipo de fallo</div>
+        </div>
+        <div class="dec-card">
+          <span class="dc-id">D14</span>
+          <div class="dc-title">Modo de extractores por CONTENIDO del estado</div>
+          <div class="dc-why">El contador es presupuesto, no señal de modo. Venir de <code>validate_schema</code> implica que el bucle local ya cerró; un <code>invalid_*</code> residual no debe secuestrar el modo. Prioridad: rellenar > corregir > normal.</div>
+          <div class="dc-sprint">Detectar modo por hay-gaps / hay-invalid, no por contador</div>
+        </div>
+        <div class="dec-card">
+          <span class="dc-id">D15</span>
+          <div class="dc-title"><code>classify_outcome</code> función pura en <code>outcome.py</code></div>
+          <div class="dc-why">Un nodo terminal no puede ver todos los desenlaces: el guard-reject sale por END saltando nodos de salida; la excepción lanza y no termina ningún nodo. <code>main.py</code> es el único punto que ve los tres. Función pura → testable sin grafo.</div>
+          <div class="dc-sprint">≥1 nodo válido → done; 0 nodos → error</div>
+        </div>
+        <div class="dec-card">
+          <span class="dc-id">D07</span>
+          <div class="dc-title">LangGraph para orquestación del agente</div>
+          <div class="dc-why">Los bucles de reintento con branches condicionales (validar → si error → regenerar → volver a validar) son nodos y edges del grafo. Sin LangGraph, el control de flujo viviría en código imperativo sin checkpointing ni observabilidad.</div>
+          <div class="dc-sprint">Tools → ToolNode nativo en LangGraph</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SECCIÓN 5: AGENTE REACT ===== -->
+    <section id="agente-react">
+      <div class="sec-head">
+        <div class="badge">&#8634;</div>
+        <div>
+          <h2>Agente ReAct y refinamiento</h2>
+          <p class="sec-sub">D16–D19 · Refinamiento conversacional</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D16</span>
+        <p><b>Dos APIs de LLM conviviendo por necesidad técnica.</b> La generación usa <code>call_llm</code>/<code>stream_llm</code> (HTTP crudo a Ollama/OpenAI, una completion, texto). El agente ReAct usa <code>get_chat_model</code> (chat-model de LangChain con <code>bind_tools()</code>). <code>bind_tools()</code>/ToolNode exigen un <code>BaseChatModel</code> que la abstracción httpx cruda no implementa. Migrar toda la generación a chat-models sería un refactor masivo sin ganancia funcional — la generación no necesita tools. Ambas APIs enrutan por el mismo <code>LLM_PROFILE</code>; el agente soporta tres perfiles (local→ChatOllama, openai→ChatOpenAI, anthropic→ChatAnthropic) con imports lazy por perfil.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D17</span>
+        <p><b>Puente tools↔workspace construido POR PETICIÓN (closure).</b> Un ToolNode global con referencias estáticas al workspace mutaría estado compartido entre peticiones concurrentes: dos usuarios refinando al mismo tiempo se pisarían. El closure captura el <code>DiagramWorkspace</code> de esa petición concreta. El contrato que ve el LLM (nombre + <code>args_schema</code>) es estático; la ejecución apunta a esa instancia. El loop ReAct termina por ausencia de <code>tool_calls</code>, no por marcador explícito.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D18</span>
+        <p><b><code>ask_clarification</code> usa <code>interrupt()</code> en nodo <code>clarify</code> dedicado, libre de efectos.</b> LangGraph re-ejecuta el nodo interrumpido desde su inicio al reanudar. Si el interrupt viviera en ToolNode, las tools hermanas del mismo turno se ejecutarían dos veces (duplicado silencioso). En nodo aparte, las tools hermanas quedan checkpointeadas y el interrupt es idempotente. La reanudación es <code>/refine/resume {thread_id, answer}</code> con <code>Command(resume=...)</code> sin validador LLM previo: interpretar la respuesta (¿contesta o pide otra cosa?) es trabajo del propio agente en su loop.</p>
+      </div>
+
+      <div class="caveat">
+        <span class="lab">Estado en memoria — deuda consciente</span>
+        <p>El estado entre pausa (<code>interrupt()</code>) y reanudación (<code>Command(resume=...)</code>) vive en <code>InMemorySaver</code> + workspace pendiente por <code>thread_id</code> en memoria del proceso. Es una excepción consciente al principio sin estado del backend, con salida planificada: migrar a checkpointer Postgres.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D19</span>
+        <p><b><code>refinement_history</code> derivada de los <code>messages</code> finales</b> con función pura <code>extract_history</code>. Cada <code>AIMessage.tool_calls</code> se empareja con su <code>ToolMessage</code> por <code>tool_call_id</code>. La traza ya existe en el estado del grafo; una lista paralela construida durante el loop sería una segunda fuente de verdad capaz de desincronizarse — mismo principio que <code>classify_outcome</code> (D15).</p>
+      </div>
+    </section>
+
+    <!-- ===== SECCIÓN 6: BACKEND ===== -->
+    <section id="gateway">
+      <div class="sec-head">
+        <div class="badge">&#9670;</div>
+        <div>
+          <h2>Backend: seguridad y admisión</h2>
+          <p class="sec-sub">D20–D22 · Acceso a datos, caché y frescura de token</p>
+        </div>
+      </div>
+
+      <p>El backend concentra responsabilidades de acceso a datos, rate limiting y caché, además de actuar como pasarela hacia el microservicio de IA. La distinción clave: <b>control de admisión ≠ lógica del agente</b>. El agente sigue siendo el único lugar donde se clasifican diagramas, validan esquemas y orquestan tools.</p>
+
+      <div class="decision">
+        <span class="lab">Decisión D20</span>
+        <p><b>El backend es el único punto de acceso a datos de persistencia.</b> El frontend nunca llama a Supabase directamente. El CRUD vive en <code>backend/src/diagrams.ts</code>; el frontend solo conoce los endpoints REST. El JWT del usuario se reenvía a Supabase para que <code>auth.uid()</code> imponga la propiedad mediante RLS — sin bypass de <code>service_role</code> para diagramas de usuario. Esto concentra auth y topología de BD en un único punto (un cambio de esquema solo afecta al backend, no al frontend).</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D21</span>
+        <p><b>Caché global de generaciones con <code>service_role</code>, sin <code>user_id</code>, RLS activada pero sin políticas.</b> El namespace de caché no tiene propietario — es compartida entre usuarios — por lo que no tiene <code>user_id</code>. RLS sin políticas bloquea cualquier acceso desde cliente y solo permite <code>service_role</code>, evitando el envenenamiento de la caché compartida desde el cliente. Clave <code>(prompt_key, model)</code>: el namespace por modelo impide servir un diagrama Qwen a un usuario de GPT-4o. Solo se cachea éxito limpio (≥1 nodo, no degradado): cachear un diagrama degradado lo serviría como bueno. El botón "Regenerar" fuerza generación saltándose el lookup. <code>checkRateLimit</code> corre ANTES del lookup — un hit cuenta y un usuario en el tope no llega a la caché.</p>
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión D22</span>
+        <p><b>Frescura del token en sockets vivos por revalidación perezosa anclada al <code>exp</code>.</b> El handshake guarda <code>socket.data.tokenExp</code>. Las 4 entradas que corren el agente comparan <code>now &gt;= exp</code> (enteros, sin cripto ni red) y cortan (<code>auth:expired</code> + disconnect) si caducó. La verificación cripto cara ocurre solo al entrar un token nuevo (<code>auth:refresh</code>). Identidad <b>inmutable</b> en un socket vivo: si llega un <code>sub</code> distinto, se corta. <code>socket.data.tokenExp</code> es estado de la conexión, no de aplicación — no va a BD; el backend sigue sin estado en lo que importa.</p>
+      </div>
+
+      <div class="caveat">
+        <span class="lab">Ventana de revocación</span>
+        <p>Solo se compara el campo <code>exp</code> del JWT, no se consulta Supabase. Una revocación server-side se respeta como muy tarde a la expiración del token (≤1h). Esto es un trade-off explícito: el coste de la verificación cripto en cada llamada no se justifica para una ventana aceptable de 1h.</p>
+      </div>
+
+      <!-- Diagrama: responsabilidades del gateway -->
+      <div class="diagram-card">
+        <div class="dc-label">Responsabilidades del backend — separación de concerns</div>
+        <div class="svg-wrap">
+<svg viewBox="0 0 720 300" width="100%" style="max-width:720px;display:block;margin:0 auto">
+  <defs>
+    <marker id="arr2" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0,9 3.5,0 7" fill="#111"/>
+    </marker>
+  </defs>
+
+  <!-- FRONTEND -->
+  <rect x="14" y="124" width="130" height="52" rx="4" fill="#111"/>
+  <rect x="10" y="120" width="130" height="52" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+  <text x="75" y="141" text-anchor="middle" font-size="10" font-weight="600">FRONTEND</text>
+  <text x="75" y="154" text-anchor="middle" font-size="9" fill="#2563eb">React + React Flow</text>
+  <text x="75" y="165" text-anchor="middle" font-size="8" fill="#75716a">REST / Socket.io</text>
+
+  <!-- GATEWAY BOX GRANDE -->
+  <rect x="174" y="44" width="360" height="212" rx="4" fill="#111"/>
+  <rect x="170" y="40" width="360" height="212" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+  <text x="350" y="60" text-anchor="middle" font-size="10" font-weight="700">BACKEND (Node.js)</text>
+
+  <!-- Subcomponentes gateway -->
+  <!-- Rate limit -->
+  <rect x="189" y="74" width="150" height="40" rx="4" fill="#111"/>
+  <rect x="185" y="70" width="150" height="40" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="2"/>
+  <text x="260" y="87" text-anchor="middle" font-size="9" font-weight="600">RATE LIMIT</text>
+  <text x="260" y="99" text-anchor="middle" font-size="8" fill="#b83f00">rateLimit.ts · por user_id/IP</text>
+
+  <!-- Caché -->
+  <rect x="359" y="74" width="160" height="40" rx="4" fill="#111"/>
+  <rect x="355" y="70" width="160" height="40" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="2"/>
+  <text x="435" y="87" text-anchor="middle" font-size="9" font-weight="600">CACHÉ GLOBAL</text>
+  <text x="435" y="99" text-anchor="middle" font-size="8" fill="#b83f00">generation_cache · service_role</text>
+
+  <!-- Auth / JWT frescura -->
+  <rect x="189" y="130" width="150" height="40" rx="4" fill="#111"/>
+  <rect x="185" y="126" width="150" height="40" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="2"/>
+  <text x="260" y="143" text-anchor="middle" font-size="9" font-weight="600">JWT FRESCURA</text>
+  <text x="260" y="155" text-anchor="middle" font-size="8" fill="#b83f00">exp check · auth:refresh</text>
+
+  <!-- CRUD -->
+  <rect x="359" y="130" width="160" height="40" rx="4" fill="#111"/>
+  <rect x="355" y="126" width="160" height="40" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="2"/>
+  <text x="435" y="143" text-anchor="middle" font-size="9" font-weight="600">CRUD PERSISTENCIA</text>
+  <text x="435" y="155" text-anchor="middle" font-size="8" fill="#b83f00">diagrams.ts · JWT → Supabase</text>
+
+  <!-- Enrutador -->
+  <rect x="259" y="186" width="182" height="40" rx="4" fill="#111"/>
+  <rect x="255" y="182" width="182" height="40" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="2"/>
+  <text x="346" y="199" text-anchor="middle" font-size="9" font-weight="600">ENRUTADOR → AGENTE</text>
+  <text x="346" y="211" text-anchor="middle" font-size="8" fill="#16a34a">HTTP POST /generate /refine</text>
+
+  <!-- AGENTE -->
+  <rect x="564" y="124" width="140" height="52" rx="4" fill="#111"/>
+  <rect x="560" y="120" width="140" height="52" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+  <text x="630" y="141" text-anchor="middle" font-size="10" font-weight="600">AGENTE IA</text>
+  <text x="630" y="154" text-anchor="middle" font-size="9" fill="#16a34a">Python + LangGraph</text>
+  <text x="630" y="165" text-anchor="middle" font-size="8" fill="#75716a">Solo lógica IA</text>
+
+  <!-- Flechas -->
+  <line x1="140" y1="146" x2="168" y2="146" stroke="#111" stroke-width="2.5" marker-end="url(#arr2)"/>
+  <line x1="532" y1="202" x2="558" y2="158" stroke="#111" stroke-width="2.5" marker-end="url(#arr2)"/>
+
+  <!-- "NO" flechas frontend → Supabase directo -->
+  <text x="350" y="290" text-anchor="middle" font-size="9" fill="#b83f00" font-weight="600">Frontend → Supabase DIRECTO: BLOQUEADO (sin credenciales en cliente)</text>
+</svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SECCIÓN 7: ANTIPATRONES ===== -->
+    <section id="antipatrones">
+      <div class="sec-head">
+        <div class="badge">&#9888;</div>
+        <div>
+          <h2>Antipatrones — bloquear en revisión</h2>
+          <p class="sec-sub">Lo que estas decisiones cierran explícitamente</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Lo que estas decisiones excluyen</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Antipatrón</th>
+              <th>Decisión que lo cierra</th>
+              <th>Riesgo si se introduce</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>child_process</code> Node→Python</td>
+              <td><span class="tag t-blue">D02</span></td>
+              <td>Estado del agente no serializable; sin streaming granular; acoplamiento de ciclos de vida</td>
+            </tr>
+            <tr>
+              <td>Next.js / SSR</td>
+              <td><span class="tag t-blue">D03</span></td>
+              <td>Canvas API / React Flow no disponibles en servidor; hydration mismatch irrecuperable</td>
+            </tr>
+            <tr>
+              <td>Mermaid como pipeline editable</td>
+              <td><span class="tag t-blue">D05</span></td>
+              <td>Pipeline unidireccional, sin modelo de datos; no hay forma de editar aristas como objetos</td>
+            </tr>
+            <tr>
+              <td>NoSQL para nodos/aristas</td>
+              <td><span class="tag t-blue">D01</span></td>
+              <td>Sin constraints relacionales; aristas huérfanas persistentes sin integridad referencial</td>
+            </tr>
+            <tr>
+              <td>LLM devolviendo strings sin schema</td>
+              <td><span class="tag t-green">D06 D08</span></td>
+              <td>JSON inválido silencioso; ninguna garantía de tipos en runtime; sin feedback de corrección</td>
+            </tr>
+            <tr>
+              <td>Lógica del agente en el backend</td>
+              <td><span class="tag t-warn">D20 D21</span></td>
+              <td>Agente se vuelve stateless-solo; backend acumula clasificación, validación y orquestación de tools</td>
+            </tr>
+            <tr>
+              <td>Estado de diagrama duplicado frontend/backend</td>
+              <td><span class="tag t-green">D09 D19</span></td>
+              <td>Divergencia silenciosa entre canvas y BD; el <code>done</code> con snapshot completo previene esto</td>
+            </tr>
+            <tr>
+              <td>Frontend → Supabase directo</td>
+              <td><span class="tag t-warn">D20</span></td>
+              <td>Credenciales de BD en cliente; bypass de RLS; topología de BD expuesta</td>
+            </tr>
+            <tr>
+              <td><code>any</code> en TypeScript / <code>dict</code> sin tipar en Python (en bordes)</td>
+              <td><span class="tag t-green">D06</span></td>
+              <td>El tipo se borra en compilación; errores de contrato solo detectables en producción</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <a class="toplink" href="#top">&#8593; volver arriba</a>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Documentación generada del código fuente del proyecto.</p>
+    </div>
+  </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Features</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+<style>
+  /* ── Feature grid ── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 18px;
+    margin: 18px 0 0;
+  }
+  .feat-card {
+    background: var(--surface);
+    border: 3px solid var(--ink);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 22px 22px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: transform .08s, box-shadow .08s;
+  }
+  .feat-card:hover {
+    transform: translate(-2px,-2px);
+    box-shadow: var(--shadow-lg);
+  }
+  .feat-card .feat-icon {
+    width: 44px; height: 44px;
+    background: var(--accent-soft);
+    border: 2.5px solid var(--ink);
+    border-radius: var(--radius);
+    display: grid; place-items: center;
+    font-size: 22px;
+    flex: 0 0 44px;
+  }
+  .feat-card h4 {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -.2px;
+  }
+  .feat-card p {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin: 0;
+    line-height: 1.55;
+  }
+  /* ── Diagram type grid ── */
+  .dtype-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .dtype-card {
+    background: var(--surface);
+    border: 3px solid var(--ink);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px 18px 14px;
+    transition: transform .08s, box-shadow .08s;
+  }
+  .dtype-card:hover {
+    transform: translate(-2px,-2px);
+    box-shadow: var(--shadow-lg);
+  }
+  .dtype-card .dtype-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--muted);
+    margin-bottom: 7px;
+  }
+  .dtype-card h4 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 6px;
+  }
+  .dtype-card p {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin: 0 0 10px;
+    line-height: 1.5;
+  }
+  /* color accents per type */
+  .dtype-card.t-erd   { border-top: 5px solid #2563eb; }
+  .dtype-card.t-uml   { border-top: 5px solid #7c3aed; }
+  .dtype-card.t-flow  { border-top: 5px solid #ff5c00; }
+  .dtype-card.t-seq   { border-top: 5px solid #16a34a; }
+  .dtype-card.t-state { border-top: 5px solid #b07c00; }
+  .dtype-card.t-mind  { border-top: 5px solid #dc2626; }
+  .dtype-card.t-arch  { border-top: 5px solid #0891b2; }
+  .dtype-card.t-use   { border-top: 5px solid #0891b2; }
+
+  /* ── two-col layout ── */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-bottom: 22px;
+  }
+  @media(max-width:720px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ── SVG diagram container ── */
+  .svg-wrap {
+    background: var(--surface);
+    border: 3px solid var(--ink);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 28px;
+    margin-bottom: 22px;
+    overflow-x: auto;
+  }
+  .svg-wrap figcaption {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-top: 12px;
+    text-align: center;
+  }
+
+  /* inline tag list */
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+  /* status badge */
+  .badge-status {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    border: 1.5px solid var(--ink);
+  }
+  .s-done  { background: var(--ok-soft);   color: var(--ok); }
+  .s-s10   { background: var(--blue-soft); color: var(--blue); }
+  .s-extra { background: var(--warn-soft); color: var(--warn); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación del proyecto</p>
+        <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a class="active" href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+  <main>
+  <div class="content">
+    <header class="hero">
+      <div class="eyebrow">Catálogo de funcionalidades</div>
+      <h1>Features de cara al usuario</h1>
+      <p class="lede">Todo lo que MydIAgram ofrece: 6 tipos de diagrama editable, edición tipo Miro, importación y exportación, autenticación, persistencia, historial y control de admisión.</p>
+      <div class="meta-row">
+        <span class="pill"><b>Componentes:</b> Frontend · Backend · Agente IA</span>
+        <span class="pill"><b>BD:</b> Supabase PostgreSQL</span>
+        <span class="pill"><b>Stack:</b> React 19 · React Flow 12</span>
+      </div>
+    </header>
+
+    <!-- ══════════════════════════════════════════════
+         § 1  TIPOS DE DIAGRAMA
+    ══════════════════════════════════════════════ -->
+    <section id="tipos-diagrama">
+      <div class="sec-head">
+        <div class="badge">⬡</div>
+        <div>
+          <h2>6 tipos de diagrama</h2>
+          <div class="sec-sub">agent/schemas.py · DiagramType enum · ALLOWED_NODE_TYPES / ALLOWED_EDGE_TYPES</div>
+        </div>
+      </div>
+
+      <p>El agente soporta seis tipologías de diagrama de software, cada una con su vocabulario propio de nodos y aristas (registrado en <code>ALLOWED_NODE_TYPES</code> / <code>ALLOWED_EDGE_TYPES</code> en <code>agent/schemas.py</code>). El usuario describe en lenguaje natural qué quiere; el nodo <code>classify</code> del grafo LangGraph elige el tipo (o respeta la preselección del usuario) y el extractor usa el prompt específico de ese tipo para producir la topología correcta.</p>
+
+      <!-- SVG — grid 6 tipos de diagrama -->
+      <div class="svg-wrap">
+        <figure style="margin:0">
+          <svg viewBox="0 0 820 122" width="100%" style="max-width:820px;display:block;margin:auto">
+
+            <!-- erd -->
+            <rect x="14" y="14" width="120" height="58" rx="4" fill="#111"/>
+            <rect x="10" y="10" width="120" height="58" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+            <text x="70" y="30" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">ERD</text>
+            <text x="70" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#2563eb">table</text>
+            <text x="70" y="61" text-anchor="middle" font-family="Space Grotesk" font-size="8.5" fill="#33312c">Entidad-Relación</text>
+
+            <!-- sequence -->
+            <rect x="148" y="14" width="120" height="58" rx="4" fill="#111"/>
+            <rect x="144" y="10" width="120" height="58" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="204" y="30" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">SEQUENCE</text>
+            <text x="204" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#16a34a">actor</text>
+            <text x="204" y="61" text-anchor="middle" font-family="Space Grotesk" font-size="8.5" fill="#33312c">Secuencia</text>
+
+            <!-- flowchart -->
+            <rect x="282" y="14" width="120" height="58" rx="4" fill="#111"/>
+            <rect x="278" y="10" width="120" height="58" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="338" y="30" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">FLOWCHART</text>
+            <text x="338" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#ff5c00">terminator·step·decision</text>
+            <text x="338" y="61" text-anchor="middle" font-family="Space Grotesk" font-size="8.5" fill="#33312c">Diagrama de flujo</text>
+
+            <!-- architecture -->
+            <rect x="416" y="14" width="120" height="58" rx="4" fill="#111"/>
+            <rect x="412" y="10" width="120" height="58" rx="4" fill="#cffafe" stroke="#111" stroke-width="3"/>
+            <text x="472" y="30" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">ARCHITECTURE</text>
+            <text x="472" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#0891b2">C4·service·db·queue</text>
+            <text x="472" y="61" text-anchor="middle" font-family="Space Grotesk" font-size="8.5" fill="#33312c">Arquitectura (C4)</text>
+
+            <!-- mindmap -->
+            <rect x="550" y="14" width="120" height="58" rx="4" fill="#111"/>
+            <rect x="546" y="10" width="120" height="58" rx="4" fill="#fee2e2" stroke="#111" stroke-width="3"/>
+            <text x="606" y="30" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">MINDMAP</text>
+            <text x="606" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="7.5" fill="#dc2626">topic</text>
+            <text x="606" y="61" text-anchor="middle" font-family="Space Grotesk" font-size="8.5" fill="#33312c">Mapa mental</text>
+
+            <!-- use_case -->
+            <rect x="684" y="14" width="120" height="58" rx="4" fill="#111"/>
+            <rect x="680" y="10" width="120" height="58" rx="4" fill="#ede9fe" stroke="#111" stroke-width="3"/>
+            <text x="740" y="30" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">USE_CASE</text>
+            <text x="740" y="45" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#7c3aed">actor·use_case·system</text>
+            <text x="740" y="61" text-anchor="middle" font-family="Space Grotesk" font-size="8.5" fill="#33312c">Casos de uso</text>
+
+            <!-- Validación estructural label -->
+            <rect x="6" y="84" width="808" height="30" rx="4" fill="#f5f0e8" stroke="#111" stroke-width="2" stroke-dasharray="6,4"/>
+            <text x="410" y="103" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#75716a">VALIDACIÓN ESTRUCTURAL · ACTIVA: flowchart · mindmap · sequence — PERMISIVOS: erd · architecture · use_case</text>
+          </svg>
+          <figcaption>Fig. 1 — Los 6 tipos de diagrama, con su vocabulario de nodos y su régimen de validación estructural</figcaption>
+        </figure>
+      </div>
+
+      <div class="dtype-grid">
+
+        <div class="dtype-card t-erd">
+          <div class="dtype-label">erd</div>
+          <h4>Entidad-Relación</h4>
+          <p>Tablas con columnas tipadas, claves primarias y relaciones por cardinalidad. Nodo <code>table</code> con cabecera + filas. Permisivo en validación estructural (tablas de catálogo sin relaciones son legítimas).</p>
+          <div class="tag-row">
+            <span class="tag t-blue">TABLE</span>
+            <span class="tag t-blue">ONE_TO_ONE</span>
+            <span class="tag t-blue">ONE_TO_MANY</span>
+            <span class="tag t-blue">MANY_TO_MANY</span>
+          </div>
+        </div>
+
+        <div class="dtype-card t-flow">
+          <div class="dtype-label">flowchart</div>
+          <h4>Diagrama de Flujo</h4>
+          <p>Pasos, decisiones y terminadores. Validación estructural activa: debe existir un <code>terminator</code> de inicio y uno de fin, con el grafo conexo. El rombo de decisión despliega ramas condicionales etiquetadas.</p>
+          <div class="tag-row">
+            <span class="tag" style="background:#ffe7d6">TERMINATOR</span>
+            <span class="tag" style="background:#ffe7d6">STEP</span>
+            <span class="tag" style="background:#ffe7d6">DECISION</span>
+            <span class="tag" style="background:#ffe7d6">FLOW</span>
+            <span class="tag" style="background:#ffe7d6">CONDITIONAL</span>
+          </div>
+        </div>
+
+        <div class="dtype-card t-seq">
+          <div class="dtype-label">sequence</div>
+          <h4>Diagrama de Secuencia</h4>
+          <p>Actores con línea de vida y activaciones derivadas del layout. Mensajes y respuestas con etiquetas editables; fragmentos combinados (<code>alt</code>, <code>opt</code>, <code>loop</code>, <code>par</code>) en un array <code>fragments</code>. Validación activa: al menos dos actores que interactúen.</p>
+          <div class="tag-row">
+            <span class="tag t-green">ACTOR</span>
+            <span class="tag t-green">SEQUENCE</span>
+            <span class="tag t-green">SEQUENCE_REPLY</span>
+          </div>
+        </div>
+
+        <div class="dtype-card t-use">
+          <div class="dtype-label">use_case</div>
+          <h4>Casos de Uso (UML)</h4>
+          <p>Actores, casos de uso y subsistemas. Relaciones de asociación, inclusión, extensión y generalización. Nodos <code>actor</code>, <code>use_case</code> y <code>system</code>. Permisivo en validación estructural.</p>
+          <div class="tag-row">
+            <span class="tag" style="background:#cffafe">ASSOCIATION</span>
+            <span class="tag" style="background:#cffafe">INCLUDE</span>
+            <span class="tag" style="background:#cffafe">EXTEND</span>
+            <span class="tag" style="background:#cffafe">INHERITS</span>
+          </div>
+        </div>
+
+        <div class="dtype-card t-mind">
+          <div class="dtype-label">mindmap</div>
+          <h4>Mapa Mental</h4>
+          <p>Un único nodo <code>topic</code> que adopta tres roles según su posición (raíz, rama u hoja), con ramas jerárquicas en layout radial. Edge <code>association</code> con curvas orgánicas. Validación activa: debe existir un <code>topic</code> raíz.</p>
+          <div class="tag-row">
+            <span class="tag" style="background:#fee2e2">TOPIC</span>
+            <span class="tag" style="background:#fee2e2">ASSOCIATION</span>
+          </div>
+        </div>
+
+        <div class="dtype-card t-arch">
+          <div class="dtype-label">architecture</div>
+          <h4>Arquitectura (C4)</h4>
+          <p>Notación C4 (<code>person</code>, <code>system</code>, <code>container</code>, <code>component</code>) más <code>service</code>, <code>database</code>, <code>queue</code> y <code>gateway</code>. Admite grupos y contenedores redimensionables. Permisivo: un servicio sin cablear es un diseño válido.</p>
+          <div class="tag-row">
+            <span class="tag" style="background:#cffafe">SYSTEM</span>
+            <span class="tag" style="background:#cffafe">CONTAINER</span>
+            <span class="tag" style="background:#cffafe">SERVICE</span>
+            <span class="tag" style="background:#cffafe">DATABASE</span>
+            <span class="tag" style="background:#cffafe">CALLS</span>
+            <span class="tag" style="background:#cffafe">DEPENDS_ON</span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="decision">
+        <span class="lab">Decisión cerrada</span>
+        <p style="margin:0">Los prompts de extracción son <strong>específicos por <code>DiagramType</code></strong> (registrados en <code>agent/prompts.py</code>). Un prompt genérico con ejemplo ERD producía topologías lineales para todos los tipos. El mapa de tipos permitidos en <code>agent/schemas.py</code> es la única fuente de verdad semántica del agente.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 2  GENERACIÓN CONVERSACIONAL
+    ══════════════════════════════════════════════ -->
+    <section id="generacion">
+      <div class="sec-head">
+        <div class="badge">◈</div>
+        <div>
+          <h2>Generación conversacional</h2>
+          <div class="sec-sub">frontend/src/components/ChatPanel.tsx · FloatingPrompt.tsx · ChatMessage.tsx</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>Entrada libre en lenguaje natural</h3>
+          <p>El usuario describe el diagrama que quiere en el panel de chat (<code>ChatPanel</code>) o mediante el <code>FloatingPrompt</code>. No se requiere sintaxis especial ni schema previo.</p>
+          <p>El mensaje viaja vía Socket.io al backend Node, que aplica rate limit y consulta la caché antes de delegar al agente Python con FastAPI.</p>
+          <div class="tag-row">
+            <span class="tag t-blue">Socket.io</span>
+            <span class="tag">generate</span>
+            <span class="tag">refine</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Streaming progresivo al canvas</h3>
+          <p>El agente emite nodos y aristas confirmados (streaming NDJSON) a medida que los valida. El canvas los renderiza incrementalmente — solo se añade, nunca se retracta.</p>
+          <p>Al terminar, el evento <code>done</code> lleva el snapshot completo y se aplica incondicionalmente (reconciliación), garantizando coherencia aunque se pierda algún evento de stream.</p>
+          <div class="tag-row">
+            <span class="tag t-green">NDJSON streaming</span>
+            <span class="tag t-green">Reconciliación</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Refinamiento iterativo (agente ReAct)</h3>
+        <p>Tras la generación, el usuario puede pedir cambios en lenguaje natural. El agente ReAct (LangGraph) dispone de nueve herramientas incrementales: <code>find_node</code>, <code>add_node</code>, <code>update_node</code>, <code>delete_node</code>, <code>add_edge</code>, <code>delete_edge</code>, <code>apply_layout</code>, <code>ask_clarification</code> y <code>regenerate_from_scratch</code>. El loop termina cuando el LLM deja de emitir <em>tool calls</em>.</p>
+        <p>Si el agente necesita aclaración, emite <code>ask_clarification</code>, que suspende el grafo con un <code>interrupt()</code> real (LangGraph). El usuario responde y el agente reanuda desde el mismo punto.</p>
+        <div class="tag-row">
+          <span class="tag t-blue">ReAct loop</span>
+          <span class="tag t-blue">tool calls</span>
+          <span class="tag t-blue">interrupt / resume</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 3  EDICIÓN INLINE TIPO MIRO
+    ══════════════════════════════════════════════ -->
+    <section id="edicion">
+      <div class="sec-head">
+        <div class="badge">✏</div>
+        <div>
+          <h2>Edición inline tipo Miro</h2>
+          <div class="sec-sub">frontend/src/components/edges/ · nodes/ · EditToolbar.tsx · NodePropertiesPanel.tsx</div>
+        </div>
+      </div>
+
+      <p>Una vez generado, el diagrama es completamente editable sin salir de la vista del canvas. El modelo de interacción toma como referencia Miro: doble clic para editar texto inline, arrastrar para mover, handles para reconectar aristas.</p>
+
+      <div class="feature-grid">
+        <div class="feat-card">
+          <div class="feat-icon">↔</div>
+          <h4>Waypoints editables</h4>
+          <p><code>EditableEdge</code> permite arrastrar puntos intermedios de la arista para trazar la ruta deseada. Los waypoints se guardan con el diagrama.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">⚓</div>
+          <h4>Re-anclaje de extremos</h4>
+          <p>Arrastrar el extremo de una arista hasta otro nodo re-ancla la conexión sin eliminarla. Implementado como reconexión en <code>EditableEdge.tsx</code>.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">🏷</div>
+          <h4>Etiquetas de arista</h4>
+          <p>Doble clic en la etiqueta de una arista abre edición inline. Las etiquetas son parte del modelo de datos (no decoración SVG estática).</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">⬒</div>
+          <h4>Nodos con propiedades</h4>
+          <p><code>NodePropertiesPanel</code> expone los campos del nodo (label, tipo, estilo) en un panel lateral sin modal. Los cambios se aplican al store Zustand en tiempo real.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">📍</div>
+          <h4>Posiciones persistentes</h4>
+          <p>El usuario mueve nodos y las coordenadas se guardan. Al recargar, si el diagrama tiene coordenadas, se usan; si no, se aplica layout automático Dagre.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">🧰</div>
+          <h4>Paleta de nodos</h4>
+          <p><code>NodePalette</code> permite arrastrar nuevos nodos al canvas. Los tipos disponibles se filtran según el <code>DiagramType</code> activo.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">⚙</div>
+          <h4>Toolbar de edición</h4>
+          <p><code>EditToolbar</code> ofrece acciones contextuales: alinear, distribuir, eliminar selección, deshacer/rehacer.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">☰</div>
+          <h4>Menú contextual</h4>
+          <p><code>NodeContextMenu</code> y <code>EdgeContextMenu</code> ofrecen acciones rápidas al hacer clic derecho: duplicar, eliminar, conectar, cambiar tipo.</p>
+        </div>
+      </div>
+
+      <!-- SVG — flujo edición inline -->
+      <div class="svg-wrap" style="margin-top:22px">
+        <figure style="margin:0">
+          <svg viewBox="0 0 700 130" width="100%" style="max-width:700px;display:block;margin:auto">
+            <defs>
+              <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L8,3 z" fill="#111"/>
+              </marker>
+            </defs>
+
+            <!-- Nodo A -->
+            <rect x="14" y="24" width="110" height="80" rx="4" fill="#111"/>
+            <rect x="10" y="20" width="110" height="80" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="65" y="48" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="600">NODO A</text>
+            <text x="65" y="62" text-anchor="middle" font-family="Space Grotesk" font-size="8" fill="#75716a">doble clic</text>
+            <text x="65" y="74" text-anchor="middle" font-family="Space Grotesk" font-size="8" fill="#ff5c00">→ edición inline</text>
+            <text x="65" y="90" text-anchor="middle" font-family="Space Grotesk" font-size="8" fill="#75716a">drag → mueve</text>
+
+            <!-- Flecha A→B con waypoint -->
+            <path d="M120,60 L180,60 L220,85 L260,60" stroke="#111" stroke-width="2.5" fill="none" marker-end="url(#arr2)"/>
+            <!-- waypoint circle -->
+            <circle cx="220" cy="85" r="5" fill="#fff" stroke="#ff5c00" stroke-width="2.5"/>
+            <text x="200" y="107" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#ff5c00">waypoint</text>
+            <text x="200" y="50" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">etiqueta editable</text>
+
+            <!-- Nodo B -->
+            <rect x="264" y="24" width="110" height="80" rx="4" fill="#111"/>
+            <rect x="260" y="20" width="110" height="80" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="315" y="48" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="600">NODO B</text>
+            <text x="315" y="65" text-anchor="middle" font-family="Space Grotesk" font-size="8" fill="#16a34a">NodeProperties</text>
+            <text x="315" y="79" text-anchor="middle" font-family="Space Grotesk" font-size="8" fill="#75716a">panel lateral</text>
+
+            <!-- Flecha B→ reconexión -->
+            <line x1="370" y1="60" x2="440" y2="60" stroke="#111" stroke-width="2.5" stroke-dasharray="6,3" marker-end="url(#arr2)"/>
+            <text x="405" y="52" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">drag extremo</text>
+            <text x="405" y="76" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">→ re-ancla</text>
+
+            <!-- Nodo C -->
+            <rect x="444" y="24" width="110" height="80" rx="4" fill="#111"/>
+            <rect x="440" y="20" width="110" height="80" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+            <text x="495" y="48" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="600">NODO C</text>
+            <text x="495" y="65" text-anchor="middle" font-family="Space Grotesk" font-size="8" fill="#2563eb">contextMenu</text>
+            <text x="495" y="79" text-anchor="middle" font-family="Space Grotesk" font-size="8" fill="#75716a">clic derecho</text>
+
+            <!-- Store label -->
+            <rect x="594" y="44" width="100" height="36" rx="4" fill="#111"/>
+            <rect x="590" y="40" width="100" height="36" rx="4" fill="#fff" stroke="#111" stroke-width="2.5"/>
+            <text x="640" y="56" text-anchor="middle" font-family="JetBrains Mono" font-size="9" font-weight="700">ZUSTAND</text>
+            <text x="640" y="70" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#75716a">store central</text>
+            <line x1="552" y1="60" x2="588" y2="60" stroke="#111" stroke-width="2" marker-end="url(#arr2)"/>
+          </svg>
+          <figcaption>Fig. 2 — Edición inline: waypoints, re-anclaje de aristas y panel de propiedades sobre store Zustand</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 4  EXPORTACIÓN
+    ══════════════════════════════════════════════ -->
+    <section id="exportacion">
+      <div class="sec-head">
+        <div class="badge">↓</div>
+        <div>
+          <h2>Exportación</h2>
+          <div class="sec-sub">frontend/src/components/ExportMenu.tsx</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>Export PNG</h3>
+          <p>Usa la API <code>toBlob()</code> de React Flow para capturar el canvas completo con el viewport actual. El nombre del archivo se deriva del título del diagrama.</p>
+          <div class="tag-row">
+            <span class="badge-status s-done">Disponible</span>
+            <span class="tag">toBlob()</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Formato nativo e interoperabilidad</h3>
+          <p>El formato nativo <code>.mdia</code> serializa el diagrama completo como <code>DiagramSchema</code> (validado con Zod, <code>diagramImportSchema</code>) y admite reimportación exacta con integridad referencial (sin aristas huérfanas). Además exporta e importa Mermaid, draw.io y Excalidraw.</p>
+          <div class="tag-row">
+            <span class="badge-status s-done">Disponible</span>
+            <span class="tag">.mdia</span>
+            <span class="tag">Mermaid</span>
+            <span class="tag">draw.io</span>
+            <span class="tag">Excalidraw</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="caveat">
+        <span class="lab">Fuente de verdad</span>
+        El import nativo valida con <code>diagramImportSchema</code> = <code>diagramSchema</code> + <code>.refine</code> de integridad referencial en runtime (Zod). Los tipos TS se derivan de los schemas Zod (<code>z.infer</code>), no al revés: el schema es la única fuente de verdad.
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 5  AUTENTICACIÓN Y PERSISTENCIA
+    ══════════════════════════════════════════════ -->
+    <section id="auth">
+      <div class="sec-head">
+        <div class="badge">🔐</div>
+        <div>
+          <h2>Autenticación y persistencia</h2>
+          <div class="sec-sub">frontend/src/components/AuthButton.tsx · backend/src/diagrams.ts</div>
+        </div>
+      </div>
+
+      <p>El acceso está protegido con Google OAuth gestionado por Supabase Auth. El backend Node verifica el JWT firmado por Supabase y extrae el <code>user_id</code> (claim <code>sub</code>) antes de cualquier operación. El frontend nunca accede directamente a Supabase: todo pasa por el backend.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Componente</th>
+            <th>Responsabilidad</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>AuthButton.tsx</code></td>
+            <td>Botón de login/logout con Google. Muestra avatar y nombre del usuario autenticado.</td>
+          </tr>
+          <tr>
+            <td>Supabase Auth</td>
+            <td>Gestiona el flujo OAuth con Google y emite el JWT de sesión. No se monta servidor OAuth propio.</td>
+          </tr>
+          <tr>
+            <td><code>backend/src/diagrams.ts</code></td>
+            <td>CRUD de diagramas. El backend reenvía el JWT del usuario a Supabase (cliente por petición con <code>Authorization: Bearer</code>) para que la RLS imponga la propiedad.</td>
+          </tr>
+          <tr>
+            <td>RLS en tabla <code>diagrams</code></td>
+            <td>Políticas Row Level Security: un usuario solo puede leer/escribir sus propios diagramas (<code>auth.uid() = user_id</code>).</td>
+          </tr>
+          <tr>
+            <td>Auto-guardado</td>
+            <td><code>POST</code> al crear / <code>PATCH</code> con debounce al editar. Las coordenadas de los nodos se incluyen en el guardado.</td>
+          </tr>
+          <tr>
+            <td>Revalidación JWT en socket</td>
+            <td>Lazy: cada llamada al agente compara <code>now &ge; exp</code>. Un token caducado provoca <code>auth:expired</code> + disconnect. El cliente refresca con <code>auth:refresh</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="decision">
+        <span class="lab">Decisión cerrada</span>
+        <p style="margin:0">El backend es el <strong>único punto de acceso a datos de persistencia</strong>. El frontend nunca llama directamente a Supabase. La <code>service_role</code> queda reservada para la caché global (<code>generation_cache</code>), que no tiene <code>user_id</code> y no debe ser accesible desde el cliente.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 6  HISTORIAL
+    ══════════════════════════════════════════════ -->
+    <section id="historial">
+      <div class="sec-head">
+        <div class="badge">⏱</div>
+        <div>
+          <h2>Historial de diagramas</h2>
+          <div class="sec-sub">frontend/src/components/HistoryDrawer.tsx</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>Panel lateral de historial</h3>
+          <p><code>HistoryDrawer</code> lista los diagramas guardados del usuario con título, tipo y fecha. Al seleccionar uno, se carga en el canvas con sus nodos, aristas y posiciones exactas.</p>
+          <div class="tag-row">
+            <span class="badge-status s-done">Disponible</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Trazabilidad del refinamiento</h3>
+          <p>El evento <code>done</code> del agente incluye <code>refinement_history</code>: la secuencia de tool calls y sus observaciones. Se muestra en <code>ChatMessage</code> como rastro colapsable de lo que hizo el agente.</p>
+          <div class="tag-row">
+            <span class="badge-status s-done">Disponible</span>
+            <span class="tag">extract_history()</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 7  CACHÉ DE GENERACIONES
+    ══════════════════════════════════════════════ -->
+    <section id="cache">
+      <div class="sec-head">
+        <div class="badge">⚡</div>
+        <div>
+          <h2>Caché de generaciones</h2>
+          <div class="sec-sub">backend/src/ · tabla generation_cache</div>
+        </div>
+      </div>
+
+      <p>Para prompts repetidos, el backend sirve el diagrama generado previamente sin invocar el LLM, reduciendo latencia y coste. La caché es <strong>global</strong> (no por usuario), gestionada exclusivamente por el backend con <code>service_role</code>.</p>
+
+      <table>
+        <thead>
+          <tr><th>Aspecto</th><th>Diseño</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Clave</b></td>
+            <td><code>(prompt_key, model)</code> — prompt normalizado (trim + minúsculas + espacios) + <code>LLM_PROFILE</code></td>
+          </tr>
+          <tr>
+            <td><b>Qué se cachea</b></td>
+            <td>Solo generación (no refinamiento). Solo éxito limpio: ≥ 1 nodo, sin degradaciones.</td>
+          </tr>
+          <tr>
+            <td><b>Invalidación</b></td>
+            <td><code>upsert</code> — solo el último diagrama por clave, renovando el TTL. El botón "Regenerar" del usuario fuerza generación nueva saltándose el lookup.</td>
+          </tr>
+          <tr>
+            <td><b>Seguridad</b></td>
+            <td>RLS activada <strong>sin políticas</strong> → solo <code>service_role</code> lee/escribe. El cliente no puede envenenar la caché. <code>checkRateLimit</code> corre <strong>antes</strong> del lookup: un usuario en el tope no llega a la caché.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="decision">
+        <span class="lab">Decisión cerrada</span>
+        <p style="margin:0">El rate limiter se trasladó del agente Python al backend Node (keyed por <code>user_id</code> o IP de socket). El agente Python veía siempre la IP del backend — una cubeta global inútil. Ahora el backend ve la identidad real del usuario.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 8  RATE LIMIT
+    ══════════════════════════════════════════════ -->
+    <section id="rate-limit">
+      <div class="sec-head">
+        <div class="badge">🚦</div>
+        <div>
+          <h2>Rate Limit</h2>
+          <div class="sec-sub">backend/src/rateLimit.ts</div>
+        </div>
+      </div>
+
+      <p>El control de admisión de peticiones al LLM vive en el backend Node, en <code>backend/src/rateLimit.ts</code>. Se aplica a las tres entradas socket que corren el agente (<code>generate</code>, <code>refine</code>, <code>refine/resume</code>).</p>
+
+      <div class="feature-grid">
+        <div class="feat-card">
+          <div class="feat-icon">🔑</div>
+          <h4>Keyed por identidad real</h4>
+          <p>Si el usuario está autenticado, la clave es su <code>user_id</code>. Si no, la IP del socket. Esto evita la cubeta global del agente Python.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">🔢</div>
+          <h4>Contador por petición</h4>
+          <p>El contador se incrementa por petición, no solo por llamada al LLM. Un hit en caché también consume quota, por diseño.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">⛔</div>
+          <h4>Prioridad ante caché</h4>
+          <p><code>checkRateLimit</code> corre siempre <strong>antes</strong> del lookup de caché. Un usuario en el tope no accede a la caché ni al LLM.</p>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">📢</div>
+          <h4>Error accionable</h4>
+          <p>El evento de rate limit incluye cuántas peticiones quedan y cuándo se resetea la ventana, para que el frontend pueda mostrar un mensaje útil al usuario.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 9  VALIDACIÓN MULTICAPA
+    ══════════════════════════════════════════════ -->
+    <section id="validacion">
+      <div class="sec-head">
+        <div class="badge">✓</div>
+        <div>
+          <h2>Validación multicapa del agente</h2>
+          <div class="sec-sub">agent/ · schemas.py · structural.py</div>
+        </div>
+      </div>
+
+      <p>La calidad del diagrama generado está garantizada por tres niveles de validación encadenados dentro del grafo LangGraph, con bucles de reintento independientes por presupuesto:</p>
+
+      <table>
+        <thead>
+          <tr><th>Nivel</th><th>Qué comprueba</th><th>Acción si falla</th><th>Presupuesto</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Local — nodos</b></td>
+            <td>Pydantic (<code>DiagramNode</code>) + tipo en <code>ALLOWED_NODE_TYPES</code></td>
+            <td>Retroalimentación al extractor con el error; bucle de regeneración de nodos</td>
+            <td><code>node_retry_count</code></td>
+          </tr>
+          <tr>
+            <td><b>Local — aristas</b></td>
+            <td>Pydantic (<code>DiagramEdge</code>) + tipo en <code>ALLOWED_EDGE_TYPES</code> + no huérfana</td>
+            <td>Retroalimentación al extractor; las huérfanas se retienen (no se emiten)</td>
+            <td><code>retry_count</code></td>
+          </tr>
+          <tr>
+            <td><b>Estructural</b></td>
+            <td>Diagrama ensamblado: <code>terminator</code> de inicio y fin (grafo conexo) en flowchart, <code>topic</code> raíz en mindmap, dos actores que interactúen en sequence. Registrada solo para estos tres tipos.</td>
+            <td>Bucle de relleno (<code>extract_nodes</code> o <code>extract_edges</code>); solo AÑADE</td>
+            <td><code>schema_retry_count</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="caveat">
+        <span class="lab">Invariante de streaming</span>
+        Lo que ya se emitió al canvas no se retracta. El reintento opera solo sobre piezas retenidas (nunca streameadas). La reconciliación del evento <code>done</code> garantiza coherencia final.
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 10  SELECCIÓN DE TIPO + UX STATES
+    ══════════════════════════════════════════════ -->
+    <section id="ux">
+      <div class="sec-head">
+        <div class="badge">◐</div>
+        <div>
+          <h2>UX: selección de tipo y estados</h2>
+          <div class="sec-sub">frontend/src/components/DiagramTypeCards.tsx · TopBar.tsx · ToolTray.tsx</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>Preselección de tipo desde la UI</h3>
+          <p><code>DiagramTypeCards</code> muestra los 6 tipos con su icono y descripción. El usuario puede elegir antes de escribir el prompt. El tipo viaja en el contrato de petición (<code>diagram_type</code>) hasta el agente. El "Automático" no es un tipo: es la ausencia de <code>diagram_type</code>, que deja que el agente clasifique.</p>
+          <p>El nodo <code>classify</code> en el grafo separa "clasificar tipo" de "generar título": si el tipo llega preseleccionado, se omite la clasificación pero se mantiene la generación del título.</p>
+          <div class="tag-row">
+            <span class="badge-status s-done">Disponible</span>
+            <span class="tag t-blue">diagram_type</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Estados UX: empty / loading / error</h3>
+          <p>Estados interesantes para cada fase del ciclo de vida del canvas: pantalla de bienvenida cuando no hay diagrama, animación de carga durante generación, y mensaje accionable con causa real en caso de error.</p>
+          <p>Absorbe deuda de <code>docs/pendientes.md</code>: feedback de error en export PNG, <code>errorMessage</code> real del store, transición <code>error → idle</code>, caída del servidor durante generación.</p>
+          <div class="tag-row">
+            <span class="badge-status s-done">Disponible</span>
+            <span class="tag">TopBar</span>
+            <span class="tag">ToolTray</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         § 11  RESUMEN DE FEATURES
+    ══════════════════════════════════════════════ -->
+    <section id="resumen">
+      <div class="sec-head">
+        <div class="badge">☰</div>
+        <div>
+          <h2>Resumen de features</h2>
+          <div class="sec-sub">estado de cada feature</div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Feature</th><th>Estado</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>6 tipos de diagrama + prompts específicos</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Validación multicapa (nodos / aristas / estructural)</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Streaming progresivo al canvas (NDJSON)</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Refinamiento iterativo (agente ReAct, 9 tools)</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Clarificación con interrupt / resume</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Export PNG</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Formato nativo .mdia + Mermaid / draw.io / Excalidraw (export e import)</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Google OAuth (Supabase Auth) + RLS</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Auto-guardado + historial cargable</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Caché de generaciones global por clave de texto normalizada</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Rate limit por usuario (backend)</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Edición inline: waypoints + re-anclaje de aristas</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>JWT refresh / revalidación lazy en sockets</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Preselección de tipo de diagrama desde UI</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Posiciones persistentes de nodos (coordenadas)</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+          <tr>
+            <td>Estados UX: empty / loading / error</td>
+            <td><span class="badge-status s-done">Disponible</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Documentación generada del código fuente del proyecto.</p>
+    </div>
+  </div>
+  </main>
+</div>
+</body>
+</html>

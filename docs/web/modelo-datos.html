@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MydIAgram · Modelo de datos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><b>MydIAgram</b><span class="v">docs</span></div>
+    <p class="brand-sub">Documentación del proyecto</p>
+        <nav id="nav">
+      <div class="nav-group">Sistema</div>
+      <a href="index.html"><span class="ic">&#9670;</span>Inicio</a>
+      <a href="arquitectura.html"><span class="ic">&#9633;</span>Arquitectura</a>
+      <a href="despliegue.html"><span class="ic">&#9881;</span>Despliegue</a>
+      <div class="nav-group">Agente de IA</div>
+      <a href="langgraph-generacion.html"><span class="ic">&#9654;</span>Grafo de generación</a>
+      <a href="langgraph-refinamiento.html"><span class="ic">&#8634;</span>Grafo de refinamiento</a>
+      <div class="nav-group">Modelo y producto</div>
+      <a class="active" href="modelo-datos.html"><span class="ic">&#9638;</span>Modelo de datos</a>
+      <a href="features.html"><span class="ic">&#9733;</span>Features</a>
+      <a href="layouts.html"><span class="ic">&#9707;</span>Layouts</a>
+      <a href="decisiones.html"><span class="ic">&#10003;</span>Decisiones</a>
+    </nav>
+  </aside>
+  <main>
+  <div class="content">
+    <header class="hero">
+      <div class="eyebrow">Schema-first · Pydantic + Zod</div>
+      <h1>Modelo de datos</h1>
+      <p class="lede">Contrato canónico <code>DiagramNode</code> / <code>DiagramSchema</code>: su definición Pydantic en el agente Python, su mirror Zod en el frontend TypeScript, los diccionarios <code>ALLOWED_*</code> por tipo de diagrama, la validación en tres niveles y la taxonomía de desenlaces (<em>outcomes</em>) del stream.</p>
+      <div class="meta-row">
+        <span class="pill"><b>Fuente</b> agent/schemas.py</span>
+        <span class="pill"><b>Fuente</b> agent/prompts.py</span>
+        <span class="pill"><b>Fuente</b> agent/structural.py</span>
+        <span class="pill"><b>Fuente</b> agent/outcome.py</span>
+        <span class="pill"><b>Fuente</b> frontend/src/types.ts</span>
+      </div>
+    </header>
+
+    <!-- ============================================================ -->
+    <section id="principio">
+      <div class="sec-head">
+        <div class="badge">&#9638;</div>
+        <div>
+          <h2>Schema-first: una única fuente de verdad</h2>
+          <p class="sec-sub">agent/schemas.py · frontend/src/types.ts</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="def">
+          El contrato de datos lo define <strong>una sola vez</strong> Pydantic en el agente Python. El frontend no repite la estructura con interfaces TypeScript sueltas; en su lugar la declara con <strong>schemas Zod</strong> y deriva los tipos con <code>z.infer&lt;&gt;</code>. Esto garantiza que tipo estático y validación en <em>runtime</em> no puedan desincronizarse.
+        </p>
+        <p>El principio queda documentado en el propio código fuente (<code>types.ts</code> línea 53): <em>"tipos en los bordes"</em> — cualquier dato que cruce un límite de proceso (JSON del agente → import del usuario → respuesta del servidor) se valida en runtime; los tipos puramente de UI siguen siendo <code>type</code>/<code>interface</code> sin validador.</p>
+
+        <div class="decision">
+          <span class="lab">Decisión</span>
+          Los schemas Zod son la <em>única fuente de verdad</em> en el frontend. Los tipos TypeScript se <strong>derivan</strong> del schema (<code>z.infer</code>), no se declaran por separado. Cualquier campo añadido a Pydantic debe replicarse en el schema Zod para que el contrato no se rompa silenciosamente en compilación.
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="modelos-core">
+      <div class="sec-head">
+        <div class="badge">&#128196;</div>
+        <div>
+          <h2>Modelos core</h2>
+          <p class="sec-sub">DiagramNode · DiagramEdge · DiagramSchema · CompactDiagram</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>DiagramNode <span class="tag t-blue">Pydantic</span> <span class="tag t-blue">Zod</span></h3>
+        <table>
+          <thead>
+            <tr><th>Campo</th><th>Tipo Python</th><th>Tipo Zod</th><th>Notas</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>str</code></td><td><code>z.string()</code></td><td>Identificador único del nodo en el diagrama</td></tr>
+            <tr><td><code>label</code></td><td><code>str</code></td><td><code>z.string()</code></td><td>Texto visible en el canvas</td></tr>
+            <tr><td><code>node_type</code></td><td><code>NodeType</code> (Enum)</td><td><code>nodeTypeSchema</code></td><td>Semántica del nodo; valida contra <code>ALLOWED_NODE_TYPES</code></td></tr>
+            <tr><td><code>attributes</code></td><td><code>list[str]</code> default <code>[]</code></td><td><code>z.array(z.string()).default([])</code></td><td>Tolerante: nodo sin <code>attributes</code> cae a lista vacía</td></tr>
+            <tr><td><code>position</code></td><td>— (no existe)</td><td><code>z.object({x,y}).optional()</code></td><td>Solo frontend: posición en el canvas. Se stripea antes de enviar al agente</td></tr>
+          </tbody>
+        </table>
+
+        <h3>DiagramEdge <span class="tag t-blue">Pydantic</span> <span class="tag t-blue">Zod</span></h3>
+        <table>
+          <thead>
+            <tr><th>Campo</th><th>Tipo Python</th><th>Tipo Zod</th><th>Notas</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>str</code></td><td><code>z.string()</code></td><td></td></tr>
+            <tr><td><code>source</code></td><td><code>str</code></td><td><code>z.string()</code></td><td>ID del nodo origen</td></tr>
+            <tr><td><code>target</code></td><td><code>str</code></td><td><code>z.string()</code></td><td>ID del nodo destino</td></tr>
+            <tr><td><code>label</code></td><td><code>str</code></td><td><code>z.string()</code></td><td>Etiqueta de la arista</td></tr>
+            <tr><td><code>edge_type</code></td><td><code>EdgeType</code> (Enum)</td><td><code>edgeTypeSchema.optional()</code></td><td>Opcional en Zod: aristas dibujadas a mano no tienen semántica de tipo; default <code>association</code></td></tr>
+            <tr><td><code>sourceHandle / targetHandle</code></td><td>— (no existe)</td><td><code>z.string().optional()</code></td><td>Solo React Flow; handle de conexión</td></tr>
+            <tr><td><code>data</code></td><td>— (no existe)</td><td><code>edgeVisualDataSchema.optional()</code></td><td>Waypoints, forma, trazo, flechas — solo canvas. Se stripea antes de enviar al agente</td></tr>
+          </tbody>
+        </table>
+
+        <h3>DiagramSchema y CompactDiagram</h3>
+        <p>El modelo raíz <code>DiagramSchema</code> (Pydantic) / <code>diagramSchema</code> (Zod) ensambla <code>title + diagram_type + nodes + edges</code>, más dos campos <strong>opcionales y específicos de un tipo</strong> que no contaminan al resto: <code>fragments</code> (fragmentos combinados, solo secuencia) y <code>group_layout</code> (geometría manual de contenedores de grupo, solo arquitectura/casos de uso). Ambos se detallan en la sección <a href="#por-tipo">Variación del JSON por tipo</a>. El campo <code>title</code> es <em>human-facing</em>; el agente lo proporciona pero el frontend lo stripea al refinar:</p>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr><th>Modelo</th><th>Contexto</th><th>Campos</th><th>Fuente</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>DiagramSchema</code></td><td>Generación → frontend (evento <code>done</code>)</td><td>title + diagram_type + nodes + edges + <em>fragments?</em></td><td><code>schemas.py</code></td></tr>
+              <tr><td><code>CompactDiagram</code></td><td>Frontend → refinamiento (<code>/refine/stream</code>)</td><td>diagram_type + nodes + edges + <em>fragments?</em> (sin title)</td><td><code>schemas.py</code></td></tr>
+              <tr><td><code>diagramSchema</code> (Zod)</td><td>Validación en import de JSON</td><td>title + diagram_type + nodes + edges</td><td><code>types.ts</code></td></tr>
+              <tr><td><code>diagramImportSchema</code> (Zod)</td><td>Import usuario + integridad referencial</td><td>diagramSchema + refine(aristas huérfanas)</td><td><code>types.ts</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="caveat">
+          <span class="lab">Pendiente</span>
+          El JSON se genera como texto libre, se parsea con <code>ijson</code> y se valida con Pydantic. La activación de <code>response_format: json_schema</code> (Structured Outputs de OpenAI) está pendiente; actualmente hay bucle de reintento/corrección cuando el LLM produce JSON malformado.
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="enums">
+      <div class="sec-head">
+        <div class="badge">&#9670;</div>
+        <div>
+          <h2>Enumeraciones globales</h2>
+          <p class="sec-sub">DiagramType · NodeType · EdgeType</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>Los tres enums se definen en <code>agent/schemas.py</code> y se replican íntegramente en <code>frontend/src/types.ts</code> como schemas Zod. Son la base de los diccionarios <code>ALLOWED_*</code> (semántica por tipo de diagrama).</p>
+
+        <h3>DiagramType — 6 tipos</h3>
+        <table>
+          <thead><tr><th>Valor</th><th>Semántica</th><th>Validación estructural</th></tr></thead>
+          <tbody>
+            <tr><td><code>erd</code></td><td>Entidad-Relación</td><td><span class="tag">Permisivo</span></td></tr>
+            <tr><td><code>sequence</code></td><td>Diagrama de secuencia</td><td><span class="tag t-blue">Estricto</span> ≥2 actores, sin huérfanos</td></tr>
+            <tr><td><code>flowchart</code></td><td>Diagrama de flujo</td><td><span class="tag t-blue">Estricto</span> terminators inicio/fin, conexo</td></tr>
+            <tr><td><code>architecture</code></td><td>Arquitectura de sistema (incl. nodos C4)</td><td><span class="tag">Permisivo</span></td></tr>
+            <tr><td><code>mindmap</code></td><td>Mapa mental</td><td><span class="tag t-blue">Estricto</span> topic central, sin huérfanos</td></tr>
+            <tr><td><code>use_case</code></td><td>Casos de uso UML</td><td><span class="tag">Permisivo</span></td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:10px;color:var(--muted);font-size:13px;">No existe un <code>diagram_type</code> «UML de clases», «máquina de estados» ni «C4» como tipo aparte: el modelo C4 se expresa como un subconjunto de <code>node_type</code> dentro de <code>architecture</code>. El «Automático» (que el agente clasifique el tipo) no es un valor del enum — se modela como ausencia (campo nulo).</p>
+
+        <h3>NodeType — 15 valores</h3>
+        <table>
+          <thead><tr><th>Valor</th><th>Diagramas donde aplica</th></tr></thead>
+          <tbody>
+            <tr><td><code>table</code></td><td>ERD</td></tr>
+            <tr><td><code>actor</code></td><td>Secuencia (lifeline), Casos de uso (monigote)</td></tr>
+            <tr><td><code>step</code></td><td>Flowchart</td></tr>
+            <tr><td><code>decision</code></td><td>Flowchart (rombo de bifurcación)</td></tr>
+            <tr><td><code>terminator</code></td><td>Flowchart (inicio/fin)</td></tr>
+            <tr><td><code>service</code></td><td>Arquitectura</td></tr>
+            <tr><td><code>database</code></td><td>Arquitectura</td></tr>
+            <tr><td><code>queue</code></td><td>Arquitectura</td></tr>
+            <tr><td><code>gateway</code></td><td>Arquitectura</td></tr>
+            <tr><td><code>topic</code></td><td>Mindmap</td></tr>
+            <tr><td><code>person</code></td><td>Arquitectura (C4)</td></tr>
+            <tr><td><code>system</code></td><td>Arquitectura (C4), Casos de uso (caja de frontera)</td></tr>
+            <tr><td><code>container</code></td><td>Arquitectura (C4)</td></tr>
+            <tr><td><code>component</code></td><td>Arquitectura (C4)</td></tr>
+            <tr><td><code>use_case</code></td><td>Casos de uso (óvalo)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>EdgeType — 12 valores</h3>
+        <table>
+          <thead><tr><th>Valor</th><th>Diagramas donde aplica</th></tr></thead>
+          <tbody>
+            <tr><td><code>one_to_one</code></td><td>ERD</td></tr>
+            <tr><td><code>one_to_many</code></td><td>ERD</td></tr>
+            <tr><td><code>many_to_many</code></td><td>ERD</td></tr>
+            <tr><td><code>sequence</code></td><td>Secuencia (mensaje)</td></tr>
+            <tr><td><code>flow</code></td><td>Flowchart (encadenado simple)</td></tr>
+            <tr><td><code>conditional</code></td><td>Flowchart (rama sí/no de un decision)</td></tr>
+            <tr><td><code>calls</code></td><td>Arquitectura</td></tr>
+            <tr><td><code>depends_on</code></td><td>Arquitectura</td></tr>
+            <tr><td><code>association</code></td><td>Casos de uso (actor↔caso), Mindmap (rama)</td></tr>
+            <tr><td><code>include</code></td><td>Casos de uso (estereotipo «include», discontinua)</td></tr>
+            <tr><td><code>extend</code></td><td>Casos de uso (estereotipo «extend», discontinua)</td></tr>
+            <tr><td><code>inherits</code></td><td>Casos de uso (generalización de actores, triángulo hueco)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="allowed">
+      <div class="sec-head">
+        <div class="badge">&#9654;</div>
+        <div>
+          <h2>ALLOWED_* por tipo de diagrama</h2>
+          <p class="sec-sub">agent/schemas.py — ALLOWED_NODE_TYPES · ALLOWED_EDGE_TYPES</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>Los diccionarios <code>ALLOWED_NODE_TYPES</code> y <code>ALLOWED_EDGE_TYPES</code> son la fuente de verdad de <strong>qué tipos semánticos son válidos para cada tipo de diagrama</strong>. Son el correlato-datos de la guía que <code>prompts.py</code> da al LLM: el prompt dice <em>qué usar</em>; estos mapas <em>validan que se haya usado</em>. Un elemento puede ser Pydantic-válido (valor dentro del enum global) y semánticamente inválido para su diagrama (p. ej. <code>edge_type=one_to_many</code> en un flowchart).</p>
+
+        <div class="decision">
+          <span class="lab">Diseño — Registro parcial deliberado</span>
+          Un <code>DiagramType</code> sin entrada en <code>ALLOWED_*</code> <strong>no se valida semánticamente</strong>: la función devuelve <code>True</code> para cualquier tipo del enum (fallback permisivo). Si se añade un nuevo tipo y se olvida registrarlo, el sistema degrada a "solo Pydantic" en vez de rechazar todos sus diagramas. El principio rector es: <em>fallar hacia permisivo, no hacia roto</em>.
+        </div>
+
+        <h3>Tabla completa — tipos permitidos por diagrama</h3>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Diagrama</th>
+                <th>node_type(s) permitidos</th>
+                <th>edge_type(s) permitidos</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>erd</b></td>
+                <td><span class="tag t-blue">table</span></td>
+                <td><span class="tag t-green">one_to_one</span> <span class="tag t-green">one_to_many</span> <span class="tag t-green">many_to_many</span></td>
+              </tr>
+              <tr>
+                <td><b>sequence</b></td>
+                <td><span class="tag t-blue">actor</span></td>
+                <td><span class="tag t-green">sequence</span></td>
+              </tr>
+              <tr>
+                <td><b>flowchart</b></td>
+                <td><span class="tag t-blue">terminator</span> <span class="tag t-blue">step</span> <span class="tag t-blue">decision</span></td>
+                <td><span class="tag t-green">flow</span> <span class="tag t-green">conditional</span></td>
+              </tr>
+              <tr>
+                <td><b>architecture</b></td>
+                <td><span class="tag t-blue">service</span> <span class="tag t-blue">database</span> <span class="tag t-blue">queue</span> <span class="tag t-blue">gateway</span> <span class="tag t-blue">person</span> <span class="tag t-blue">system</span> <span class="tag t-blue">container</span> <span class="tag t-blue">component</span></td>
+                <td><span class="tag t-green">calls</span> <span class="tag t-green">depends_on</span></td>
+              </tr>
+              <tr>
+                <td><b>mindmap</b></td>
+                <td><span class="tag t-blue">topic</span></td>
+                <td><span class="tag t-green">association</span></td>
+              </tr>
+              <tr>
+                <td><b>use_case</b></td>
+                <td><span class="tag t-blue">actor</span> <span class="tag t-blue">use_case</span> <span class="tag t-blue">system</span></td>
+                <td><span class="tag t-green">association</span> <span class="tag t-green">include</span> <span class="tag t-green">extend</span> <span class="tag t-green">inherits</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>API de consulta</h3>
+        <p>Dos funciones exportadas en <code>schemas.py</code> encapsulan la consulta a estos diccionarios:</p>
+        <ul class="clean">
+          <li><code>node_type_allowed(diagram_type, node_type) → bool</code> — Devuelve <code>True</code> si el tipo de nodo es válido para ese diagrama, o si el diagrama no está registrado (fallback permisivo).</li>
+          <li><code>edge_type_allowed(diagram_type, edge_type) → bool</code> — Ídem para aristas.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="por-tipo">
+      <div class="sec-head">
+        <div class="badge">&#9636;</div>
+        <div>
+          <h2>Variación del JSON por tipo de diagrama</h2>
+          <p class="sec-sub">Misma forma, distinto contenido · agent/prompts.py · frontend/src/ui/utils</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="def">
+          El <strong>esquema es uniforme</strong>: todos los tipos de diagrama usan el mismo <code>DiagramNode</code> y el mismo <code>DiagramEdge</code>. No hay un campo <code>shape</code>, <code>kind</code> o <code>variant</code> por nodo que cambie la forma del JSON según el diagrama. Lo que varía es el <strong>contenido</strong>, en tres ejes:
+        </p>
+        <ol class="clean">
+          <li><b>Qué valores son válidos</b> en <code>node_type</code> / <code>edge_type</code> — lo regula <code>ALLOWED_*</code> (<a href="#allowed">sección anterior</a>). El subtipo <em>dentro</em> de un diagrama también se distingue por <code>node_type</code> (en un flowchart: <code>step</code> vs <code>decision</code> vs <code>terminator</code>), no por un campo aparte.</li>
+          <li><b>Qué se mete en <code>attributes</code></b> — un array de <em>strings</em> con convenciones de prefijo distintas según el tipo. Aquí está casi toda la diferencia «pequeña» que se percibe entre diagramas.</li>
+          <li><b>Campos top-level extra</b> que solo usa un tipo concreto: <code>fragments</code> (secuencia) y <code>group_layout</code> (arquitectura / casos de uso).</li>
+        </ol>
+        <div class="caveat">
+          <span class="lab">Clave</span>
+          <code>attributes</code> es siempre <code>list[str]</code>: nunca objetos anidados. La riqueza (tipo de columna, PK/FK, tecnología, agrupación) se codifica como <strong>convención dentro del string</strong>. Un ERD no tiene un campo estructurado de columnas: lleva <code>["id: INT PK", …]</code> y es el frontend quien interpreta ese texto (p. ej. <code>TableNode</code> detecta PK/FK por substring).
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Qué lleva <code>attributes</code> en cada tipo</h3>
+        <table>
+          <thead>
+            <tr><th>Diagrama</th><th>Contenido de <code>attributes</code></th><th>Quién lo interpreta en el frontend</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><b>erd</b></td><td>Una columna por string, formato <code>"nombre: TIPO RESTRICCIÓN"</code>. PK/FK se marcan como substring del propio texto (<code>"id: INT PK"</code>, <code>"usuario_id: INT FK"</code>)</td><td><code>TableNode</code> — pinta una fila por columna; detecta <code>PK</code>/<code>FK</code> con <code>includes()</code> y muestra 🔑/🔗</td></tr>
+            <tr><td><b>architecture</b></td><td>Dos prefijos: <code>"group: &lt;Subsistema&gt;"</code> (agrupa nodos por capa/módulo) y <code>"tech: &lt;Tecnología&gt;"</code> (solo en service/container/component)</td><td><code>architectureLayout</code> crea contenedores derivados <code>group__&lt;Nombre&gt;</code>; <code>ArchIconNode</code> muestra el <code>tech</code> bajo el icono</td></tr>
+            <tr><td><b>sequence</b></td><td>Siempre <code>[]</code></td><td>—</td></tr>
+            <tr><td><b>flowchart</b></td><td>Siempre <code>[]</code> (toda la info va en <code>label</code> + <code>node_type</code>)</td><td>—</td></tr>
+            <tr><td><b>mindmap</b></td><td>Siempre <code>[]</code> — el detalle se modela como <em>nodos hijos</em> enlazados, no como atributos</td><td><code>mindmapLayout</code> deriva jerarquía, nivel y color de rama en runtime</td></tr>
+            <tr><td><b>use_case</b></td><td>Siempre <code>[]</code></td><td>—</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:10px;color:var(--muted);font-size:13px;">El mapa mental dejó de aceptar <code>attributes</code> a propósito: como un nodo de mindmap solo renderiza su <code>label</code>, escribir en <code>attributes</code> sería trabajo invisible; <code>update_node</code> lo rechaza con un error accionable (crea un nodo hijo y conéctalo con una arista <code>association</code>).</p>
+      </div>
+
+      <div class="card">
+        <h3>Rol de nodos, aristas y campos extra por tipo</h3>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr><th>Diagrama</th><th>Los nodos son…</th><th>Las aristas son…</th><th>Campo top-level extra</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><b>erd</b></td><td>Tablas (con columnas en <code>attributes</code>)</td><td>Relaciones con cardinalidad</td><td>—</td></tr>
+              <tr><td><b>sequence</b></td><td>Actores = <em>lifelines</em></td><td>Mensajes; <strong>su orden = el orden del array <code>edges</code></strong></td><td><code>fragments</code></td></tr>
+              <tr><td><b>flowchart</b></td><td>Pasos / decisiones / terminadores (por <code>node_type</code>)</td><td>Flujo simple o ramas condicionales</td><td>—</td></tr>
+              <tr><td><b>architecture</b></td><td>Servicios, BD, colas, gateways y nodos C4</td><td>Llamadas / dependencias</td><td><code>group_layout</code></td></tr>
+              <tr><td><b>mindmap</b></td><td>Temas (<code>topic</code>) — árbol estricto</td><td>Ramas (<code>association</code>); color/grosor derivados por nivel</td><td>—</td></tr>
+              <tr><td><b>use_case</b></td><td>Actores, casos de uso (óvalos) y frontera del sistema</td><td>Asociación / «include» / «extend» / generalización</td><td><code>group_layout</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:10px;color:var(--muted);font-size:13px;">Las <em>lifelines</em> y activaciones de secuencia, la jerarquía coloreada del mapa mental y los contenedores de grupo de arquitectura/casos de uso <strong>no viajan en el JSON</strong>: los deriva el layout del frontend en tiempo de render a partir de los mismos <code>nodes</code>/<code>edges</code>/<code>attributes</code>.</p>
+      </div>
+
+      <div class="card">
+        <h3>Campos extra opcionales — <code>fragments</code> y <code>group_layout</code></h3>
+        <p><strong><code>fragments</code> (solo secuencia).</strong> Un fragmento combinado UML (<code>alt</code>/<code>opt</code>/<code>loop</code>/<code>par</code>) no es ni nodo ni arista: es una tercera entidad que envuelve un rango <em>ordenado</em> de mensajes (ids de <code>edges</code>) con semántica de control de flujo. Por eso vive en su propio array top-level y no en <code>attributes</code>. <code>alt</code> tiene ≥2 operandos (if/else, cada uno con su guarda); el resto, uno. Anidan por referencia explícita (<code>child_fragment_ids</code>), no por contención. Se validan referencialmente (cada <code>message_id</code> / hijo debe existir); un fragmento inválido se <strong>descarta</strong> en limpio, no se reintenta como nodos/aristas.</p>
+        <pre style="background:var(--code-bg);border:1.5px solid var(--ink);border-radius:var(--radius);padding:14px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto;color:var(--accent-ink);">"fragments": [
+  {"id": "f1", "kind": "alt", "operands": [
+    {"guard": "[usuario válido]", "message_ids": ["e3"], "child_fragment_ids": []},
+    {"guard": "[else]",          "message_ids": ["e4"], "child_fragment_ids": []}
+  ]}
+]</pre>
+        <p style="margin-top:14px;"><strong><code>group_layout</code> (arquitectura / casos de uso).</strong> Geometría manual <code>{x, y, width, height}</code> de los contenedores de grupo, indexada por el id derivado del contenedor (<code>group__&lt;Nombre&gt;</code> en arquitectura, el id del <code>system</code> en casos de uso). Es <strong>solo-canvas</strong>: si el usuario mueve o redimensiona un contenedor su geometría se persiste aquí, pero <code>diagramToJson</code> lo stripea antes de enviar al agente (que solo recibe <code>diagram_type</code>/<code>nodes</code>/<code>edges</code>/<code>fragments</code>).</p>
+      </div>
+
+      <div class="card">
+        <h3>Ejemplos de JSON (extraídos de <code>prompts.py</code>)</h3>
+        <p>Mismo molde <code>{id, label, node_type, attributes}</code> en los tres; cambian los valores y lo que se escribe en <code>attributes</code>.</p>
+
+        <p style="margin:14px 0 6px;font-weight:600;">ERD — columnas dentro de <code>attributes</code>:</p>
+        <pre style="background:var(--code-bg);border:1.5px solid var(--ink);border-radius:var(--radius);padding:14px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto;color:var(--accent-ink);">{"id": "usuario", "label": "Usuario", "node_type": "table",
+ "attributes": ["id: INT PK", "email: VARCHAR UNIQUE"]}
+{"id": "pedido", "label": "Pedido", "node_type": "table",
+ "attributes": ["id: INT PK", "usuario_id: INT FK", "total: DECIMAL"]}
+// arista: {"id":"e1","source":"usuario","target":"pedido","label":"realiza","edge_type":"one_to_many"}</pre>
+
+        <p style="margin:18px 0 6px;font-weight:600;">Architecture — prefijos <code>group:</code> y <code>tech:</code>:</p>
+        <pre style="background:var(--code-bg);border:1.5px solid var(--ink);border-radius:var(--radius);padding:14px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto;color:var(--accent-ink);">{"id": "servicio_auth", "label": "Servicio de Autenticación", "node_type": "service",
+ "attributes": ["group: Backend", "tech: Node.js"]}
+{"id": "bd_usuarios", "label": "BD de Usuarios", "node_type": "database",
+ "attributes": ["group: Datos", "tech: PostgreSQL"]}</pre>
+
+        <p style="margin:18px 0 6px;font-weight:600;">Flowchart / sequence / mindmap / use_case — <code>attributes</code> vacío (toda la info en <code>label</code> + <code>node_type</code>):</p>
+        <pre style="background:var(--code-bg);border:1.5px solid var(--ink);border-radius:var(--radius);padding:14px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto;color:var(--accent-ink);">{"id": "comprobar_super", "label": "¿Está en el supermercado?", "node_type": "decision", "attributes": []}
+{"id": "usuario", "label": "Usuario", "node_type": "actor", "attributes": []}</pre>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="validacion">
+      <div class="sec-head">
+        <div class="badge">&#10003;</div>
+        <div>
+          <h2>Validación en tres niveles</h2>
+          <p class="sec-sub">Local · Referencial · Estructural</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>El sistema aplica <strong>tres capas de validación secuenciales</strong>. Cada capa detecta una clase distinta de error; su combinación garantiza que el diagrama que llega al frontend es Pydantic-válido, semánticamente consistente, referencialmente íntegro y estructuralmente correcto para su tipo.</p>
+
+        <!-- SVG: capas de validación -->
+        <div style="margin:30px 0;overflow-x:auto;">
+          <svg viewBox="0 0 780 340" width="100%" style="max-width:780px;display:block;margin:0 auto;">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#111"/>
+              </marker>
+            </defs>
+
+            <!-- Nivel 1: Local / Pydantic + semántica -->
+            <!-- shadow -->
+            <rect x="24" y="34" width="210" height="88" rx="4" fill="#111"/>
+            <!-- box -->
+            <rect x="20" y="30" width="210" height="88" rx="4" fill="#dbe6ff" stroke="#111" stroke-width="3"/>
+            <text x="125" y="58" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111" text-decoration="none">NIVEL 1 — LOCAL</text>
+            <text x="125" y="78" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">Pydantic · Zod</text>
+            <text x="125" y="96" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">Tipo del enum global válido</text>
+            <text x="125" y="112" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">node_type / edge_type ∈ ALLOWED_*</text>
+
+            <!-- Nivel 2: Referencial -->
+            <!-- shadow -->
+            <rect x="284" y="34" width="210" height="88" rx="4" fill="#111"/>
+            <!-- box -->
+            <rect x="280" y="30" width="210" height="88" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="385" y="58" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111">NIVEL 2 — REFERENCIAL</text>
+            <text x="385" y="78" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">extract_edges · diagramImportSchema</text>
+            <text x="385" y="96" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">source/target existen entre los nodos</text>
+            <text x="385" y="112" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">Sin aristas huérfanas (IDs inválidos)</text>
+
+            <!-- Nivel 3: Estructural -->
+            <!-- shadow -->
+            <rect x="544" y="34" width="210" height="88" rx="4" fill="#111"/>
+            <!-- box -->
+            <rect x="540" y="30" width="210" height="88" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="3"/>
+            <text x="645" y="58" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111">NIVEL 3 — ESTRUCTURAL</text>
+            <text x="645" y="78" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">structural.py · validate_structure()</text>
+            <text x="645" y="96" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">El diagrama como CONJUNTO es válido</text>
+            <text x="645" y="112" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">Reglas por tipo (flowchart, mindmap…)</text>
+
+            <!-- Flechas entre niveles -->
+            <line x1="230" y1="74" x2="278" y2="74" stroke="#111" stroke-width="2.5" marker-end="url(#arrow)"/>
+            <line x1="490" y1="74" x2="538" y2="74" stroke="#111" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+            <!-- Etiquetas de las flechas -->
+            <rect x="235" y="56" width="38" height="16" rx="3" fill="#fdf0b8" stroke="#111" stroke-width="1.5"/>
+            <text x="254" y="68" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#111">PASA</text>
+            <rect x="495" y="56" width="38" height="16" rx="3" fill="#fdf0b8" stroke="#111" stroke-width="1.5"/>
+            <text x="514" y="68" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#111">PASA</text>
+
+            <!-- Error outputs -->
+            <!-- N1 error -->
+            <rect x="24" y="170" width="210" height="46" rx="4" fill="#111"/>
+            <rect x="20" y="166" width="210" height="46" rx="4" fill="#fff" stroke="#111" stroke-width="2"/>
+            <text x="125" y="186" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">ValidationError (Pydantic)</text>
+            <text x="125" y="202" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#75716a">422 / bucle reintento LLM</text>
+            <line x1="125" y1="118" x2="125" y2="164" stroke="#111" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+            <text x="132" y="148" font-family="JetBrains Mono" font-size="9" fill="#111">FALLA</text>
+
+            <!-- N2 error -->
+            <rect x="284" y="170" width="210" height="46" rx="4" fill="#111"/>
+            <rect x="280" y="166" width="210" height="46" rx="4" fill="#fff" stroke="#111" stroke-width="2"/>
+            <text x="385" y="186" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">arista huérfana rechazada</text>
+            <text x="385" y="202" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#75716a">reintento extract_edges / 422 import</text>
+            <line x1="385" y1="118" x2="385" y2="164" stroke="#111" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+            <text x="392" y="148" font-family="JetBrains Mono" font-size="9" fill="#111">FALLA</text>
+
+            <!-- N3 error -->
+            <rect x="544" y="170" width="210" height="46" rx="4" fill="#111"/>
+            <rect x="540" y="166" width="210" height="46" rx="4" fill="#fff" stroke="#111" stroke-width="2"/>
+            <text x="645" y="186" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">StructuralGap {type, reason}</text>
+            <text x="645" y="202" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#75716a">rebucle desde nodes o edges</text>
+            <line x1="645" y1="118" x2="645" y2="164" stroke="#111" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+            <text x="652" y="148" font-family="JetBrains Mono" font-size="9" fill="#111">FALLA</text>
+
+            <!-- Done output -->
+            <rect x="314" y="260" width="150" height="46" rx="4" fill="#111"/>
+            <rect x="310" y="256" width="150" height="46" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="3"/>
+            <text x="385" y="276" text-anchor="middle" font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#111">done</text>
+            <text x="385" y="294" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">diagrama válido → stream</text>
+            <line x1="645" y1="212" x2="645" y2="246" stroke="#111" stroke-width="1.5"/>
+            <line x1="645" y1="246" x2="386" y2="246" stroke="#111" stroke-width="1.5"/>
+            <line x1="386" y1="246" x2="386" y2="254" stroke="#111" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+            <!-- Labels de capas -->
+            <text x="20" y="22" font-family="JetBrains Mono" font-size="10" fill="#75716a">schemas.py</text>
+            <text x="280" y="22" font-family="JetBrains Mono" font-size="10" fill="#75716a">extract_edges / types.ts</text>
+            <text x="540" y="22" font-family="JetBrains Mono" font-size="10" fill="#75716a">structural.py</text>
+          </svg>
+        </div>
+
+        <h3>Nivel 1 — Validación local (por pieza)</h3>
+        <p>Cada nodo y arista se valida individualmente contra los schemas Pydantic/Zod. La validación comprueba dos cosas: (a) que los valores estén dentro del enum global (<code>NodeType</code>, <code>EdgeType</code>), y (b) que sean semánticamente válidos para el <code>diagram_type</code> del diagrama (consulta a <code>ALLOWED_NODE_TYPES</code> / <code>ALLOWED_EDGE_TYPES</code>). Un fallo en este nivel dispara un <code>ValidationError</code> de Pydantic, que el bucle de reintento del agente utiliza para corregir al LLM.</p>
+
+        <h3>Nivel 2 — Validación referencial (integridad de grafo)</h3>
+        <p>Una arista cuyo <code>source</code> o <code>target</code> no exista entre los nodos del diagrama es una <em>arista huérfana</em>. El agente la detecta en <code>extract_edges</code> y reintenta la extracción; el frontend la rechaza al importar un JSON externo mediante <code>diagramImportSchema</code> (Zod <code>.refine()</code>):</p>
+        <pre style="background:var(--code-bg);border:1.5px solid var(--ink);border-radius:var(--radius);padding:14px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto;color:var(--accent-ink);">diagramImportSchema = diagramSchema.refine(
+  (d) =&gt; {
+    const ids = new Set(d.nodes.map((n) =&gt; n.id));
+    return d.edges.every((e) =&gt; ids.has(e.source) &amp;&amp; ids.has(e.target));
+  },
+  { message: "El diagrama tiene aristas que referencian nodos inexistentes (huérfanas)" },
+)</pre>
+
+        <h3>Nivel 3 — Validación estructural (conjunto)</h3>
+        <p>Implementada en <code>structural.py</code> por <code>validate_structure(diagram_type, nodes, edges)</code>. Un diagrama puede tener todos sus elementos válidos por separado y aun así ser estructuralmente incorrecto: un flowchart sin terminators, un mindmap sin raíz, una secuencia con un solo actor. Cuando la validación estructural falla, genera uno o varios <code>StructuralGap {type, reason}</code> que el LangGraph usa para decidir desde dónde relanzar el bucle de relleno:</p>
+        <ul class="clean">
+          <li><code>type = "nodes"</code> — falta un nodo; el bucle relanza desde <code>extract_nodes</code>.</li>
+          <li><code>type = "edges"</code> — los nodos existen pero falta conectarlos; el bucle relanza desde <code>extract_edges</code>.</li>
+        </ul>
+
+        <div class="decision">
+          <span class="lab">Principio rector</span>
+          Validar el <em>mínimo</em> que hace a un diagrama ser de su tipo; nunca más. Por eso <code>erd</code>, <code>architecture</code> y <code>use_case</code> son permisivos a propósito en el nivel estructural: una tabla sin FK, un servicio sin cablear o un actor sin casos asociados son legítimos en esos tipos.
+        </div>
+      </div>
+
+      <!-- Tabla resumen de reglas estructurales -->
+      <div class="card">
+        <h3>Reglas estructurales por tipo — <code>structural.py · STRUCTURAL_VALIDATORS</code></h3>
+        <table>
+          <thead>
+            <tr><th>Diagrama</th><th>Regla</th><th>Gap type</th></tr>
+          </thead>
+          <tbody>
+            <tr><td rowspan="4"><b>flowchart</b></td><td>Sin ningún <code>terminator</code>: faltan nodos de inicio y fin</td><td><code>nodes</code> + <code>edges</code></td></tr>
+            <tr><td>Ningún terminator ejerce de inicio (in-degree=0, out-degree≥1)</td><td><code>edges</code></td></tr>
+            <tr><td>Ningún terminator ejerce de fin (out-degree=0, in-degree≥1)</td><td><code>edges</code></td></tr>
+            <tr><td>Nodos huérfanos (grado 0) o grupos aislados del inicio</td><td><code>edges</code></td></tr>
+            <tr><td rowspan="2"><b>mindmap</b></td><td>Sin topic central (in-degree=0, out-degree≥1) habiendo ≥2 nodos</td><td><code>edges</code></td></tr>
+            <tr><td>Ideas sin conectar al mapa (huérfanos)</td><td><code>edges</code></td></tr>
+            <tr><td rowspan="2"><b>sequence</b></td><td>Menos de 2 actores (<code>node_type=actor</code>)</td><td><code>nodes</code></td></tr>
+            <tr><td>Actores sin ningún mensaje (huérfanos) habiendo ≥2 nodos</td><td><code>edges</code></td></tr>
+            <tr><td><b>erd</b></td><td colspan="2" style="color:var(--muted);font-style:italic">Sin validador estructural (permisivo)</td></tr>
+            <tr><td><b>architecture</b></td><td colspan="2" style="color:var(--muted);font-style:italic">Sin validador estructural (permisivo)</td></tr>
+            <tr><td><b>use_case</b></td><td colspan="2" style="color:var(--muted);font-style:italic">Sin validador estructural (permisivo)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="outcomes">
+      <div class="sec-head">
+        <div class="badge">&#9654;</div>
+        <div>
+          <h2>Taxonomía de desenlaces (<em>outcomes</em>)</h2>
+          <p class="sec-sub">agent/outcome.py · classify_outcome()</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>La función <code>classify_outcome(state, *, crashed)</code> en <code>outcome.py</code> es una función <strong>pura</strong> — no es un nodo del grafo — que traduce el estado final del LangGraph en el evento terminal del stream (<code>done</code> o <code>error</code>). Su justificación: hay dos desenlaces que ningún nodo de salida puede observar:</p>
+        <ul class="clean">
+          <li><strong>guard-reject</strong>: el grafo sale por END justo tras <code>guard</code>, saltándose cualquier nodo terminal.</li>
+          <li><strong>excepción interna</strong>: si un nodo revienta, <code>ainvoke</code> lanza y no llega a ejecutarse ningún nodo de salida.</li>
+        </ul>
+        <p><code>main.py</code> es el único punto que observa los tres desenlaces posibles (estado limpio, guard-reject y crash), de ahí que la clasificación resida aquí y no dentro del grafo.</p>
+
+        <!-- SVG: árbol de desenlaces -->
+        <div style="margin:30px 0;overflow-x:auto;">
+          <svg viewBox="0 0 740 310" width="100%" style="max-width:740px;display:block;margin:0 auto;">
+            <defs>
+              <marker id="arrow2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#111"/>
+              </marker>
+            </defs>
+
+            <!-- Raíz: classify_outcome -->
+            <rect x="264" y="10" width="212" height="50" rx="4" fill="#111"/>
+            <rect x="260" y="6" width="212" height="50" rx="4" fill="#fdf0b8" stroke="#111" stroke-width="3"/>
+            <text x="366" y="28" text-anchor="middle" font-family="JetBrains Mono" font-size="12" font-weight="600" fill="#111">classify_outcome()</text>
+            <text x="366" y="46" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#75716a">outcome.py — función pura</text>
+
+            <!-- Rama A: crash -->
+            <rect x="18" y="110" width="170" height="50" rx="4" fill="#111"/>
+            <rect x="14" y="106" width="170" height="50" rx="4" fill="#fff" stroke="#111" stroke-width="2.5"/>
+            <text x="99" y="127" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">crashed=True</text>
+            <text x="99" y="145" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#75716a">excepción interna</text>
+            <line x1="366" y1="56" x2="366" y2="84" stroke="#111" stroke-width="1.5"/>
+            <line x1="366" y1="84" x2="99" y2="84" stroke="#111" stroke-width="1.5"/>
+            <line x1="99" y1="84" x2="99" y2="104" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+            <!-- Rama B: guard-reject -->
+            <rect x="218" y="110" width="170" height="50" rx="4" fill="#111"/>
+            <rect x="214" y="106" width="170" height="50" rx="4" fill="#fff" stroke="#111" stroke-width="2.5"/>
+            <text x="299" y="127" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">!is_diagram_request</text>
+            <text x="299" y="145" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#75716a">guard-reject</text>
+            <line x1="366" y1="84" x2="299" y2="84" stroke="#111" stroke-width="1.5"/>
+            <line x1="299" y1="84" x2="299" y2="104" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+            <!-- Rama C: empty -->
+            <rect x="418" y="110" width="170" height="50" rx="4" fill="#111"/>
+            <rect x="414" y="106" width="170" height="50" rx="4" fill="#fff" stroke="#111" stroke-width="2.5"/>
+            <text x="499" y="127" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">nodes = []</text>
+            <text x="499" y="145" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#75716a">cero nodos válidos</text>
+            <line x1="366" y1="84" x2="499" y2="84" stroke="#111" stroke-width="1.5"/>
+            <line x1="499" y1="84" x2="499" y2="104" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+            <!-- Rama D: done -->
+            <rect x="618" y="110" width="110" height="50" rx="4" fill="#111"/>
+            <rect x="614" y="106" width="110" height="50" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="2.5"/>
+            <text x="669" y="127" text-anchor="middle" font-family="JetBrains Mono" font-size="10" font-weight="600" fill="#111">nodes ≥ 1</text>
+            <text x="669" y="145" text-anchor="middle" font-family="Space Grotesk" font-size="11" fill="#33312c">diagrama válido</text>
+            <line x1="366" y1="84" x2="669" y2="84" stroke="#111" stroke-width="1.5"/>
+            <line x1="669" y1="84" x2="669" y2="104" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+            <!-- Resultados -->
+            <!-- error internal_error -->
+            <rect x="14" y="206" width="170" height="60" rx="4" fill="#111"/>
+            <rect x="10" y="202" width="170" height="60" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="2"/>
+            <text x="95" y="222" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">_type: "error"</text>
+            <text x="95" y="238" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#b83f00">category: "internal_error"</text>
+            <text x="95" y="254" text-anchor="middle" font-family="Space Grotesk" font-size="10" fill="#75716a">mensaje accionable</text>
+            <line x1="99" y1="156" x2="95" y2="200" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+            <!-- error not_a_diagram -->
+            <rect x="214" y="206" width="170" height="60" rx="4" fill="#111"/>
+            <rect x="210" y="202" width="170" height="60" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="2"/>
+            <text x="295" y="222" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">_type: "error"</text>
+            <text x="295" y="238" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#b83f00">category: "not_a_diagram"</text>
+            <text x="295" y="254" text-anchor="middle" font-family="Space Grotesk" font-size="10" fill="#75716a">mensaje accionable</text>
+            <line x1="299" y1="156" x2="295" y2="200" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+            <!-- error empty -->
+            <rect x="414" y="206" width="170" height="60" rx="4" fill="#111"/>
+            <rect x="410" y="202" width="170" height="60" rx="4" fill="#ffe7d6" stroke="#111" stroke-width="2"/>
+            <text x="495" y="222" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">_type: "error"</text>
+            <text x="495" y="238" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#b83f00">category: "empty"</text>
+            <text x="495" y="254" text-anchor="middle" font-family="Space Grotesk" font-size="10" fill="#75716a">mensaje accionable</text>
+            <line x1="499" y1="156" x2="495" y2="200" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+            <!-- done -->
+            <rect x="614" y="206" width="110" height="60" rx="4" fill="#111"/>
+            <rect x="610" y="202" width="110" height="60" rx="4" fill="#d8f3e1" stroke="#111" stroke-width="2.5"/>
+            <text x="665" y="222" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#111">_type: "done"</text>
+            <text x="665" y="238" text-anchor="middle" font-family="JetBrains Mono" font-size="10" fill="#16a34a">degraded: bool</text>
+            <text x="665" y="254" text-anchor="middle" font-family="Space Grotesk" font-size="10" fill="#33312c">diagram snapshot</text>
+            <line x1="669" y1="156" x2="669" y2="200" stroke="#111" stroke-width="1.5" marker-end="url(#arrow2)"/>
+          </svg>
+        </div>
+
+        <h3>Frontera done / error</h3>
+        <p>El umbral es <strong>≥1 nodo válido</strong>. Con al menos un nodo el diagrama es utilizable → <code>done</code> (degradado o no). Con cero nodos no hay nada que mostrar → <code>error</code>. <em>Guard-reject</em> y excepción son sendas categorías de <code>error</code>.</p>
+
+        <h3>Tabla de categorías de error</h3>
+        <table>
+          <thead>
+            <tr><th>Categoría</th><th>Causa</th><th>Mensaje accionable</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>internal_error</code></td>
+              <td>Excepción interna (<code>crashed=True</code> o <code>state is None</code>)</td>
+              <td>Error interno; reintentar en unos segundos</td>
+            </tr>
+            <tr>
+              <td><code>not_a_diagram</code></td>
+              <td>Guard-reject: <code>is_diagram_request = False</code></td>
+              <td>El texto no describe un sistema representable; reformular indicando entidades y relaciones</td>
+            </tr>
+            <tr>
+              <td><code>empty</code></td>
+              <td>Fallo total: <code>diagram.nodes = []</code> tras el bucle de relleno</td>
+              <td>No se extrajo ningún elemento; describir con más detalle qué elementos lo componen</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Degradación parcial — <code>done</code> + <code>degraded: true</code></h3>
+        <p>Cuando el diagrama es utilizable pero incompleto (el agente agotó los reintentos sin cumplir todas las reglas estructurales), el evento <code>done</code> incluye <code>degraded: true</code> y la lista <code>degradations: Degradation[]</code>. El frontend compone el aviso al usuario por categoría (<code>'nodes' | 'edges' | 'structure'</code>). En el agente, las degradaciones se acumulan en el campo <code>degradations</code> del <code>DiagramState</code> por los branches de rendición.</p>
+
+        <div class="decision">
+          <span class="lab">Decisión — Snapshot completo en done</span>
+          El evento <code>done</code> lleva el snapshot completo del diagrama también en el flujo de <strong>generación</strong> (no solo en refinamiento). Los eventos incrementales <code>node_ready</code> / <code>edge_ready</code> no transmiten el <code>diagram_type</code>, que el frontend necesita para poder refinar después (<code>CompactDiagram</code> lo exige; sin él, <code>/refine/stream</code> da 422). El snapshot también reconcilia cualquier evento incremental perdido. Patrón uniforme: <em>eventos = UX efímera; done = verdad</em>.
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="visual-data">
+      <div class="sec-head">
+        <div class="badge">&#9733;</div>
+        <div>
+          <h2>Datos visuales del canvas</h2>
+          <p class="sec-sub">EdgeVisualData · position — solo frontend</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <p>El contrato con el agente Python es minimalista; el canvas React Flow necesita metadatos adicionales que <strong>no forman parte del contrato</strong> y que <code>diagramToJson</code> stripea antes de enviar al agente:</p>
+
+        <table>
+          <thead>
+            <tr><th>Campo</th><th>Modelo</th><th>Tipo</th><th>Descripción</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>position</code></td><td><code>DiagramNode</code></td><td><code>{x,y}</code> opcional</td><td>Coordenadas en el canvas. Persiste en el store para sobrevivir al round-trip. Dagre la calcula si falta.</td></tr>
+            <tr><td><code>data.label</code></td><td><code>DiagramEdge.data</code></td><td><code>string</code> opcional</td><td>Etiqueta deslizable sobre la arista</td></tr>
+            <tr><td><code>data.labelT</code></td><td><code>DiagramEdge.data</code></td><td><code>number</code> opcional</td><td>Posición normalizada de la etiqueta en la curva (0–1)</td></tr>
+            <tr><td><code>data.waypoints</code></td><td><code>DiagramEdge.data</code></td><td><code>{x,y}[]</code> opcional</td><td>Puntos intermedios del trayecto de la arista (edición manual)</td></tr>
+            <tr><td><code>data.shape</code></td><td><code>DiagramEdge.data</code></td><td><code>'straight'|'elbow'|'curved'</code></td><td>Forma geométrica de la arista en el canvas</td></tr>
+            <tr><td><code>data.strokeStyle</code></td><td><code>DiagramEdge.data</code></td><td><code>'normal'|'dashed'|'dotted'</code></td><td>Estilo de trazo</td></tr>
+            <tr><td><code>data.sourceArrow / targetArrow</code></td><td><code>DiagramEdge.data</code></td><td><code>boolean</code></td><td>Visibilidad de puntas de flecha</td></tr>
+            <tr><td><code>sourceHandle / targetHandle</code></td><td><code>DiagramEdge</code></td><td><code>string</code> opcional</td><td>Handle de React Flow al que se ancla la arista</td></tr>
+          </tbody>
+        </table>
+
+        <div class="caveat">
+          <span class="lab">Nota de diseño</span>
+          <code>edge_type</code> es <strong>opcional en el schema Zod</strong> (no en Pydantic): las aristas dibujadas a mano en el canvas no tienen semántica de tipo asignada inicialmente; se trata como <code>association</code> por defecto. Pydantic lo requiere obligatorio porque el agente siempre genera un tipo explícito.
+        </div>
+      </div>
+    </section>
+
+    <a class="toplink" href="#">&#8593; Volver arriba</a>
+
+    <div class="footer">
+      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
+      Documentación generada del código fuente del proyecto.</p>
+    </div>
+  </div>
+  </main>
+</div>
+</body>
+</html>
