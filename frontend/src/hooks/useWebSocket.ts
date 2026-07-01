@@ -53,6 +53,26 @@ const OLLAMA_PROXY_TIMEOUT_MS = 120_000;
 // sin soporte de ack durante un despliegue): pasado el tope, se emite igualmente.
 const TRANSIENT_KEY_ACK_TIMEOUT_MS = 2500;
 
+// ¿El detalle de un `llm_error` es un fallo de autenticación de la API key (HTTP
+// 401)? Es la firma del caso conocido en el que la key transitoria se pierde al
+// reconectar el socket del backend y la generación se emite antes de re-registrarla:
+// reinyectar la key y reintentar lo arregla sin tocar nada más. Se detecta por el
+// texto (no por un código aparte) porque el agente Python ya manda los dos mensajes
+// de auth en español: «La API key … no es válida o falta (HTTP 401)» (streaming) y
+// «La API key de … no es válida o ha caducado …» (loop ReAct). Match laxo a
+// propósito: basta con que mencione la API key y un síntoma de auth.
+export const isApiKeyAuthError = (detail: string | undefined): boolean => {
+    const t = (detail ?? '').toLowerCase();
+    if (!t.includes('api key')) return false;
+    return (
+        t.includes('401') ||
+        t.includes('no es válida') ||
+        t.includes('inválida') ||
+        t.includes('caducado') ||
+        t.includes('falta')
+    );
+};
+
 // Payload de `diagram:done` (campos que consume processDone; el resto se valida con
 // diagramSchema antes de aplicarse).
 type DoneData = {
@@ -76,6 +96,12 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
     // S9.3 — último prompt enviado, para guardarlo junto al diagrama (columna
     // prompt). Un ref: no debe provocar re-render ni recrear el efecto del socket.
     const lastPromptRef = useRef<string | undefined>(undefined);
+    // Guard anti-bucle del reintento automático por API key (HTTP 401). Guarda el
+    // prompt para el que ya se reintentó una vez: si el segundo intento vuelve a dar
+    // 401 (la key es de verdad inválida, no un caso de reconexión), se muestra el
+    // error normal en vez de reintentar en bucle. Se limpia en cada `diagram:done`
+    // (éxito ⇒ un futuro fallo independiente puede volver a reintentar).
+    const authRetriedPromptRef = useRef<string | undefined>(undefined);
     // El refinamiento NO pasa por staging/assembling: aplica deltas en vivo sobre
     // el canvas interactivo. Este ref distingue el run actual (refinamiento vs
     // generación) en el handler de `done`, donde ya no hay closure del prompt.
@@ -534,6 +560,9 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
             socket.on('diagram:done', (data: DoneData) => {
                 // #2 — desenlace válido: cancelar el timeout de generación.
                 cancelGenTimeout();
+                // Éxito: libera el guard del reintento por 401 para que un fallo
+                // futuro independiente pueda volver a reintentar una vez.
+                authRetriedPromptRef.current = undefined;
 
                 // Refinamiento (canvas ya interactivo) o generación cuyo montaje en
                 // vivo ya terminó (o nunca arrancó): aplicamos el desenlace al instante.
@@ -595,9 +624,40 @@ export function useWebSocket(url: string = 'ws://localhost:3001') {
                 // ya lleva su botón "Abrir configuración". El spinner se detiene
                 // igual. No se añade mensaje al chat (sería redundante).
                 if (data?.category === 'llm_error') {
+                    const detail = data.error ?? 'Error del modelo de lenguaje.';
+
+                    // Reintento automático del caso conocido «401 que se arreglaba al
+                    // recargar»: la key transitoria se perdió al reconectar el socket
+                    // del backend y la generación se emitió antes de re-registrarla.
+                    // En vez de recargar la página (pierde el diagrama no guardado y
+                    // parpadea), reintentamos EN SITIO: el prompt y el diagrama siguen
+                    // en memoria. retry()→sendMessage()→ensureTransientKey() re-registra
+                    // la key esperando su ack y re-emite, que es justo lo que faltaba.
+                    // Solo si: es fallo de auth de la API key, hay una key/config local
+                    // que reinyectar (si no, reintentar es inútil), hay prompt+conexión,
+                    // y no se reintentó ya para este prompt (guard anti-bucle: si el 2º
+                    // intento vuelve a 401, la key es de verdad inválida → error normal).
+                    const prompt = lastPromptRef.current;
+                    const canReinject = !!readTransientKey() || !!readLocalConfig();
+                    if (
+                        isApiKeyAuthError(detail) &&
+                        canReinject &&
+                        prompt &&
+                        socketRef.current?.connected &&
+                        authRetriedPromptRef.current !== prompt
+                    ) {
+                        authRetriedPromptRef.current = prompt;
+                        useLlmSettingsStore.getState().setOllamaError(null);
+                        resetLiveStream();
+                        // Aviso efímero: explica el reintento sin el banner de error fijo.
+                        toast.info('La conexión perdió la API key. Reintentando…');
+                        sendMessage(prompt);
+                        return;
+                    }
+
                     useLlmSettingsStore.getState().setOllamaError({
                         error_code: 'llm_error',
-                        detail: data.error ?? 'Error del modelo de lenguaje.',
+                        detail,
                         provider: data.provider,
                     });
                     // El detalle ya viaja en el banner superior de LLM (ollamaError):
