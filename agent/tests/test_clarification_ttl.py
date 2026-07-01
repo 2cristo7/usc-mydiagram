@@ -15,10 +15,20 @@ import main
 
 @pytest.fixture(autouse=True)
 def _clean_pending():
-    """Aísla el dict global entre tests (es estado de módulo)."""
+    """Aísla el estado global de módulo entre tests.
+
+    `_pending_clarifications` es un dict de proceso y `_checkpointer` es un
+    singleton perezoso que OTROS tests de la suite (los endpoints /refine de
+    test_agent_graph.py) inicializan al llamar a `_get_checkpointer`. Ese
+    InMemorySaver persiste en el módulo y contamina
+    `test_forget_thread_is_best_effort_without_checkpointer`, que asume el caso de
+    un proceso que nunca corrió /refine (checkpointer en None). Reseteamos ambos
+    antes y después para que el test pase tanto en aislamiento como en la suite."""
     main._pending_clarifications.clear()
+    main._checkpointer = None
     yield
     main._pending_clarifications.clear()
+    main._checkpointer = None
 
 
 @pytest.mark.asyncio

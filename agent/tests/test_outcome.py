@@ -10,7 +10,7 @@ Cubre la taxonomía de desenlaces:
 import pytest
 
 from schemas import DiagramNode, DiagramSchema, NodeType, EdgeType, DiagramType, DiagramEdge
-from outcome import classify_outcome, ERROR_MESSAGES
+from outcome import classify_outcome, ERROR_MESSAGES, llm_error_event
 from nodes.validate_edges import validate_edges, MAX_RETRIES
 from nodes.validate_nodes import validate_nodes, MAX_NODE_RETRIES
 from nodes.validate_schema import validate_schema, MAX_SCHEMA_RETRIES
@@ -35,7 +35,7 @@ def _state(**overrides):
         "invalid_nodes": [],
         "diagram": None,
         "validation_errors": [],
-        "retry_count": 0,
+        "edges_retry_count": 0,
         "node_retry_count": 0,
         "node_validation_errors": [],
         "structural_gaps": [],
@@ -115,12 +115,34 @@ def test_every_error_category_has_a_distinct_message():
     assert all(m.strip() for m in msgs)
 
 
+# ============================ A2. llm_error_event y type_clarification ============================
+
+def test_llm_error_event_without_provider():
+    ev = llm_error_event("falló el modelo")
+    assert ev == {"_type": "error", "category": "llm_error", "message": "falló el modelo"}
+    assert "provider" not in ev
+
+
+def test_llm_error_event_with_provider():
+    ev = llm_error_event("key inválida", provider="openai")
+    assert ev["category"] == "llm_error"
+    assert ev["message"] == "key inválida"
+    assert ev["provider"] == "openai"
+
+
+def test_needs_type_clarification_returns_none():
+    # S10.3 — el evento de clarificación ya se emitió por la queue; classify_outcome
+    # devuelve None para que main.py no añada ningún evento terminal (ni done ni error).
+    out = classify_outcome(_state(needs_type_clarification=True))
+    assert out is None
+
+
 # ============================ B. branches de rendición → degradations ============================
 
 @pytest.mark.asyncio
 async def test_validate_edges_records_degradation_on_giveup():
     invalid = [{"raw": {"id": "e1"}, "reason": "referencia a nodo inexistente"}]
-    state = _state(invalid_edges=invalid, retry_count=MAX_RETRIES)
+    state = _state(invalid_edges=invalid, edges_retry_count=MAX_RETRIES)
 
     result = await validate_edges(state)
 
@@ -133,7 +155,7 @@ async def test_validate_edges_records_degradation_on_giveup():
 @pytest.mark.asyncio
 async def test_validate_edges_no_degradation_while_budget_left():
     # Con presupuesto reintenta, no degrada: no debe tocar `degradations`.
-    state = _state(invalid_edges=[{"raw": {}, "reason": "r"}], retry_count=0)
+    state = _state(invalid_edges=[{"raw": {}, "reason": "r"}], edges_retry_count=0)
     result = await validate_edges(state)
     assert result["validation_errors"], "reintenta"
     assert "degradations" not in result
@@ -145,7 +167,7 @@ async def test_validate_edges_giveup_is_idempotent():
     # registrada, no se duplica la entrada "edges".
     state = _state(
         invalid_edges=[{"raw": {}, "reason": "r"}],
-        retry_count=MAX_RETRIES,
+        edges_retry_count=MAX_RETRIES,
         degradations=[{"category": "edges", "reasons": ["previo"]}],
     )
     result = await validate_edges(state)
