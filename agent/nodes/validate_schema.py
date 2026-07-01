@@ -19,7 +19,7 @@ async def validate_schema(state: DiagramState) -> DiagramState:
     Tercer bucle de feedback, simétrico a los de nodos y aristas:
     - tope MAX_SCHEMA_RETRIES aquí, en un solo sitio; el router solo refleja la
       decisión leyendo structural_gaps.
-    - presupuesto propio (schema_retry_count), separado de retry_count y
+    - presupuesto propio (schema_retry_count), separado de edges_retry_count y
       node_retry_count: un diagrama que gastó su saldo regenerando piezas no debe
       llegar aquí sin saldo para rellenar el hueco.
     - al agotar el presupuesto: degradación con log honesto. El diagrama se

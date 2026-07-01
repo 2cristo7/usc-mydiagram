@@ -39,7 +39,7 @@ def _base_state(**overrides):
         "invalid_nodes": [],
         "diagram": None,
         "validation_errors": [],
-        "retry_count": 0,
+        "edges_retry_count": 0,
         "node_retry_count": 0,
         "node_validation_errors": [],
         "structural_gaps": [],
@@ -64,27 +64,27 @@ async def test_validate_retries_when_invalid_and_budget():
     state = _base_state(
         invalid_edges=[_invalid({"id": "e1", "source": "usr", "target": "order"},
                                 'referencia a nodo inexistente: "usr" -> "order"')],
-        retry_count=0,
+        edges_retry_count=0,
     )
 
     result = await validate_edges(state)
 
     assert result["validation_errors"], "debe producir feedback para reintentar"
     assert "usr" in result["validation_errors"][0]
-    assert result["retry_count"] == 1, "incrementa el contador de reintentos"
+    assert result["edges_retry_count"] == 1, "incrementa el contador de reintentos"
 
 
 @pytest.mark.asyncio
 async def test_validate_gives_up_when_budget_exhausted():
     state = _base_state(
         invalid_edges=[_invalid({"id": "e1"}, "motivo")],
-        retry_count=MAX_RETRIES,
+        edges_retry_count=MAX_RETRIES,
     )
 
     result = await validate_edges(state)
 
     assert result["validation_errors"] == [], "agotado el presupuesto → no reintenta (descarta)"
-    assert "retry_count" not in result, "no toca el contador al rendirse"
+    assert "edges_retry_count" not in result, "no toca el contador al rendirse"
 
 
 @pytest.mark.asyncio
@@ -117,7 +117,7 @@ def test_route_to_extract_fragments_when_clean():
 @pytest.mark.asyncio
 async def test_extract_edges_normal_retains_orphan():
     queue = asyncio.Queue()
-    state = _base_state(retry_count=0)
+    state = _base_state(edges_retry_count=0)
     raw = '[{"id": "e0", "source": "user", "target": "order", "label": "p", "edge_type": "one_to_many"},' \
           ' {"id": "e1", "source": "usr", "target": "order", "label": "p", "edge_type": "one_to_many"}]'
 
@@ -136,7 +136,7 @@ async def test_extract_edges_normal_retains_orphan():
 async def test_extract_edges_normal_retains_semantic_invalid():
     # edge_type 'flow' es Pydantic-válido (está en el enum) pero NO permitido en un ERD.
     queue = asyncio.Queue()
-    state = _base_state(retry_count=0)
+    state = _base_state(edges_retry_count=0)
     raw = '[{"id": "e1", "source": "user", "target": "order", "label": "x", "edge_type": "flow"}]'
 
     with patch("nodes.extract_edges.stream_llm", return_value=_fake_stream(raw)):
@@ -153,7 +153,7 @@ async def test_extract_edges_normal_retains_semantic_invalid():
 async def test_extract_edges_normal_retains_pydantic_invalid():
     # edge_type 'relates_to' NO está en el enum EdgeType → falla Pydantic.
     queue = asyncio.Queue()
-    state = _base_state(retry_count=0)
+    state = _base_state(edges_retry_count=0)
     raw = '[{"id": "e1", "source": "user", "target": "order", "label": "x", "edge_type": "relates_to"}]'
 
     with patch("nodes.extract_edges.stream_llm", return_value=_fake_stream(raw)):
@@ -174,7 +174,7 @@ async def test_extract_edges_feedback_fixes_and_streams():
         edges=[_edge("e0", "user", "order")],   # ya confirmada en pasada previa
         invalid_edges=[_invalid({"id": "e1", "source": "usr", "target": "order",
                                  "label": "p", "edge_type": "one_to_many"}, "huérfana")],
-        retry_count=1,                           # > 0 → rama feedback
+        edges_retry_count=1,                           # > 0 → rama feedback
     )
     # El LLM corrige e1 (usr -> user) y re-emite e0 (debe ignorarse por dedup).
     fixed = '[{"id": "e1", "source": "user", "target": "order", "label": "p", "edge_type": "one_to_many"},' \
@@ -197,7 +197,7 @@ async def test_extract_edges_truncated_registers_degradation():
     # para que la respuesta truncada llegue al usuario en vez de un diagrama
     # silenciosamente parcial.
     queue = asyncio.Queue()
-    state = _base_state(retry_count=0)
+    state = _base_state(edges_retry_count=0)
     # Primera arista completa y válida; la segunda queda cortada (sin cerrar).
     truncated = '[{"id": "e0", "source": "user", "target": "order", "label": "p", "edge_type": "one_to_many"},' \
                 ' {"id": "e1", "source": "user", "tar'
@@ -217,7 +217,7 @@ async def test_extract_edges_feedback_reholds_still_broken():
     state = _base_state(
         invalid_edges=[_invalid({"id": "e1", "source": "usr", "target": "order",
                                  "label": "x", "edge_type": "one_to_many"}, "huérfana")],
-        retry_count=1,
+        edges_retry_count=1,
     )
     still_broken = '[{"id": "e1", "source": "customer", "target": "order", "label": "x", "edge_type": "one_to_many"}]'
 

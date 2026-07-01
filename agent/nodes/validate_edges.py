@@ -14,12 +14,12 @@ async def validate_edges(state: DiagramState) -> DiagramState:
 
     # Hay aristas inválidas retenidas y queda presupuesto: construir el feedback
     # (motivo por arista) y devolver al grafo a extract_edges para regenerarlas.
-    if invalid and state["retry_count"] < MAX_RETRIES:
+    if invalid and state["edges_retry_count"] < MAX_RETRIES:
         reasons = [item["reason"] for item in invalid]
-        print(f"[validate_edges] {len(invalid)} invalid edge(s) — retry {state['retry_count'] + 1}/{MAX_RETRIES}")
+        print(f"[validate_edges] {len(invalid)} invalid edge(s) — retry {state['edges_retry_count'] + 1}/{MAX_RETRIES}")
         for item in invalid:
             print(f"[validate_edges]   {item['reason']} — {item['raw']}")
-        return {"validation_errors": reasons, "retry_count": state["retry_count"] + 1}
+        return {"validation_errors": reasons, "edges_retry_count": state["edges_retry_count"] + 1}
 
     # Sin presupuesto: descartar las inválidas restantes con log que las nombra
     # (degradación honesta). Seguro porque nunca se streamearon ni entraron en

@@ -98,7 +98,7 @@ def initial_generation_state(prompt: str, diagram_type=None, llm_runtime=None) -
         "invalid_nodes": [],
         "diagram": None,
         "validation_errors": [],
-        "retry_count": 0,
+        "edges_retry_count": 0,
         "node_retry_count": 0,
         "node_validation_errors": [],
         "structural_gaps": [],

@@ -49,7 +49,7 @@ class DiagramState(TypedDict):
     # inválidos, sustituyendo la lista anterior — debe menguar, no crecer.
     invalid_nodes: list[dict]
     # Presupuesto de reintentos de NODOS, independiente del de aristas
-    # (retry_count): un fallo de nodos no debe agotar el bucle de aristas.
+    # (edges_retry_count): un fallo de nodos no debe agotar el bucle de aristas.
     node_retry_count: int
     # Señal de routing del bucle de nodos (mirror de validation_errors para
     # aristas): no-vacío → validate_nodes pidió reintentar → router vuelve a
@@ -73,7 +73,7 @@ class DiagramState(TypedDict):
     invalid_edges: list[dict]
     diagram: Optional[DiagramSchema]
     validation_errors: list[str]
-    retry_count: int
+    edges_retry_count: int
     # Huecos estructurales del diagrama ensamblado, escritos SOLO por
     # validate_schema (S6.8). Replace (sin Annotated): cada pasada recalcula los
     # huecos desde cero sobre el diagrama actual; si la regeneración los rellenó,
@@ -82,7 +82,7 @@ class DiagramState(TypedDict):
     # reaparecerían y el bucle no terminaría nunca.
     structural_gaps: list[StructuralGap]
     # Presupuesto de reintentos ESTRUCTURALES, independiente de los de nodos
-    # (node_retry_count) y aristas (retry_count): un diagrama que gasta su
+    # (node_retry_count) y aristas (edges_retry_count): un diagrama que gasta su
     # presupuesto regenerando piezas no debe llegar al validador estructural ya
     # sin saldo para rellenar el hueco. Tope en validate_schema.
     schema_retry_count: int
