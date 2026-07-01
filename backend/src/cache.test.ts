@@ -61,6 +61,11 @@ describe('getCached', () => {
     maybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'boom' } })
     expect(await getCached('x')).toBeNull()
   })
+
+  it('devuelve null (no propaga) si la consulta LANZA (catch): la caché es best-effort', async () => {
+    maybeSingle.mockRejectedValueOnce(new Error('network down'))
+    expect(await getCached('x')).toBeNull()
+  })
 })
 
 describe('setCached', () => {
@@ -79,6 +84,16 @@ describe('setCached', () => {
     await setCached('Crear blog', 'Blog', { nodes: [], edges: [] }, 'flowchart')
     const [row] = upsert.mock.calls[0] as unknown as [Record<string, unknown>]
     expect(row.prompt_key).toBe('crear blog|type=flowchart')
+  })
+
+  it('no propaga si el upsert devuelve error (best-effort, solo loguea)', async () => {
+    upsert.mockResolvedValueOnce({ error: { message: 'unique violation' } })
+    await expect(setCached('x', null, { nodes: [], edges: [] })).resolves.toBeUndefined()
+  })
+
+  it('no propaga si el upsert LANZA (catch): no debe romper la respuesta ya servida', async () => {
+    upsert.mockRejectedValueOnce(new Error('connection reset'))
+    await expect(setCached('x', null, { nodes: [], edges: [] })).resolves.toBeUndefined()
   })
 })
 

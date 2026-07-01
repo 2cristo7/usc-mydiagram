@@ -21,6 +21,13 @@ vi.mock('jose', () => ({
 // devuelve el propio builder; es thenable (await builder → result) para el GET de
 // lista, y single/maybeSingle resuelven el result configurado por test.
 let result: { data: unknown; error: unknown } = { data: null, error: null }
+// Cola opcional de resultados: cuando un handler hace VARIAS consultas terminales
+// (rename: read + update), permite dar una respuesta distinta a cada maybeSingle.
+// Si está vacía, se usa `result` (comportamiento por defecto de todos los tests).
+let resultQueue: Array<{ data: unknown; error: unknown }> = []
+function nextResult() {
+  return resultQueue.length ? resultQueue.shift()! : result
+}
 // Acumula las llamadas a TODOS los builders de la petición (cada `.from()` crea
 // uno nuevo). Desde S10.3 una escritura golpea dos tablas (diagrams + el diario
 // diagram_versions), así que `calls` no se reinicia por builder sino por test
@@ -37,14 +44,15 @@ function makeBuilder() {
     select: record('select'),
     insert: record('insert'),
     update: record('update'),
+    delete: record('delete'),
     eq: record('eq'),
     is: record('is'),
     not: record('not'),
     order: record('order'),
     limit: record('limit'),
-    single: vi.fn(() => Promise.resolve(result)),
-    maybeSingle: vi.fn(() => Promise.resolve(result)),
-    then: (resolve: (r: typeof result) => unknown) => resolve(result),
+    single: vi.fn(() => Promise.resolve(nextResult())),
+    maybeSingle: vi.fn(() => Promise.resolve(nextResult())),
+    then: (resolve: (r: typeof result) => unknown) => resolve(nextResult()),
   }
   return builder
 }
@@ -74,6 +82,7 @@ function authOk() {
 beforeEach(() => {
   vi.clearAllMocks()
   result = { data: null, error: null }
+  resultQueue = []
   calls = {}
 })
 
@@ -263,5 +272,208 @@ describe('diario de versiones (S10.3)', () => {
     result = { data: null, error: null }
     const res = await request(app).get('/diagrams/abc/versions/zzz').set(VALID)
     expect(res.status).toBe(404)
+  })
+
+  it('500 si la BD falla al listar versiones', async () => {
+    result = { data: null, error: { message: 'boom' } }
+    const res = await request(app).get('/diagrams/abc/versions').set(VALID)
+    expect(res.status).toBe(500)
+  })
+
+  it('500 si la BD falla al obtener una versión concreta', async () => {
+    result = { data: null, error: { message: 'boom' } }
+    const res = await request(app).get('/diagrams/abc/versions/v1').set(VALID)
+    expect(res.status).toBe(500)
+  })
+})
+
+// Caminos de error y rutas no cubiertas previamente: lista, papelera, errores 500.
+describe('GET /diagrams y GET /:id — caminos de error', () => {
+  beforeEach(authOk)
+
+  it('500 si la BD falla al listar el historial', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).get('/diagrams').set(VALID)
+    expect(res.status).toBe(500)
+    expect(res.body.error).toMatch(/Error interno/)
+  })
+
+  it('500 si la BD falla al obtener un diagrama por id', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).get('/diagrams/abc').set(VALID)
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('GET /diagrams/trash (papelera)', () => {
+  beforeEach(authOk)
+
+  it('lista los borrados ordenados por deleted_at desc, filtrando deleted_at NOT NULL', async () => {
+    result = { data: [{ id: '1', title: 'A', deleted_at: '2026-01-01' }], error: null }
+    const res = await request(app).get('/diagrams/trash').set(VALID)
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual([{ id: '1', title: 'A', deleted_at: '2026-01-01' }])
+    // El filtro de papelera: solo filas con deleted_at presente.
+    expect(calls.not[0]).toEqual(['deleted_at', 'is', null])
+    expect(calls.order[0]).toEqual(['deleted_at', { ascending: false }])
+  })
+
+  it('500 si la BD falla al listar la papelera', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).get('/diagrams/trash').set(VALID)
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('PATCH /diagrams/:id (UPDATE) — error de BD', () => {
+  beforeEach(authOk)
+
+  it('500 si la BD falla en el UPDATE', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).patch('/diagrams/abc').set(VALID).send({ diagram: sampleDiagram })
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('PATCH /diagrams/:id/rename (renombrar)', () => {
+  beforeEach(authOk)
+
+  it('400 si el título llega vacío o ausente', async () => {
+    const res = await request(app).patch('/diagrams/abc/rename').set(VALID).send({ title: '   ' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/vacío/)
+  })
+
+  it('404 si el diagrama a renombrar no existe (lectura previa → 0 filas)', async () => {
+    result = { data: null, error: null }
+    const res = await request(app).patch('/diagrams/abc/rename').set(VALID).send({ title: 'Nuevo' })
+    expect(res.status).toBe(404)
+  })
+
+  it('500 si la lectura previa para renombrar falla', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).patch('/diagrams/abc/rename').set(VALID).send({ title: 'Nuevo' })
+    expect(res.status).toBe(500)
+  })
+
+  it('200 sincroniza title y data.title (read-modify-write) sin pisar el resto del JSON', async () => {
+    // Primera lectura (.select('data')) y luego el update comparten el mismo `result`.
+    // Configuramos un data con campos extra para comprobar que se preservan.
+    result = { data: { id: 'abc', title: 'Nuevo', data: { foo: 'bar', title: 'Viejo' } }, error: null }
+    const res = await request(app).patch('/diagrams/abc/rename').set(VALID).send({ title: '  Nuevo  ' })
+    expect(res.status).toBe(200)
+    // El UPDATE escribe title (trim) y un data fusionado con el title nuevo.
+    const updated = calls.update[0][0] as { title: string; data: Record<string, unknown> }
+    expect(updated.title).toBe('Nuevo')
+    expect(updated.data.title).toBe('Nuevo')
+    expect(updated.data.foo).toBe('bar') // el resto del JSON intacto
+  })
+
+  it('500 si el UPDATE de renombrado falla (lectura OK, escritura con error)', async () => {
+    resultQueue = [
+      { data: { data: {} }, error: null }, // lectura del data OK
+      { data: null, error: { message: 'db down' } }, // el UPDATE falla
+    ]
+    const res = await request(app).patch('/diagrams/abc/rename').set(VALID).send({ title: 'Nuevo' })
+    expect(res.status).toBe(500)
+  })
+
+  it('404 si la fila desaparece entre la lectura y el UPDATE de renombrado', async () => {
+    resultQueue = [
+      { data: { data: {} }, error: null }, // existe al leer
+      { data: null, error: null }, // pero el update no devuelve fila
+    ]
+    const res = await request(app).patch('/diagrams/abc/rename').set(VALID).send({ title: 'Nuevo' })
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('POST /diagrams/:id/restore (restaurar de papelera)', () => {
+  beforeEach(authOk)
+
+  it('204 al restaurar (deleted_at → null)', async () => {
+    result = { data: { id: 'abc' }, error: null }
+    const res = await request(app).post('/diagrams/abc/restore').set(VALID)
+    expect(res.status).toBe(204)
+    const updated = calls.update[0][0] as Record<string, unknown>
+    expect(updated.deleted_at).toBeNull()
+  })
+
+  it('404 si no hay fila que restaurar (RLS / no existe)', async () => {
+    result = { data: null, error: null }
+    const res = await request(app).post('/diagrams/abc/restore').set(VALID)
+    expect(res.status).toBe(404)
+  })
+
+  it('500 si la BD falla al restaurar', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).post('/diagrams/abc/restore').set(VALID)
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('DELETE /diagrams/:id/permanent (borrado físico)', () => {
+  beforeEach(authOk)
+
+  it('204 al borrar definitivamente', async () => {
+    result = { data: { id: 'abc' }, error: null }
+    const res = await request(app).delete('/diagrams/abc/permanent').set(VALID)
+    expect(res.status).toBe(204)
+  })
+
+  it('404 si la fila no existe / es ajena (RLS)', async () => {
+    result = { data: null, error: null }
+    const res = await request(app).delete('/diagrams/abc/permanent').set(VALID)
+    expect(res.status).toBe(404)
+  })
+
+  it('500 si la BD falla en el borrado físico', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).delete('/diagrams/abc/permanent').set(VALID)
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('DELETE /diagrams/trash (vaciar papelera)', () => {
+  beforeEach(authOk)
+
+  it('204 al vaciar la papelera, filtrando deleted_at NOT NULL (no toca activos)', async () => {
+    result = { data: null, error: null }
+    const res = await request(app).delete('/diagrams/trash').set(VALID)
+    expect(res.status).toBe(204)
+    // El filtro de seguridad: solo filas ya en papelera.
+    expect(calls.not[0]).toEqual(['deleted_at', 'is', null])
+  })
+
+  it('500 si la BD falla al vaciar la papelera', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).delete('/diagrams/trash').set(VALID)
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('DELETE /diagrams/:id (borrado suave a papelera)', () => {
+  beforeEach(authOk)
+
+  it('204 al mover a papelera (deleted_at = now), filtrando solo activos', async () => {
+    result = { data: { id: 'abc' }, error: null }
+    const res = await request(app).delete('/diagrams/abc').set(VALID)
+    expect(res.status).toBe(204)
+    // Escribe deleted_at con timestamp y filtra deleted_at IS NULL (no re-borra).
+    const updated = calls.update[0][0] as Record<string, unknown>
+    expect(typeof updated.deleted_at).toBe('string')
+    expect(calls.is[0]).toEqual(['deleted_at', null])
+  })
+
+  it('404 si el diagrama no existe / es ajeno (RLS)', async () => {
+    result = { data: null, error: null }
+    const res = await request(app).delete('/diagrams/abc').set(VALID)
+    expect(res.status).toBe(404)
+  })
+
+  it('500 si la BD falla en el borrado suave', async () => {
+    result = { data: null, error: { message: 'db down' } }
+    const res = await request(app).delete('/diagrams/abc').set(VALID)
+    expect(res.status).toBe(500)
   })
 })
