@@ -12,6 +12,11 @@ __pycache__/
 .venv/
 .env
 
+# Cobertura de tests y resultados (artefactos generados, no se commitean)
+.coverage
+coverage/
+test-results/
+
 # macOS
 .DS_Store
 
