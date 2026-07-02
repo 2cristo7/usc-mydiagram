@@ -61,6 +61,11 @@
       </div>
     </header>
 
+    <figure class="card" style="padding:14px;margin:0 0 10px">
+      <img src="../img/captura-generar.png" alt="MydIAgram generando un diagrama de arquitectura desde lenguaje natural" style="width:100%;display:block;border-radius:6px">
+      <figcaption style="font-size:13px;color:var(--muted);margin-top:10px;text-align:center">La aplicación generando un diagrama de arquitectura desde una descripción en lenguaje natural, con el panel de operaciones en vivo y el campo de refinamiento.</figcaption>
+    </figure>
+
     <!-- ============ MAPA DEL SISTEMA ============ -->
     <section>
       <div class="sec-head">
@@ -130,6 +135,24 @@
       El backend es el único punto de acceso a datos: verifica el JWT, aplica límite de tasa y caché, y
       reenvía la petición al agente por HTTP recibiendo el diagrama en streaming NDJSON. El microservicio
       de IA nunca se expone al navegador.</p>
+    </section>
+
+    <!-- ============ EJEMPLOS GENERADOS ============ -->
+    <section>
+      <div class="sec-head">
+        <span class="badge">&#9733;</span>
+        <div><h2>Ejemplos generados</h2><p class="sec-sub">Diagramas producidos por el agente desde lenguaje natural y editables en el lienzo</p></div>
+      </div>
+      <div class="card" style="padding:22px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:18px">
+          <figure style="margin:0;text-align:center"><img src="../img/ej-erd.png" alt="Diagrama entidad-relación" style="width:100%;border:2px solid var(--ink);border-radius:6px"><figcaption style="font-size:12.5px;color:var(--muted);margin-top:8px">Entidad-relación</figcaption></figure>
+          <figure style="margin:0;text-align:center"><img src="../img/ej-secuencia.png" alt="Diagrama de secuencia" style="width:100%;border:2px solid var(--ink);border-radius:6px"><figcaption style="font-size:12.5px;color:var(--muted);margin-top:8px">Secuencia</figcaption></figure>
+          <figure style="margin:0;text-align:center"><img src="../img/ej-flujo.png" alt="Diagrama de flujo" style="width:100%;border:2px solid var(--ink);border-radius:6px"><figcaption style="font-size:12.5px;color:var(--muted);margin-top:8px">Flujo</figcaption></figure>
+          <figure style="margin:0;text-align:center"><img src="../img/ej-arquitectura.png" alt="Diagrama de arquitectura C4" style="width:100%;border:2px solid var(--ink);border-radius:6px"><figcaption style="font-size:12.5px;color:var(--muted);margin-top:8px">Arquitectura (C4)</figcaption></figure>
+          <figure style="margin:0;text-align:center"><img src="../img/ej-mapamental.png" alt="Mapa mental" style="width:100%;border:2px solid var(--ink);border-radius:6px"><figcaption style="font-size:12.5px;color:var(--muted);margin-top:8px">Mapa mental</figcaption></figure>
+          <figure style="margin:0;text-align:center"><img src="../img/ej-casosuso.png" alt="Diagrama de casos de uso" style="width:100%;border:2px solid var(--ink);border-radius:6px"><figcaption style="font-size:12.5px;color:var(--muted);margin-top:8px">Casos de uso</figcaption></figure>
+        </div>
+      </div>
     </section>
 
     <!-- ============ HUB DE SECCIONES ============ -->
@@ -221,8 +244,13 @@
     </section>
 
     <div class="footer">
-      <p><b>MydIAgram</b> — TFG, Universidad de Santiago de Compostela.
-      Documentación técnica generada a partir del código fuente del proyecto.</p>
+      <p><b>MydIAgram</b> — Trabajo de Fin de Grao, Grao en Enxeñaría Informática,
+      Escola Técnica Superior de Enxeñaría, Universidade de Santiago de Compostela.
+      Desarrollado en el Observatorio HP-SCDS (2025&ndash;2026).</p>
+      <p style="margin-top:8px"><b>Autor:</b> Diego Cristóbal Andaluz &nbsp;·&nbsp;
+      <b>Tutor:</b> Juan Carlos Vidal Aguiar (USC) &nbsp;·&nbsp;
+      <b>Cotutor:</b> Rubén López Fernández (HP)</p>
+      <p style="margin-top:8px">Documentación técnica generada a partir del código fuente del proyecto.</p>
     </div>
 
   </div>
